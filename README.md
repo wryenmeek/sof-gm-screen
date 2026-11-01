@@ -6,30 +6,30 @@ A lightweight Single-Page Application (SPA) GM Dashboard built on Google Apps Sc
 
 ## Live Web App URLs
 
-* **Active Production URL (v2):**  
-  [https://script.google.com/macros/s/AKfycbxWByqpfzgd6PcZw5vo6gnWHWBC6a-JgS3ZhM4EWbhs4ubTgLvpGkUWudBoSirNmDl4/exec](https://script.google.com/macros/s/AKfycbxWByqpfzgd6PcZw5vo6gnWHWBC6a-JgS3ZhM4EWbhs4ubTgLvpGkUWudBoSirNmDl4/exec)
+* **Active Production URL (v3):**  
+  [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec)
 * **Direct 2026-10-31 Session URL:**  
-  [https://script.google.com/macros/s/AKfycbxWByqpfzgd6PcZw5vo6gnWHWBC6a-JgS3ZhM4EWbhs4ubTgLvpGkUWudBoSirNmDl4/exec?session=2026-10-31](https://script.google.com/macros/s/AKfycbxWByqpfzgd6PcZw5vo6gnWHWBC6a-JgS3ZhM4EWbhs4ubTgLvpGkUWudBoSirNmDl4/exec?session=2026-10-31)
+  [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?session=2026-10-31](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?session=2026-10-31)
 * **Script Editor:**  
   [https://script.google.com/d/1WzexkauxHjTuUjkucL_EyxKjnqddDkdwvlPg7aqk2cZRLiEK3HjEXOad/edit](https://script.google.com/d/1WzexkauxHjTuUjkucL_EyxKjnqddDkdwvlPg7aqk2cZRLiEK3HjEXOad/edit)
 
 ---
 
-## What Was Fixed in v2:
+## What Was Fixed in v3:
 
-1. **Folder Shortcuts Unpacked**:
-   * Inspects `application/vnd.google-apps.shortcut` targets via Drive API.
-   * Unpacks all items inside `1. Floor Maps`, `2. Floor Specific NPCs...`, and `3. Monsters` into the sidebar under clean category badges.
+1. **Fixed Gilded Prisoner & GM Screen Sticky Nav Headers**:
+   * **Root Cause:** Parent `<base target="_top">` was hijacking anchor jumps (`<a href="#lore">`), attempting to navigate the top-level Google Script window instead of scrolling the iframe viewport.
+   * **Fix:** Injected `<base target="_self">` and capture-phase (`useCapture = true`) click interceptors into `<head>` so internal anchor links (`#lore`, `#setup`, `#phases`, `#threats`, `#rituals`, `#clock`, `#visions`, `#after`) immediately call `scrollIntoView({ behavior: 'smooth', block: 'start' })` inside the iframe.
+   * Also patched both local and Google Drive files directly (`GM_Guide_Trapped_Nereid_Encounter.html` and `Hotel_Lapis_Session_GM_Screen.html`) with native smooth-scroll click handlers.
 2. **Reliable Image Rendering (Base64 Data URIs)**:
    * Converted images under 8MB to Base64 data URIs so they render 100% reliably in any browser sandbox without third-party cookie blocks.
-3. **5e Monster Statblock Styling**:
+3. **Folder Shortcuts Unpacked**:
+   * Inspects `application/vnd.google-apps.shortcut` targets via Drive API.
+   * Unpacks all items inside `1. Floor Maps`, `2. Floor Specific NPCs...`, and `3. Monsters` into the sidebar under clean category badges.
+4. **5e Monster Statblock Styling**:
    * Pre-processes Homebrewery statblocks (`{monster,frame,wide`, `::`, `{bonus ...}`).
    * Strips outer triple-backtick markdown fences (```` ```markdown ````).
    * Renders with custom dark gold 5e statblock cards, stat tables, and crimson action headers.
-4. **Seamless Iframe Navigation**:
-   * Injects cross-frame messaging into embedded HTML documents.
-   * Smoothly scrolls internal `#hash` anchors within the iframe.
-   * Intercepts relative links (e.g. `href="Herald_30_Chimes_Player_Printable.html"`) and signals the parent dashboard to open the companion handout directly.
 
 ---
 

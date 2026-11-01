@@ -596,35 +596,60 @@
     }
 
     function prepareHtmlSrcdoc(htmlContent) {
-      // Injects script into iframe to handle internal hash anchors and relative links
-      const script = `
+      const injection = `
+        <base target="_self">
         <script>
-          document.addEventListener('DOMContentLoaded', function() {
-            // Internal anchor jumps
-            document.querySelectorAll('a[href^="#"]').forEach(function(a) {
-              a.addEventListener('click', function(e) {
-                e.preventDefault();
-                var targetId = a.getAttribute('href').substring(1);
-                var el = document.getElementById(targetId);
-                if (el) {
-                  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  window.location.hash = targetId;
-                }
-              });
-            });
+          (function() {
+            function initNavInterceptors() {
+              document.addEventListener('click', function(e) {
+                var a = e.target.closest('a');
+                if (!a) return;
+                var href = a.getAttribute('href');
+                if (!href) return;
 
-            // Relative file links to sibling handouts
-            document.querySelectorAll('a:not([href^="#"]):not([href^="http://"]):not([href^="https://"]):not([href^="mailto:"])').forEach(function(a) {
-              a.addEventListener('click', function(e) {
-                e.preventDefault();
-                var filename = a.getAttribute('href').split('/').pop().split('?')[0];
-                window.parent.postMessage({ type: 'OPEN_FILE_BY_NAME', filename: filename }, '*');
-              });
-            });
-          });
+                // 1. Internal hash jumps (#lore, #setup, #phases, #radar, etc.)
+                if (href.startsWith('#')) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  var targetId = href.substring(1);
+                  if (!targetId) return;
+                  var el = document.getElementById(targetId) || document.querySelector('[name="' + targetId + '"]');
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                  return;
+                }
+
+                // 2. Relative file links to companion handouts
+                if (!href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('mailto:') && !href.startsWith('javascript:') && !href.startsWith('tel:')) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  var filename = href.split('/').pop().split('?')[0].split('#')[0];
+                  window.parent.postMessage({ type: 'OPEN_FILE_BY_NAME', filename: filename }, '*');
+                  return;
+                }
+
+                // 3. External links: force target="_blank"
+                if (href.startsWith('http://') || href.startsWith('https://')) {
+                  a.setAttribute('target', '_blank');
+                }
+              }, true);
+            }
+
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', initNavInterceptors);
+            } else {
+              initNavInterceptors();
+            }
+          })();
         <\/script>
       `;
-      return htmlContent + script;
+
+      if (htmlContent.includes('<head>')) {
+        return htmlContent.replace('<head>', '<head>\n' + injection);
+      } else {
+        return injection + htmlContent;
+      }
     }
 
     function renderPayloadIntoContainer(payload, container) {

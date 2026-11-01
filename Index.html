@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --sidebar-bg: #111827;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --gold: #f59e0b;
+      --gold-light: #fbbf24;
+      --cyan: #38bdf8;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      display: flex;
+      height: 100vh;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    /* Sidebar Layout */
+    #sidebar {
+      width: 320px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      flex-shrink: 0;
+    }
+
+    .sidebar-section {
+      padding: 12px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .brand-header {
+      font-family: 'Cinzel', serif;
+      font-size: 14px;
+      font-weight: 900;
+      color: var(--gold-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .session-control-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    #session-select {
+      flex: 1;
+      background: #0f172a;
+      color: var(--cyan);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: 'Fira Code', monospace;
+      cursor: pointer;
+    }
+
+    #filter-input {
+      width: 100%;
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 12px;
+      outline: none;
+    }
+    #filter-input:focus { border-color: var(--cyan); }
+
+    /* File List */
+    #file-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .file-item {
+      padding: 6px 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 12.5px;
+      word-break: break-all;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+    }
+    .file-item:hover {
+      background: #1e293b;
+      color: #ffffff;
+    }
+    .file-item.active {
+      background: #1e293b;
+      color: var(--gold-light);
+      font-weight: 600;
+      border-left: 3px solid var(--gold);
+    }
+
+    .file-icon { font-size: 14px; flex-shrink: 0; }
+
+    /* Scratchpad Drawer */
+    #scratchpad-container {
+      border-top: 1px solid var(--border);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      height: 42%;
+      background: #0d131f;
+    }
+
+    .scratchpad-header {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--gold);
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+
+    #scratchpad {
+      flex: 1;
+      width: 100%;
+      background: #090d16;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 8px;
+      font-family: 'Fira Code', monospace;
+      font-size: 11.5px;
+      line-height: 1.4;
+      resize: none;
+      outline: none;
+    }
+    #scratchpad:focus { border-color: var(--gold); }
+
+    .scratchpad-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    #save-status {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Workspace & Split Panes */
+    #workspace {
+      flex: 1;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    #right-pane {
+      border-left: 1px solid var(--border);
+      display: none;
+      background: #070a10;
+    }
+
+    .pane-toolbar {
+      height: 44px;
+      background: #0f172a;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--silver);
+    }
+
+    .pane-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    /* Buttons */
+    button {
+      background: #1e293b;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    button:hover { background: #334155; border-color: var(--cyan); }
+    button.primary {
+      background: var(--gold);
+      border-color: var(--gold);
+      color: #000;
+      font-weight: 700;
+    }
+    button.primary:hover { background: var(--gold-light); }
+
+    /* Rendered Assets */
+    iframe.sandbox-frame {
+      width: 100%;
+      height: calc(100vh - 90px);
+      border: none;
+      background: #ffffff;
+      border-radius: 6px;
+    }
+
+    img.asset-img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      display: block;
+      margin: 0 auto;
+    }
+
+    .markdown-body {
+      line-height: 1.6;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+      font-family: 'Cinzel', serif;
+      color: var(--gold-light);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+      margin-top: 1rem;
+      margin-bottom: .5rem;
+    }
+    .markdown-body p, .markdown-body li {
+      color: #cbd5e1;
+      margin-bottom: .5rem;
+    }
+    .markdown-body pre {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      padding: 12px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-family: 'Fira Code', monospace;
+      color: #e2e8f0;
+    }
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    .markdown-body th, .markdown-body td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+    }
+    .markdown-body th {
+      background: #1e293b;
+      color: var(--gold-light);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Left Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <div class="brand-header">
+        <span>⚔️ Sea of Fortune GM</span>
+        <button onclick="refreshManifest()" title="Refresh files">↻</button>
+      </div>
+
+      <div class="session-control-row">
+        <select id="session-select" onchange="switchSession(this.value)">
+          <option value="<?= sessionDate ?>"><?= sessionDate ?></option>
+        </select>
+      </div>
+
+      <input type="text" id="filter-input" placeholder="🔍 Filter session assets..." oninput="filterFiles(this.value)">
+
+      <div id="file-list">Loading files...</div>
+    </div>
+
+    <!-- Scratchpad Drawer -->
+    <div id="scratchpad-container">
+      <div class="scratchpad-header">
+        <span id="scratchpad-label">table_notes.md (<?= sessionDate ?>)</span>
+      </div>
+      <textarea id="scratchpad" placeholder="Loading session table notes..."></textarea>
+      <div class="scratchpad-controls">
+        <span id="save-status">Loading...</span>
+        <button class="primary" onclick="saveNotes()">Save (Ctrl+S)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace -->
+  <div id="workspace">
+    <!-- Left Primary Pane -->
+    <div id="left-pane" class="pane">
+      <div class="pane-toolbar">
+        <span id="left-title">No file selected</span>
+        <button id="pin-btn" style="display:none;" onclick="pinCurrentToRight()">Pin to Right ➔</button>
+      </div>
+      <div id="left-content" class="pane-content">
+        <p style="color:var(--text-muted); text-align:center; margin-top:20vh;">
+          Select any floor map, encounter dossier, statblock, or audio log from the sidebar to begin.
+        </p>
+      </div>
+    </div>
+
+    <!-- Right Pinned Pane -->
+    <div id="right-pane" class="pane">
+      <div class="pane-toolbar">
+        <span id="right-title">Pinned Asset</span>
+        <button onclick="unpinRight()">✕ Close Split</button>
+      </div>
+      <div id="right-content" class="pane-content"></div>
+    </div>
+  </div>
+
+  <script>
+    let currentSessionDate = "<?= sessionDate ?>";
+    const cache = {};
+    let allFiles = [];
+    let currentLeftPayload = null;
+
+    window.onload = () => {
+      loadSessionDropdown();
+      refreshManifest();
+      loadScratchpad();
+    };
+
+    // Keyboard shortcut Ctrl+S / Cmd+S for instant saving
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveNotes();
+      }
+    });
+
+    function loadSessionDropdown() {
+      google.script.run.withSuccessHandler((sessions) => {
+        const select = document.getElementById('session-select');
+        select.innerHTML = '';
+        if (!sessions.includes(currentSessionDate)) {
+          sessions.unshift(currentSessionDate);
+        }
+        sessions.forEach((folderName) => {
+          const opt = document.createElement('option');
+          opt.value = folderName;
+          opt.textContent = folderName;
+          if (folderName === currentSessionDate) opt.selected = true;
+          select.appendChild(opt);
+        });
+      }).getSessionList();
+    }
+
+    function switchSession(newSessionDate) {
+      currentSessionDate = newSessionDate;
+      document.getElementById('file-list').innerHTML = 'Loading files...';
+      document.getElementById('scratchpad-label').textContent = 'table_notes.md (' + currentSessionDate + ')';
+      document.getElementById('scratchpad').value = 'Loading table notes...';
+      document.getElementById('save-status').textContent = 'Loading...';
+      
+      refreshManifest();
+      loadScratchpad();
+    }
+
+    function refreshManifest() {
+      google.script.run.withSuccessHandler(renderManifest).getSessionManifest(currentSessionDate);
+    }
+
+    function renderManifest(files) {
+      allFiles = files;
+      filterFiles(document.getElementById('filter-input').value);
+    }
+
+    function filterFiles(query) {
+      const list = document.getElementById('file-list');
+      list.innerHTML = '';
+      const q = query.toLowerCase().trim();
+
+      const filtered = allFiles.filter(f => f.name.toLowerCase().includes(q));
+
+      if (filtered.length === 0) {
+        list.innerHTML = '<div style="color:#777; font-size:12px; padding:10px;">No matching assets found.</div>';
+        return;
+      }
+
+      filtered.forEach(f => {
+        const div = document.createElement('div');
+        div.className = 'file-item';
+        div.onclick = () => loadFile(f.id, div);
+
+        let icon = '📄';
+        if (f.mimeType.startsWith('image/')) icon = '🗺️';
+        else if (f.mimeType.startsWith('audio/')) icon = '🎧';
+        else if (f.name.endsWith('.html')) icon = '📑';
+        else if (f.name.endsWith('.md')) icon = '📝';
+
+        div.innerHTML = `<span class="file-icon">${icon}</span> <span>${f.name}</span>`;
+        list.appendChild(div);
+      });
+    }
+
+    function loadFile(fileId, element) {
+      document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+      if (element) element.classList.add('active');
+
+      if (cache[fileId] && cache[fileId].name !== 'table_notes.md') {
+        renderToLeftPane(cache[fileId]);
+        return;
+      }
+
+      document.getElementById('left-title').textContent = 'Loading...';
+      document.getElementById('left-content').innerHTML = '<p style="color:var(--text-muted); text-align:center; margin-top:20vh;">Loading asset...</p>';
+
+      google.script.run.withSuccessHandler((payload) => {
+        cache[fileId] = payload;
+        renderToLeftPane(payload);
+      }).getFilePayload(fileId, currentSessionDate);
+    }
+
+    function renderToLeftPane(payload) {
+      currentLeftPayload = payload;
+      document.getElementById('left-title').textContent = payload.name;
+      document.getElementById('pin-btn').style.display = 'inline-block';
+      renderPayloadIntoContainer(payload, document.getElementById('left-content'));
+    }
+
+    function pinCurrentToRight() {
+      if (!currentLeftPayload) return;
+      const rightPane = document.getElementById('right-pane');
+      rightPane.style.display = 'flex';
+      document.getElementById('right-title').textContent = '📌 ' + currentLeftPayload.name;
+      renderPayloadIntoContainer(currentLeftPayload, document.getElementById('right-content'));
+    }
+
+    function unpinRight() {
+      document.getElementById('right-pane').style.display = 'none';
+      document.getElementById('right-content').innerHTML = '';
+    }
+
+    function renderPayloadIntoContainer(payload, container) {
+      container.innerHTML = '';
+      if (payload.type === 'image') {
+        const img = document.createElement('img');
+        img.className = 'asset-img';
+        img.src = payload.content;
+        container.appendChild(img);
+      } else if (payload.type === 'audio') {
+        const iframe = document.createElement('iframe');
+        iframe.src = payload.content;
+        iframe.style.width = '100%';
+        iframe.style.height = '140px';
+        iframe.style.border = '1px solid var(--border)';
+        iframe.style.borderRadius = '6px';
+        container.appendChild(iframe);
+      } else if (payload.type === 'markdown') {
+        const div = document.createElement('div');
+        div.className = 'markdown-body';
+        div.innerHTML = marked.parse(payload.content);
+        container.appendChild(div);
+      } else if (payload.type === 'html') {
+        const iframe = document.createElement('iframe');
+        iframe.className = 'sandbox-frame';
+        iframe.srcdoc = payload.content;
+        container.appendChild(iframe);
+      }
+    }
+
+    // Scratchpad Live Operations
+    function loadScratchpad() {
+      google.script.run.withSuccessHandler((res) => {
+        document.getElementById('scratchpad').value = res.content;
+        document.getElementById('save-status').textContent = 'Loaded: ' + res.updated;
+      }).getScratchpadNotes(currentSessionDate);
+    }
+
+    function saveNotes() {
+      const content = document.getElementById('scratchpad').value;
+      const status = document.getElementById('save-status');
+      status.textContent = 'Saving...';
+
+      google.script.run.withSuccessHandler((res) => {
+        status.textContent = 'Saved at ' + res.updated;
+        if (res.id && cache[res.id]) {
+          delete cache[res.id];
+        }
+        refreshManifest();
+      }).saveScratchpadNotes(currentSessionDate, content);
+    }
+  </script>
+</body>
+</html>

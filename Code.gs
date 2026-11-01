@@ -24,25 +24,24 @@ function getSessionList() {
   const list = [];
   while (folders.hasNext()) {
     const name = folders.next().getName();
-    // Exclude checkpoint/hidden folders
     if (!name.startsWith('.')) {
       list.push(name);
     }
   }
-  // Sort descending so newest session dates (YYYY-MM-DD) appear first
   return list.sort((a, b) => b.localeCompare(a));
 }
 
 /**
  * Resolves session folder by date and builds a recursive file manifest.
- * Traverses subfolders and shortcuts (e.g., 1. Floor Maps, 3. Monsters).
+ * Unpacks shortcuts to folders (e.g. 1. Floor Maps, 3. Monsters) and traverses subfolders.
  */
 function getSessionManifest(sessionDate) {
   const folder = resolveSessionFolder_(sessionDate);
   const manifest = [];
-  
+  const token = ScriptApp.getOAuthToken();
+
   function scanFolder(f, prefix = "") {
-    // 1. Files in current folder
+    // 1. Files & Shortcuts in current folder
     const files = f.getFiles();
     while (files.hasNext()) {
       let file = files.next();
@@ -50,15 +49,38 @@ function getSessionManifest(sessionDate) {
       let id = file.getId();
       let name = file.getName();
       
-      // Resolve shortcuts if applicable
+      // If shortcut, resolve via Drive v3 API
       if (mime === "application/vnd.google-apps.shortcut") {
         try {
-          id = file.getTargetId();
-          file = DriveApp.getFileById(id);
-          mime = file.getMimeType();
-        } catch(e) {
-          // If shortcut target unresolvable, continue
-        }
+          const url = 'https://www.googleapis.com/drive/v3/files/' + id + '?fields=shortcutDetails';
+          const res = JSON.parse(UrlFetchApp.fetch(url, {
+            headers: { Authorization: 'Bearer ' + token },
+            muteHttpExceptions: true
+          }).getContentText());
+
+          if (res.shortcutDetails) {
+            const targetId = res.shortcutDetails.targetId;
+            const targetMime = res.shortcutDetails.targetMimeType;
+
+            // Shortcut to a FOLDER: Recurse into target folder
+            if (targetMime === "application/vnd.google-apps.folder") {
+              try {
+                const targetFolder = DriveApp.getFolderById(targetId);
+                scanFolder(targetFolder, prefix + "[" + name + "] ");
+                continue; // Do not add the shortcut container itself
+              } catch(e) {}
+            } else {
+              // Shortcut to a file
+              id = targetId;
+              mime = targetMime;
+            }
+          }
+        } catch(e) {}
+      }
+
+      // Skip pure folder items in file list
+      if (mime === "application/vnd.google-apps.folder") {
+        continue;
       }
 
       manifest.push({
@@ -71,18 +93,11 @@ function getSessionManifest(sessionDate) {
       });
     }
 
-    // 2. Recurse into subfolders & folder shortcuts
+    // 2. Real Subfolders
     const subfolders = f.getFolders();
     while (subfolders.hasNext()) {
       const sub = subfolders.next();
-      let targetFolder = sub;
-      // Handle folder shortcuts if present
-      if (sub.getMimeType && sub.getMimeType() === "application/vnd.google-apps.shortcut") {
-        try {
-          targetFolder = DriveApp.getFolderById(sub.getTargetId());
-        } catch(e) {}
-      }
-      scanFolder(targetFolder, prefix + sub.getName() + " / ");
+      scanFolder(sub, prefix + "[" + sub.getName() + "] ");
     }
   }
 
@@ -98,14 +113,26 @@ function getFilePayload(fileId, sessionDate) {
   const mime = file.getMimeType();
   const name = file.getName();
 
-  // 1. Images: High-performance direct CDN link (Prevents Apps Script memory limits)
+  // 1. Images: High-performance Base64 Data URI (under 8MB renders with zero cookie blocks)
   if (mime.startsWith('image/')) {
-    return {
-      id: fileId,
-      type: 'image',
-      name: name,
-      content: 'https://lh3.googleusercontent.com/d/' + fileId
-    };
+    const size = file.getSize();
+    if (size < 8 * 1024 * 1024) {
+      const bytes = file.getBlob().getBytes();
+      const b64 = Utilities.base64Encode(bytes);
+      return {
+        id: fileId,
+        type: 'image',
+        name: name,
+        content: 'data:' + mime + ';base64,' + b64
+      };
+    } else {
+      return {
+        id: fileId,
+        type: 'image-preview',
+        name: name,
+        content: 'https://drive.google.com/file/d/' + fileId + '/preview'
+      };
+    }
   }
 
   // 2. Audio: Streaming preview player for large session recordings
@@ -132,7 +159,7 @@ function getFilePayload(fileId, sessionDate) {
     };
   }
 
-  // 4. HTML and Markdown: Resolve relative images to Drive CDN links
+  // 4. HTML and Markdown: Resolve relative images to Base64 or Drive CDN links
   let rawText = file.getBlob().getDataAsString();
   rawText = resolveRelativeImages_(rawText, sessionDate);
   const isMarkdown = name.endsWith('.md') || mime === 'text/markdown';
@@ -146,7 +173,7 @@ function getFilePayload(fileId, sessionDate) {
 }
 
 /**
- * Replaces relative image filenames in MD/HTML with Google CDN direct URLs.
+ * Replaces relative image filenames in MD/HTML with Base64 Data URIs from the session folder.
  */
 function resolveRelativeImages_(text, sessionDate) {
   const folder = resolveSessionFolder_(sessionDate);
@@ -155,15 +182,16 @@ function resolveRelativeImages_(text, sessionDate) {
     const files = folder.getFilesByName(cleanName);
     if (files.hasNext()) {
       const imgFile = files.next();
-      const cdnUrl = 'https://lh3.googleusercontent.com/d/' + imgFile.getId();
-      return match.replace(filename, cdnUrl);
+      const b64 = Utilities.base64Encode(imgFile.getBlob().getBytes());
+      const dataUri = 'data:' + imgFile.getMimeType() + ';base64,' + b64;
+      return match.replace(filename, dataUri);
     }
     return match;
   });
 }
 
 /**
- * Loads existing content from table_notes.md in the session folder, or returns a default template.
+ * Loads existing content from table_notes.md in the session folder.
  */
 function getScratchpadNotes(sessionDate) {
   const folder = resolveSessionFolder_(sessionDate);
@@ -213,7 +241,6 @@ function resolveSessionsRoot_() {
     props.setProperty('SOF_SESSIONS_ROOT_ID', folder.getId());
     return folder;
   } catch (e) {
-    // Fallback: search by name if ID fails
     const rootIter = DriveApp.getFoldersByName('Sea of Fortune');
     if (rootIter.hasNext()) {
       const sessionsIter = rootIter.next().getFoldersByName('Sessions');

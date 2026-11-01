@@ -17,6 +17,7 @@
       --cyan: #38bdf8;
       --text: #f8fafc;
       --text-muted: #94a3b8;
+      --dnd-red: #e11d48;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -109,9 +110,10 @@
       word-break: break-all;
       transition: all 0.15s;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 6px;
       color: var(--text-muted);
+      line-height: 1.3;
     }
     .file-item:hover {
       background: #1e293b;
@@ -124,7 +126,7 @@
       border-left: 3px solid var(--gold);
     }
 
-    .file-icon { font-size: 14px; flex-shrink: 0; }
+    .file-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
 
     /* Scratchpad Drawer */
     #scratchpad-container {
@@ -132,7 +134,7 @@
       padding: 10px 12px;
       display: flex;
       flex-direction: column;
-      height: 42%;
+      height: 40%;
       background: #0d131f;
     }
 
@@ -250,11 +252,12 @@
       max-width: 100%;
       height: auto;
       border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.5);
       display: block;
       margin: 0 auto;
     }
 
+    /* Markdown Styling */
     .markdown-body {
       line-height: 1.6;
       max-width: 860px;
@@ -265,26 +268,30 @@
       color: var(--gold-light);
       border-bottom: 1px solid var(--border);
       padding-bottom: 4px;
-      margin-top: 1rem;
-      margin-bottom: .5rem;
+      margin-top: 1.25rem;
+      margin-bottom: .6rem;
     }
     .markdown-body p, .markdown-body li {
       color: #cbd5e1;
-      margin-bottom: .5rem;
+      margin-bottom: .6rem;
     }
     .markdown-body pre {
       background: #0f172a;
       border: 1px solid var(--border);
       padding: 12px;
-      border-radius: 4px;
+      border-radius: 6px;
       overflow-x: auto;
       font-family: 'Fira Code', monospace;
       color: #e2e8f0;
+      margin: 1rem 0;
     }
     .markdown-body table {
       width: 100%;
       border-collapse: collapse;
       margin: 1rem 0;
+      background: #111827;
+      border-radius: 4px;
+      overflow: hidden;
     }
     .markdown-body th, .markdown-body td {
       border: 1px solid var(--border);
@@ -292,6 +299,68 @@
     }
     .markdown-body th {
       background: #1e293b;
+      color: var(--gold-light);
+    }
+    .markdown-body tr:nth-child(even) td {
+      background: rgba(255,255,255,0.02);
+    }
+
+    /* 5e Statblock Theme for Markdown Monsters */
+    .dnd-statblock {
+      background: #161b26;
+      border: 2px solid var(--gold);
+      border-radius: 8px;
+      padding: 1.2rem 1.5rem;
+      margin: 1.5rem 0;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .dnd-statblock h2 {
+      font-family: 'Cinzel', serif;
+      font-size: 1.6rem;
+      color: var(--gold-light);
+      border-bottom: 2px solid var(--gold);
+      margin: 0 0 4px 0;
+      padding: 0;
+    }
+    .dnd-statblock em {
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 8px;
+      font-size: 0.95rem;
+    }
+    .dnd-statblock hr {
+      border: none;
+      height: 2px;
+      background: linear-gradient(90deg, var(--gold), transparent);
+      margin: 10px 0;
+    }
+    .dnd-statblock table {
+      background: #0f172a;
+      text-align: center;
+      margin: 8px 0;
+    }
+    .dnd-statblock th {
+      color: var(--cyan);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+    .dnd-statblock td {
+      font-family: 'Fira Code', monospace;
+      color: #ffffff;
+      font-weight: 600;
+    }
+    .dnd-statblock h3 {
+      font-family: 'Cinzel', serif;
+      font-size: 1.2rem;
+      color: var(--dnd-red);
+      border-bottom: 1px solid var(--border);
+      margin-top: 14px;
+    }
+    .dnd-prop {
+      margin-bottom: 4px;
+      font-size: 0.92rem;
+    }
+    .dnd-prop strong {
       color: var(--gold-light);
     }
   </style>
@@ -312,7 +381,7 @@
         </select>
       </div>
 
-      <input type="text" id="filter-input" placeholder="🔍 Filter session assets..." oninput="filterFiles(this.value)">
+      <input type="text" id="filter-input" placeholder="🔍 Filter maps, statblocks, notes..." oninput="filterFiles(this.value)">
 
       <div id="file-list">Loading files...</div>
     </div>
@@ -361,6 +430,12 @@
     let allFiles = [];
     let currentLeftPayload = null;
 
+    // Configure marked for tables and line breaks
+    marked.setOptions({
+      gfm: true,
+      breaks: true
+    });
+
     window.onload = () => {
       loadSessionDropdown();
       refreshManifest();
@@ -372,6 +447,17 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         saveNotes();
+      }
+    });
+
+    // Cross-frame link interceptor for relative links inside GM screens
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'OPEN_FILE_BY_NAME') {
+        const filename = event.data.filename;
+        const target = allFiles.find(f => f.simpleName === filename || f.name.endsWith(filename));
+        if (target) {
+          loadFile(target.id);
+        }
       }
     });
 
@@ -430,7 +516,10 @@
         div.onclick = () => loadFile(f.id, div);
 
         let icon = '📄';
-        if (f.mimeType.startsWith('image/')) icon = '🗺️';
+        if (f.name.includes('[1. Floor Maps]')) icon = '🗺️';
+        else if (f.name.includes('[3. Monsters]')) icon = '🐉';
+        else if (f.name.includes('[2. Floor Specific')) icon = '💎';
+        else if (f.mimeType.startsWith('image/')) icon = '🖼️';
         else if (f.mimeType.startsWith('audio/')) icon = '🎧';
         else if (f.name.endsWith('.html')) icon = '📑';
         else if (f.name.endsWith('.md')) icon = '📝';
@@ -442,7 +531,13 @@
 
     function loadFile(fileId, element) {
       document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
-      if (element) element.classList.add('active');
+      if (element) {
+        element.classList.add('active');
+      } else {
+        // Highlight matching element if triggered from inside iframe link
+        const matchingEl = Array.from(document.querySelectorAll('.file-item')).find(el => el.textContent.includes(fileId));
+        if (matchingEl) matchingEl.classList.add('active');
+      }
 
       if (cache[fileId] && cache[fileId].name !== 'table_notes.md') {
         renderToLeftPane(cache[fileId]);
@@ -478,6 +573,60 @@
       document.getElementById('right-content').innerHTML = '';
     }
 
+    function parseCustomMarkdown(content) {
+      let raw = content.trim();
+
+      // 1. Strip outer code fences if file was saved as ```markdown ... ```
+      if (raw.startsWith('```markdown') && raw.endsWith('```')) {
+        raw = raw.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '').trim();
+      }
+
+      // 2. Parse 5e Homebrewery statblock tags
+      if (raw.includes('{monster,frame') || raw.includes('{monster,frame,wide')) {
+        raw = raw.replace(/\{monster,frame(?:,wide)?/gi, '<div class="dnd-statblock">')
+                 .replace(/\n\}/g, '\n</div>');
+      }
+
+      // 3. Clean up statblock property lines: "**Armor Class** :: 17" -> "**Armor Class:** 17"
+      raw = raw.replace(/\*\*([^*]+)\*\*\s*::\s*/g, '**$1:** ')
+               .replace(/\{bonus \*\*([^*]+)\*\*\s*([^}]+)\}/g, '(**$1** $2)');
+
+      // 4. Render marked
+      return marked.parse(raw);
+    }
+
+    function prepareHtmlSrcdoc(htmlContent) {
+      // Injects script into iframe to handle internal hash anchors and relative links
+      const script = `
+        <script>
+          document.addEventListener('DOMContentLoaded', function() {
+            // Internal anchor jumps
+            document.querySelectorAll('a[href^="#"]').forEach(function(a) {
+              a.addEventListener('click', function(e) {
+                e.preventDefault();
+                var targetId = a.getAttribute('href').substring(1);
+                var el = document.getElementById(targetId);
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  window.location.hash = targetId;
+                }
+              });
+            });
+
+            // Relative file links to sibling handouts
+            document.querySelectorAll('a:not([href^="#"]):not([href^="http://"]):not([href^="https://"]):not([href^="mailto:"])').forEach(function(a) {
+              a.addEventListener('click', function(e) {
+                e.preventDefault();
+                var filename = a.getAttribute('href').split('/').pop().split('?')[0];
+                window.parent.postMessage({ type: 'OPEN_FILE_BY_NAME', filename: filename }, '*');
+              });
+            });
+          });
+        <\/script>
+      `;
+      return htmlContent + script;
+    }
+
     function renderPayloadIntoContainer(payload, container) {
       container.innerHTML = '';
       if (payload.type === 'image') {
@@ -485,23 +634,23 @@
         img.className = 'asset-img';
         img.src = payload.content;
         container.appendChild(img);
-      } else if (payload.type === 'audio') {
+      } else if (payload.type === 'image-preview' || payload.type === 'audio') {
         const iframe = document.createElement('iframe');
         iframe.src = payload.content;
         iframe.style.width = '100%';
-        iframe.style.height = '140px';
+        iframe.style.height = payload.type === 'audio' ? '140px' : 'calc(100vh - 90px)';
         iframe.style.border = '1px solid var(--border)';
         iframe.style.borderRadius = '6px';
         container.appendChild(iframe);
       } else if (payload.type === 'markdown') {
         const div = document.createElement('div');
         div.className = 'markdown-body';
-        div.innerHTML = marked.parse(payload.content);
+        div.innerHTML = parseCustomMarkdown(payload.content);
         container.appendChild(div);
       } else if (payload.type === 'html') {
         const iframe = document.createElement('iframe');
         iframe.className = 'sandbox-frame';
-        iframe.srcdoc = payload.content;
+        iframe.srcdoc = prepareHtmlSrcdoc(payload.content);
         container.appendChild(iframe);
       }
     }

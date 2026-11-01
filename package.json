@@ -1,0 +1,41 @@
+{
+  "name": "sof-gm-screen",
+  "version": "1.0.0",
+  "description": "Sea of Fortune GM Dashboard Google Apps Script Web App",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck:server": "mkdir -p node_modules/.cache && cp Code.gs node_modules/.cache/Code.js && tsc --lib es2022 --types google-apps-script --noEmit --allowJs --checkJs node_modules/.cache/Code.js",
+    "typecheck:tests": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "npm run typecheck:server && npm run typecheck:tests",
+    "lint:js": "eslint Code.gs test/**/*.ts",
+    "lint:css": "stylelint Index.html",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\"",
+    "format:check": "prettier --check \"**/*.{html,gs,js,ts,css,md,json}\" --ignore-path .prettierignore",
+    "format": "prettier --write \"**/*.{html,gs,js,ts,css,md,json}\" --ignore-path .prettierignore",
+    "audit:artifacts": "python3 validate_session_artifacts.py",
+    "test": "vitest run",
+    "knip": "knip",
+    "check": "npm run typecheck && npm run lint:js && npm run lint:css && npm run lint:md && npm run format:check && npm run audit:artifacts && npm run test && npm run knip",
+    "push": "clasp push -f",
+    "deploy": "npm run check && clasp push -f && clasp deploy"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@google/clasp": "^2.4.2",
+    "@types/google-apps-script": "^1.0.86",
+    "@types/node": "^22.13.0",
+    "eslint": "^9.20.0",
+    "happy-dom": "^21.0.4",
+    "knip": "^5.43.0",
+    "markdownlint-cli2": "^0.17.2",
+    "marked": "^18.1.2",
+    "postcss-html": "^2.0.0",
+    "prettier": "^3.5.0",
+    "stylelint": "^16.14.1",
+    "stylelint-config-standard": "^37.0.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  }
+}

@@ -3,8 +3,8 @@
  * Serves live session materials, maps, statblocks, and notes from Google Drive.
  */
 
-const SESSIONS_ROOT_ID = '1MnppB86ysCIlqS-c023Ss96rx5vHEnjT';
-const GOOGLE_EDGE_CDN_PREFIX = 'https://lh3.googleusercontent.com/d/';
+const SESSIONS_ROOT_ID = "1MnppB86ysCIlqS-c023Ss96rx5vHEnjT";
+const GOOGLE_EDGE_CDN_PREFIX = "https://lh3.googleusercontent.com/d/";
 
 /**
  * Returns Google Edge CDN direct URL for a given file ID.
@@ -14,13 +14,17 @@ function getDriveCdnUrl_(fileId) {
 }
 
 function doGet(e) {
-  const sessionDate = (e && e.parameter && e.parameter.session) ? e.parameter.session : '2026-10-31';
-  const template = HtmlService.createTemplateFromFile('Index');
+  const sessionDate =
+    e && e.parameter && e.parameter.session
+      ? e.parameter.session
+      : "2026-10-31";
+  const template = HtmlService.createTemplateFromFile("Index");
   template.sessionDate = sessionDate;
-  return template.evaluate()
-    .setTitle('Sea of Fortune GM Dashboard - ' + sessionDate)
+  return template
+    .evaluate()
+    .setTitle("Sea of Fortune GM Dashboard - " + sessionDate)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    .addMetaTag("viewport", "width=device-width, initial-scale=1");
 }
 
 /**
@@ -32,7 +36,7 @@ function getSessionList() {
   const list = [];
   while (folders.hasNext()) {
     const name = folders.next().getName();
-    if (!name.startsWith('.')) {
+    if (!name.startsWith(".")) {
       list.push(name);
     }
   }
@@ -56,15 +60,20 @@ function getSessionManifest(sessionDate) {
       let mime = file.getMimeType();
       let id = file.getId();
       let name = file.getName();
-      
+
       // If shortcut, resolve via Drive v3 API
       if (mime === "application/vnd.google-apps.shortcut") {
         try {
-          const url = 'https://www.googleapis.com/drive/v3/files/' + id + '?fields=shortcutDetails';
-          const res = JSON.parse(UrlFetchApp.fetch(url, {
-            headers: { Authorization: 'Bearer ' + token },
-            muteHttpExceptions: true
-          }).getContentText());
+          const url =
+            "https://www.googleapis.com/drive/v3/files/" +
+            id +
+            "?fields=shortcutDetails";
+          const res = JSON.parse(
+            UrlFetchApp.fetch(url, {
+              headers: { Authorization: "Bearer " + token },
+              muteHttpExceptions: true
+            }).getContentText()
+          );
 
           if (res.shortcutDetails) {
             const targetId = res.shortcutDetails.targetId;
@@ -76,14 +85,14 @@ function getSessionManifest(sessionDate) {
                 const targetFolder = DriveApp.getFolderById(targetId);
                 scanFolder(targetFolder, prefix + "[" + name + "] ");
                 continue; // Do not add the shortcut container itself
-              } catch(e) {}
+              } catch (_e) {}
             } else {
               // Shortcut to a file
               id = targetId;
               mime = targetMime;
             }
           }
-        } catch(e) {}
+        } catch (_e) {}
       }
 
       // Skip pure folder items in file list
@@ -122,34 +131,37 @@ function getFilePayload(fileId, sessionDate) {
   const name = file.getName();
 
   // 1. Images: High-performance Google Edge CDN URL (zero memory, instant load)
-  if (mime.startsWith('image/')) {
+  if (mime.startsWith("image/")) {
     return {
       id: fileId,
-      type: 'image',
+      type: "image",
       name: name,
       content: getDriveCdnUrl_(fileId)
     };
   }
 
   // 2. Audio: Streaming preview player for large session recordings
-  if (mime.startsWith('audio/')) {
+  if (mime.startsWith("audio/")) {
     return {
       id: fileId,
-      type: 'audio',
+      type: "audio",
       name: name,
-      content: 'https://drive.google.com/file/d/' + fileId + '/preview'
+      content: "https://drive.google.com/file/d/" + fileId + "/preview"
     };
   }
 
   // 3. Native Google Docs: Export to HTML on the fly
   if (mime === MimeType.GOOGLE_DOCS) {
-    const url = 'https://www.googleapis.com/drive/v3/files/' + fileId + '/export?mimeType=text/html';
+    const url =
+      "https://www.googleapis.com/drive/v3/files/" +
+      fileId +
+      "/export?mimeType=text/html";
     const response = UrlFetchApp.fetch(url, {
-      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
+      headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() }
     });
     return {
       id: fileId,
-      type: 'html',
+      type: "html",
       name: name,
       content: response.getContentText()
     };
@@ -158,11 +170,11 @@ function getFilePayload(fileId, sessionDate) {
   // 4. HTML and Markdown: Resolve relative images to Drive CDN links
   let rawText = file.getBlob().getDataAsString();
   rawText = resolveRelativeImages_(rawText, sessionDate);
-  const isMarkdown = name.endsWith('.md') || mime === 'text/markdown';
+  const isMarkdown = name.endsWith(".md") || mime === "text/markdown";
 
   return {
     id: fileId,
-    type: isMarkdown ? 'markdown' : 'html',
+    type: isMarkdown ? "markdown" : "html",
     name: name,
     content: rawText
   };
@@ -173,15 +185,18 @@ function getFilePayload(fileId, sessionDate) {
  */
 function resolveRelativeImages_(text, sessionDate) {
   const folder = resolveSessionFolder_(sessionDate);
-  return text.replace(/(?:src=["']|!\[.*?\]\()([^"'\)\s]+\.(?:png|jpg|jpeg|webp|gif))["'\)]/gi, (match, filename) => {
-    const cleanName = filename.split('/').pop();
-    const files = folder.getFilesByName(cleanName);
-    if (files.hasNext()) {
-      const imgFile = files.next();
-      return match.replace(filename, getDriveCdnUrl_(imgFile.getId()));
+  return text.replace(
+    /(?:src=["']|!\[.*?\]\()([^"')\s]+\.(?:png|jpg|jpeg|webp|gif))["')]/gi,
+    (match, filename) => {
+      const cleanName = filename.split("/").pop();
+      const files = folder.getFilesByName(cleanName);
+      if (files.hasNext()) {
+        const imgFile = files.next();
+        return match.replace(filename, getDriveCdnUrl_(imgFile.getId()));
+      }
+      return match;
     }
-    return match;
-  });
+  );
 }
 
 /**
@@ -189,7 +204,7 @@ function resolveRelativeImages_(text, sessionDate) {
  */
 function getScratchpadNotes(sessionDate) {
   const folder = resolveSessionFolder_(sessionDate);
-  const files = folder.getFilesByName('table_notes.md');
+  const files = folder.getFilesByName("table_notes.md");
   if (files.hasNext()) {
     const file = files.next();
     return {
@@ -200,8 +215,11 @@ function getScratchpadNotes(sessionDate) {
   }
   return {
     id: null,
-    content: '# Session Table Notes (' + sessionDate + ')\n\n- Initiative:\n- Rulings:\n- Loot distributed:\n',
-    updated: 'Not saved yet'
+    content:
+      "# Session Table Notes (" +
+      sessionDate +
+      ")\n\n- Initiative:\n- Rulings:\n- Loot distributed:\n",
+    updated: "Not saved yet"
   };
 }
 
@@ -210,13 +228,13 @@ function getScratchpadNotes(sessionDate) {
  */
 function saveScratchpadNotes(sessionDate, content) {
   const folder = resolveSessionFolder_(sessionDate);
-  const files = folder.getFilesByName('table_notes.md');
+  const files = folder.getFilesByName("table_notes.md");
   let file;
   if (files.hasNext()) {
     file = files.next();
     file.setContent(content);
   } else {
-    file = folder.createFile('table_notes.md', content, 'text/markdown');
+    file = folder.createFile("table_notes.md", content, "text/markdown");
   }
   return {
     id: file.getId(),
@@ -229,22 +247,23 @@ function saveScratchpadNotes(sessionDate, content) {
  */
 function resolveSessionsRoot_() {
   const props = PropertiesService.getScriptProperties();
-  const cachedRootId = props.getProperty('SOF_SESSIONS_ROOT_ID') || SESSIONS_ROOT_ID;
+  const cachedRootId =
+    props.getProperty("SOF_SESSIONS_ROOT_ID") || SESSIONS_ROOT_ID;
   try {
     const folder = DriveApp.getFolderById(cachedRootId);
-    props.setProperty('SOF_SESSIONS_ROOT_ID', folder.getId());
+    props.setProperty("SOF_SESSIONS_ROOT_ID", folder.getId());
     return folder;
-  } catch (e) {
-    const rootIter = DriveApp.getFoldersByName('Sea of Fortune');
+  } catch (_e) {
+    const rootIter = DriveApp.getFoldersByName("Sea of Fortune");
     if (rootIter.hasNext()) {
-      const sessionsIter = rootIter.next().getFoldersByName('Sessions');
+      const sessionsIter = rootIter.next().getFoldersByName("Sessions");
       if (sessionsIter.hasNext()) {
         const f = sessionsIter.next();
-        props.setProperty('SOF_SESSIONS_ROOT_ID', f.getId());
+        props.setProperty("SOF_SESSIONS_ROOT_ID", f.getId());
         return f;
       }
     }
-    throw new Error('Sessions root folder could not be found.');
+    throw new Error("Sessions root folder could not be found.");
   }
 }
 
@@ -253,18 +272,20 @@ function resolveSessionsRoot_() {
  */
 function resolveSessionFolder_(sessionDate) {
   const props = PropertiesService.getScriptProperties();
-  const cachedId = props.getProperty('SESSION_' + sessionDate);
+  const cachedId = props.getProperty("SESSION_" + sessionDate);
   if (cachedId) {
     try {
       return DriveApp.getFolderById(cachedId);
-    } catch (e) {}
+    } catch (_e) {}
   }
   const sessionsFolder = resolveSessionsRoot_();
   const targetIter = sessionsFolder.getFoldersByName(sessionDate);
   if (!targetIter.hasNext()) {
-    throw new Error('Session folder "' + sessionDate + '" not found in Sessions root.');
+    throw new Error(
+      'Session folder "' + sessionDate + '" not found in Sessions root.'
+    );
   }
   const targetFolder = targetIter.next();
-  props.setProperty('SESSION_' + sessionDate, targetFolder.getId());
+  props.setProperty("SESSION_" + sessionDate, targetFolder.getId());
   return targetFolder;
 }

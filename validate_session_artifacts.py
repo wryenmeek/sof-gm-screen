@@ -142,7 +142,11 @@ def validate_directory(dir_path, fix=False):
     total_issues = 0
 
     for root, dirs, files in os.walk(dir_path):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        dirs[:] = [
+            d
+            for d in dirs
+            if not d.startswith(".") and d not in ("node_modules", "dist")
+        ]
         for file in sorted(files):
             if (
                 file.startswith(".")

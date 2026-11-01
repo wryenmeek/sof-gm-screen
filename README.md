@@ -6,31 +6,31 @@ A lightweight Single-Page Application (SPA) GM Dashboard built on Google Apps Sc
 
 ## Live Web App URLs
 
-* **Active Production URL (v3):**  
+- **Active Production URL (v3):**  
   [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec)
-* **Direct 2026-10-31 Session URL:**  
+- **Direct 2026-10-31 Session URL:**  
   [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?session=2026-10-31](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?session=2026-10-31)
-* **Script Editor:**  
+- **Script Editor:**  
   [https://script.google.com/d/1WzexkauxHjTuUjkucL_EyxKjnqddDkdwvlPg7aqk2cZRLiEK3HjEXOad/edit](https://script.google.com/d/1WzexkauxHjTuUjkucL_EyxKjnqddDkdwvlPg7aqk2cZRLiEK3HjEXOad/edit)
 
 ---
 
-## What Was Fixed in v3:
+## What Was Fixed in v3
 
 1. **Fixed Gilded Prisoner & GM Screen Sticky Nav Headers**:
-   * **Root Cause:** Parent `<base target="_top">` was hijacking anchor jumps (`<a href="#lore">`), attempting to navigate the top-level Google Script window instead of scrolling the iframe viewport.
-   * **Fix:** Injected `<base target="_self">` and capture-phase (`useCapture = true`) click interceptors into `<head>` so internal anchor links (`#lore`, `#setup`, `#phases`, `#threats`, `#rituals`, `#clock`, `#visions`, `#after`) immediately call `scrollIntoView({ behavior: 'smooth', block: 'start' })` inside the iframe.
-   * Also patched both local and Google Drive files directly (`GM_Guide_Trapped_Nereid_Encounter.html` and `Hotel_Lapis_Session_GM_Screen.html`) with native smooth-scroll click handlers.
+   - **Root Cause:** Parent `<base target="_top">` was hijacking anchor jumps (`<a href="#lore">`), attempting to navigate the top-level Google Script window instead of scrolling the iframe viewport.
+   - **Fix:** Injected `<base target="_self">` and capture-phase (`useCapture = true`) click interceptors into `<head>` so internal anchor links (`#lore`, `#setup`, `#phases`, `#threats`, `#rituals`, `#clock`, `#visions`, `#after`) immediately call `scrollIntoView({ behavior: 'smooth', block: 'start' })` inside the iframe.
+   - Also patched both local and Google Drive files directly (`GM_Guide_Trapped_Nereid_Encounter.html` and `Hotel_Lapis_Session_GM_Screen.html`) with native smooth-scroll click handlers.
 2. **High-Performance Image Rendering (Google Edge CDN & Preview Fallback)**:
-   * Delivers images instantly via Google's edge CDN (`lh3.googleusercontent.com/d/<id>`) with zero Apps Script server memory overhead.
-   * Includes automatic client-side fallback to Google Drive `/preview` iframes for unshared files.
+   - Delivers images instantly via Google's edge CDN (`lh3.googleusercontent.com/d/<id>`) with zero Apps Script server memory overhead.
+   - Includes automatic client-side fallback to Google Drive `/preview` iframes for unshared files.
 3. **Folder Shortcuts Unpacked**:
-   * Inspects `application/vnd.google-apps.shortcut` targets via Drive API.
-   * Unpacks all items inside `1. Floor Maps`, `2. Floor Specific NPCs...`, and `3. Monsters` into the sidebar under clean category badges.
+   - Inspects `application/vnd.google-apps.shortcut` targets via Drive API.
+   - Unpacks all items inside `1. Floor Maps`, `2. Floor Specific NPCs...`, and `3. Monsters` into the sidebar under clean category badges.
 4. **5e Monster Statblock Styling**:
-   * Pre-processes Homebrewery statblocks (`{ monster, frame, wide }`, `::`, `{bonus ...}`).
-   * Strips outer triple-backtick markdown fences (```` ```markdown ````).
-   * Renders with custom dark gold 5e statblock cards, stat tables, and crimson action headers.
+   - Pre-processes Homebrewery statblocks (`{ monster, frame, wide }`, `::`, `{bonus ...}`).
+   - Strips outer triple-backtick markdown fences (` ```markdown `).
+   - Renders with custom dark gold 5e statblock cards, stat tables, and crimson action headers.
 
 ---
 

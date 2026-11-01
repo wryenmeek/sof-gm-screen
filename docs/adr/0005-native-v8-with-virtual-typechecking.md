@@ -1,0 +1,3 @@
+# Native V8 Runtime with Virtual Typechecking and Isolated VM Testing
+
+Backend server code (`Code.gs`) is authored directly in native Google Apps Script V8 JavaScript and validated via virtual TypeScript typechecking and isolated Node.js VM test harnesses, rather than introducing a TypeScript build and bundling step (such as Webpack or Rollup). This preserves immediate readability and direct live debugging in the Google Apps Script web editor, avoids sourcemap distortions in production error traces, and eliminates bundling overhead, while retaining strict static typing against `@types/google-apps-script` and unit test coverage in Vitest.

@@ -37,9 +37,18 @@ A lightweight Single-Page Application (SPA) GM Dashboard built on Google Apps Sc
 ## Local Development Workflow
 
 ```bash
-# Push changes to Apps Script:
-npx @google/clasp push -f
+# Run the full automated verification suite (TypeScript, ESLint, Stylelint, Markdownlint, Prettier, Vitest, Knip, Artifacts):
+npm run check
 
-# Create a new versioned deployment:
-npx @google/clasp deploy --description "Your change description"
+# Run unit tests in watch mode:
+npm test
+
+# Format all project files:
+npm run format
+
+# Push changes to Google Apps Script:
+npm run push
+
+# Deploy new version to production:
+npm run deploy
 ```

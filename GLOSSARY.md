@@ -24,9 +24,17 @@ _Avoid_: Symlink, alias, virtual folder, subfolder.
 The consolidated live dashboard interface displaying session assets, encounter dossiers, maps, and quick references side-by-side during play.
 _Avoid_: Admin panel, console, web app, viewer.
 
+**Pinned Pane**:
+The secondary view pane in the GM Screen locked to a specific asset (such as a Floor Map or Encounter Dossier) while continuing to browse other assets in the primary pane.
+_Avoid_: Right pane, secondary view, split screen, pinned tab.
+
 **Table Notes**:
 The dedicated markdown scratchpad used during active play to record dynamic initiative orders, ad-hoc rulings, and awarded loot.
 _Avoid_: Scratchpad, scratch notes, scratch file, session log.
+
+**Session Manifest**:
+The structured inventory of all discovered session assets and unpacked shortcut libraries available for a given session.
+_Avoid_: File list, directory tree, catalog, asset index.
 
 ### Game Content
 
@@ -41,3 +49,7 @@ _Avoid_: Monster card, sheet, creature entry, NPC stats.
 **Floor Map**:
 A visual cartographic depiction of a tactical encounter space, deck layout, or floor plan.
 _Avoid_: Battlemap, dungeon map, plan, diagram.
+
+**Handout**:
+A player-facing document, prop, translated script, or companion handout referenced during play or linked from an Encounter Dossier.
+_Avoid_: Player doc, companion handout, attachment, paper, handout file.

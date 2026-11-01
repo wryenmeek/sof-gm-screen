@@ -113,26 +113,14 @@ function getFilePayload(fileId, sessionDate) {
   const mime = file.getMimeType();
   const name = file.getName();
 
-  // 1. Images: High-performance Base64 Data URI (under 8MB renders with zero cookie blocks)
+  // 1. Images: High-performance Google Edge CDN URL (zero memory, instant load)
   if (mime.startsWith('image/')) {
-    const size = file.getSize();
-    if (size < 8 * 1024 * 1024) {
-      const bytes = file.getBlob().getBytes();
-      const b64 = Utilities.base64Encode(bytes);
-      return {
-        id: fileId,
-        type: 'image',
-        name: name,
-        content: 'data:' + mime + ';base64,' + b64
-      };
-    } else {
-      return {
-        id: fileId,
-        type: 'image-preview',
-        name: name,
-        content: 'https://drive.google.com/file/d/' + fileId + '/preview'
-      };
-    }
+    return {
+      id: fileId,
+      type: 'image',
+      name: name,
+      content: 'https://lh3.googleusercontent.com/d/' + fileId
+    };
   }
 
   // 2. Audio: Streaming preview player for large session recordings
@@ -173,7 +161,7 @@ function getFilePayload(fileId, sessionDate) {
 }
 
 /**
- * Replaces relative image filenames in MD/HTML with Base64 Data URIs from the session folder.
+ * Replaces relative image filenames in MD/HTML with Google CDN direct URLs.
  */
 function resolveRelativeImages_(text, sessionDate) {
   const folder = resolveSessionFolder_(sessionDate);
@@ -182,9 +170,7 @@ function resolveRelativeImages_(text, sessionDate) {
     const files = folder.getFilesByName(cleanName);
     if (files.hasNext()) {
       const imgFile = files.next();
-      const b64 = Utilities.base64Encode(imgFile.getBlob().getBytes());
-      const dataUri = 'data:' + imgFile.getMimeType() + ';base64,' + b64;
-      return match.replace(filename, dataUri);
+      return match.replace(filename, 'https://lh3.googleusercontent.com/d/' + imgFile.getId());
     }
     return match;
   });

@@ -21,8 +21,9 @@ A lightweight Single-Page Application (SPA) GM Dashboard built on Google Apps Sc
    * **Root Cause:** Parent `<base target="_top">` was hijacking anchor jumps (`<a href="#lore">`), attempting to navigate the top-level Google Script window instead of scrolling the iframe viewport.
    * **Fix:** Injected `<base target="_self">` and capture-phase (`useCapture = true`) click interceptors into `<head>` so internal anchor links (`#lore`, `#setup`, `#phases`, `#threats`, `#rituals`, `#clock`, `#visions`, `#after`) immediately call `scrollIntoView({ behavior: 'smooth', block: 'start' })` inside the iframe.
    * Also patched both local and Google Drive files directly (`GM_Guide_Trapped_Nereid_Encounter.html` and `Hotel_Lapis_Session_GM_Screen.html`) with native smooth-scroll click handlers.
-2. **Reliable Image Rendering (Base64 Data URIs)**:
-   * Converted images under 8MB to Base64 data URIs so they render 100% reliably in any browser sandbox without third-party cookie blocks.
+2. **High-Performance Image Rendering (Google Edge CDN & Preview Fallback)**:
+   * Delivers images instantly via Google's edge CDN (`lh3.googleusercontent.com/d/<id>`) with zero Apps Script server memory overhead.
+   * Includes automatic client-side fallback to Google Drive `/preview` iframes for unshared files.
 3. **Folder Shortcuts Unpacked**:
    * Inspects `application/vnd.google-apps.shortcut` targets via Drive API.
    * Unpacks all items inside `1. Floor Maps`, `2. Floor Specific NPCs...`, and `3. Monsters` into the sidebar under clean category badges.

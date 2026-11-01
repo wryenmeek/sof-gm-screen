@@ -124,9 +124,9 @@ def check_and_fix_markdown(path, fix=False):
 def check_image(path):
     issues = []
     size = os.path.getsize(path)
-    if size > 8 * 1024 * 1024:
+    if size > 50 * 1024 * 1024:
         issues.append(
-            f"IMAGE_TOO_LARGE: Size is {size / (1024 * 1024):.2f}MB (> 8MB limit for Base64 streaming)."
+            f"IMAGE_TOO_LARGE: Size is {size / (1024 * 1024):.2f}MB (> 50MB warning threshold)."
         )
     elif size == 0:
         issues.append("EMPTY_IMAGE: Image file is 0 bytes.")

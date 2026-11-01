@@ -658,6 +658,17 @@
         const img = document.createElement('img');
         img.className = 'asset-img';
         img.src = payload.content;
+        img.onerror = function() {
+          // Graceful fallback to Drive preview iframe if unshared or direct link blocked
+          const iframe = document.createElement('iframe');
+          iframe.src = 'https://drive.google.com/file/d/' + payload.id + '/preview';
+          iframe.style.width = '100%';
+          iframe.style.height = 'calc(100vh - 90px)';
+          iframe.style.border = '1px solid var(--border)';
+          iframe.style.borderRadius = '6px';
+          container.innerHTML = '';
+          container.appendChild(iframe);
+        };
         container.appendChild(img);
       } else if (payload.type === 'image-preview' || payload.type === 'audio') {
         const iframe = document.createElement('iframe');

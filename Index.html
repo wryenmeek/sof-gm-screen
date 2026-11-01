@@ -652,6 +652,16 @@
       }
     }
 
+    function createDrivePreviewIframe(srcUrl, height = 'calc(100vh - 90px)') {
+      const iframe = document.createElement('iframe');
+      iframe.src = srcUrl;
+      iframe.style.width = '100%';
+      iframe.style.height = height;
+      iframe.style.border = '1px solid var(--border)';
+      iframe.style.borderRadius = '6px';
+      return iframe;
+    }
+
     function renderPayloadIntoContainer(payload, container) {
       container.innerHTML = '';
       if (payload.type === 'image') {
@@ -660,28 +670,30 @@
         img.src = payload.content;
         img.onerror = function() {
           // Graceful fallback to Drive preview iframe if unshared or direct link blocked
-          const iframe = document.createElement('iframe');
-          iframe.src = 'https://drive.google.com/file/d/' + payload.id + '/preview';
-          iframe.style.width = '100%';
-          iframe.style.height = 'calc(100vh - 90px)';
-          iframe.style.border = '1px solid var(--border)';
-          iframe.style.borderRadius = '6px';
           container.innerHTML = '';
-          container.appendChild(iframe);
+          container.appendChild(createDrivePreviewIframe('https://drive.google.com/file/d/' + payload.id + '/preview'));
         };
         container.appendChild(img);
       } else if (payload.type === 'image-preview' || payload.type === 'audio') {
-        const iframe = document.createElement('iframe');
-        iframe.src = payload.content;
-        iframe.style.width = '100%';
-        iframe.style.height = payload.type === 'audio' ? '140px' : 'calc(100vh - 90px)';
-        iframe.style.border = '1px solid var(--border)';
-        iframe.style.borderRadius = '6px';
-        container.appendChild(iframe);
+        const height = payload.type === 'audio' ? '140px' : 'calc(100vh - 90px)';
+        container.appendChild(createDrivePreviewIframe(payload.content, height));
       } else if (payload.type === 'markdown') {
         const div = document.createElement('div');
         div.className = 'markdown-body';
         div.innerHTML = parseCustomMarkdown(payload.content);
+        div.querySelectorAll('img').forEach(img => {
+          img.onerror = function() {
+            const match = img.src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (match) {
+              const fallback = document.createElement('a');
+              fallback.href = 'https://drive.google.com/file/d/' + match[1] + '/view';
+              fallback.target = '_blank';
+              fallback.style.cssText = 'display:inline-block; padding:4px 8px; margin:4px 0; background:#334155; color:#38bdf8; border-radius:4px; font-size:12px; text-decoration:none;';
+              fallback.textContent = '🗺️ [Open in Drive: ' + (img.alt || 'Asset') + ']';
+              img.replaceWith(fallback);
+            }
+          };
+        });
         container.appendChild(div);
       } else if (payload.type === 'html') {
         const iframe = document.createElement('iframe');

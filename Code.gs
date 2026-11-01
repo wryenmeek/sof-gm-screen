@@ -4,6 +4,14 @@
  */
 
 const SESSIONS_ROOT_ID = '1MnppB86ysCIlqS-c023Ss96rx5vHEnjT';
+const GOOGLE_EDGE_CDN_PREFIX = 'https://lh3.googleusercontent.com/d/';
+
+/**
+ * Returns Google Edge CDN direct URL for a given file ID.
+ */
+function getDriveCdnUrl_(fileId) {
+  return GOOGLE_EDGE_CDN_PREFIX + fileId;
+}
 
 function doGet(e) {
   const sessionDate = (e && e.parameter && e.parameter.session) ? e.parameter.session : '2026-10-31';
@@ -119,7 +127,7 @@ function getFilePayload(fileId, sessionDate) {
       id: fileId,
       type: 'image',
       name: name,
-      content: 'https://lh3.googleusercontent.com/d/' + fileId
+      content: getDriveCdnUrl_(fileId)
     };
   }
 
@@ -147,7 +155,7 @@ function getFilePayload(fileId, sessionDate) {
     };
   }
 
-  // 4. HTML and Markdown: Resolve relative images to Base64 or Drive CDN links
+  // 4. HTML and Markdown: Resolve relative images to Drive CDN links
   let rawText = file.getBlob().getDataAsString();
   rawText = resolveRelativeImages_(rawText, sessionDate);
   const isMarkdown = name.endsWith('.md') || mime === 'text/markdown';
@@ -170,7 +178,7 @@ function resolveRelativeImages_(text, sessionDate) {
     const files = folder.getFilesByName(cleanName);
     if (files.hasNext()) {
       const imgFile = files.next();
-      return match.replace(filename, 'https://lh3.googleusercontent.com/d/' + imgFile.getId());
+      return match.replace(filename, getDriveCdnUrl_(imgFile.getId()));
     }
     return match;
   });

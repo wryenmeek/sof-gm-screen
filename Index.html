@@ -363,6 +363,11 @@
     .dnd-prop strong {
       color: var(--gold-light);
     }
+    @media print {
+      body { background: #ffffff; color: #000000; overflow: visible; }
+      #sidebar { display: none; }
+      table, td { background: #ffffff; color: #000000; }
+    }
   </style>
 </head>
 <body>

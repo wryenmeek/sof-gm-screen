@@ -28,7 +28,7 @@ A lightweight Single-Page Application (SPA) GM Dashboard built on Google Apps Sc
    * Inspects `application/vnd.google-apps.shortcut` targets via Drive API.
    * Unpacks all items inside `1. Floor Maps`, `2. Floor Specific NPCs...`, and `3. Monsters` into the sidebar under clean category badges.
 4. **5e Monster Statblock Styling**:
-   * Pre-processes Homebrewery statblocks (`{monster,frame,wide}`, `::`, `{bonus ...}`).
+   * Pre-processes Homebrewery statblocks (`{ monster, frame, wide }`, `::`, `{bonus ...}`).
    * Strips outer triple-backtick markdown fences (```` ```markdown ````).
    * Renders with custom dark gold 5e statblock cards, stat tables, and crimson action headers.
 

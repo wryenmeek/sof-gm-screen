@@ -14,6 +14,20 @@ function getDriveCdnUrl_(fileId) {
   return GOOGLE_EDGE_CDN_PREFIX + fileId;
 }
 
+/**
+ * Server-side GM access guard for Execute as: Me deployments.
+ * When ScriptProperty SOF_GM_KEY is configured, calls with a missing or
+ * mismatched key throw an "Unauthorized GM RPC" error; when unset, calls succeed.
+ */
+function assertGmAccess_(gmKey) {
+  const expected =
+    PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
+  if (expected && gmKey !== expected) {
+    throw new Error("Unauthorized GM RPC");
+  }
+  return true;
+}
+
 function doGet(e) {
   const sessionDate =
     e && e.parameter && e.parameter.session
@@ -31,7 +45,8 @@ function doGet(e) {
 /**
  * Returns a sorted array of all session folder names inside Sessions/.
  */
-function getSessionList() {
+function getSessionList(gmKey) {
+  assertGmAccess_(gmKey);
   const sessionsFolder = resolveSessionsRoot_();
   const folders = sessionsFolder.getFolders();
   const list = [];
@@ -48,7 +63,8 @@ function getSessionList() {
  * Resolves session folder by date and builds a recursive file manifest.
  * Unpacks shortcuts to folders (e.g. 1. Floor Maps, 3. Monsters) and traverses subfolders.
  */
-function getSessionManifest(sessionDate) {
+function getSessionManifest(sessionDate, gmKey) {
+  assertGmAccess_(gmKey);
   const folder = resolveSessionFolder_(sessionDate);
   const manifest = [];
   const token = ScriptApp.getOAuthToken();
@@ -126,7 +142,8 @@ function getSessionManifest(sessionDate) {
 /**
  * Fetches file content by ID and formats it for client rendering.
  */
-function getFilePayload(fileId, sessionDate) {
+function getFilePayload(fileId, sessionDate, gmKey) {
+  assertGmAccess_(gmKey);
   const file = DriveApp.getFileById(fileId);
   const mime = file.getMimeType();
   const name = file.getName();
@@ -203,7 +220,8 @@ function resolveRelativeImages_(text, sessionDate) {
 /**
  * Loads existing content from table_notes.md in the session folder.
  */
-function getScratchpadNotes(sessionDate) {
+function getScratchpadNotes(sessionDate, gmKey) {
+  assertGmAccess_(gmKey);
   const folder = resolveSessionFolder_(sessionDate);
   const files = folder.getFilesByName("table_notes.md");
   if (files.hasNext()) {
@@ -227,7 +245,8 @@ function getScratchpadNotes(sessionDate) {
 /**
  * Saves or overwrites table_notes.md in the session folder.
  */
-function saveScratchpadNotes(sessionDate, content) {
+function saveScratchpadNotes(sessionDate, content, gmKey) {
+  assertGmAccess_(gmKey);
   const folder = resolveSessionFolder_(sessionDate);
   const files = folder.getFilesByName("table_notes.md");
   let file;
@@ -246,7 +265,8 @@ function saveScratchpadNotes(sessionDate, content) {
 /**
  * Ticket 06: Saves or appends digital sidecar audio timeline events to session_audio_timeline.json.
  */
-function saveAudioTimeline(sessionDate, jsonString) {
+function saveAudioTimeline(sessionDate, jsonString, gmKey) {
+  assertGmAccess_(gmKey);
   const folder = resolveSessionFolder_(sessionDate);
   const fileName = "session_audio_timeline.json";
   const files = folder.getFilesByName(fileName);

@@ -11,13 +11,13 @@ Router & phase-boundary reference:
 
 All maps, specs, and implementation tickets live as **GitHub issues** operated via `gh` ([`docs/agents/issue-tracker.md`](issue-tracker.md)):
 
-| Artifact | Location | Label |
-| --- | --- | --- |
-| Wayfinder map | GitHub issue (`gh issue create`) | `wayfinder:map` |
-| Wayfinder decision ticket | GitHub sub-issue of the map | `wayfinder:research` \| `prototype` \| `grilling` \| `task` |
-| Feature spec | GitHub issue (`gh issue create`) | `ready-for-agent` |
-| Implementation ticket | GitHub sub-issue of the spec with native `blocked_by` edges | `ready-for-agent` |
-| Domain vocabulary & ADRs | [`GLOSSARY.md`](../../GLOSSARY.md) and [`docs/adr/`](../adr/) | — |
+| Artifact                  | Location                                                      | Label                                                       |
+| ------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------- |
+| Wayfinder map             | GitHub issue (`gh issue create`)                              | `wayfinder:map`                                             |
+| Wayfinder decision ticket | GitHub sub-issue of the map                                   | `wayfinder:research` \| `prototype` \| `grilling` \| `task` |
+| Feature spec              | GitHub issue (`gh issue create`)                              | `ready-for-agent`                                           |
+| Implementation ticket     | GitHub sub-issue of the spec with native `blocked_by` edges   | `ready-for-agent`                                           |
+| Domain vocabulary & ADRs  | [`GLOSSARY.md`](../../GLOSSARY.md) and [`docs/adr/`](../adr/) | —                                                           |
 
 ## Main flow: idea → ship
 

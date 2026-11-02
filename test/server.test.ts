@@ -57,6 +57,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       RegExp,
       Array,
       Object,
+      Error,
       encodeURIComponent,
       decodeURIComponent
     });
@@ -293,6 +294,25 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       const res2 = ctx.extractNarrativePromises("2026-10-31", "@default");
       expect(res2.createdCount).toBe(0);
       expect(mocks.taskStore.length).toBe(2);
+    });
+  });
+
+  describe("Ticket 15: Server-Side GM Access Guard (assertGmAccess_)", () => {
+    it("allows calls when SOF_GM_KEY is unset (open single-user mode)", () => {
+      expect(ctx.assertGmAccess_).toBeDefined();
+      expect(() => ctx.assertGmAccess_()).not.toThrow();
+      expect(() => ctx.assertGmAccess_("any_key")).not.toThrow();
+    });
+
+    it("throws 'Unauthorized GM RPC' when SOF_GM_KEY is set and gmKey is missing or mismatched, and succeeds on exact match", () => {
+      mocks.propsStore.set("SOF_GM_KEY", "secret-gm-token-99");
+      expect(ctx.assertGmAccess_).toBeDefined();
+
+      expect(() => ctx.assertGmAccess_()).toThrow("Unauthorized GM RPC");
+      expect(() => ctx.assertGmAccess_("wrong-token")).toThrow(
+        "Unauthorized GM RPC"
+      );
+      expect(() => ctx.assertGmAccess_("secret-gm-token-99")).not.toThrow();
     });
   });
 });

@@ -1,8 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import fs from "fs";
-import { marked } from "marked";
-import MiniSearch from "minisearch";
+import { setupClientHarness } from "./helpers/client-harness";
 
 describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", () => {
   let AudioCache: any;
@@ -17,135 +15,16 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
 
   beforeEach(() => {
     vi.useFakeTimers();
-    document.body.innerHTML = `
-      <select id="session-select"></select>
-      <input type="text" id="filter-input" value="" />
-      <div id="audio-cache-status"></div>
-      <div id="file-list"></div>
-      <span id="scratchpad-label"></span>
-      <textarea id="scratchpad"></textarea>
-      <span id="save-status"></span>
-      <span id="left-title"></span>
-      <button id="pin-btn"></button>
-      <div id="left-content"></div>
-      <div id="right-pane"></div>
-      <span id="right-title"></span>
-      <div id="right-content"></div>
-      <div id="player-hud" style="display:none;">
-        <div id="rule-card" style="display:none;">
-          <h2 id="card-title"></h2>
-          <div id="card-type"></div>
-          <p id="card-text"></p>
-        </div>
-      </div>
-    `;
-
-    idbStore = new Map<string, ArrayBuffer>();
-    idbOpenSpy = vi.fn().mockImplementation(() => {
-      const req: any = {
-        result: {
-          objectStoreNames: { contains: () => true },
-          createObjectStore: vi.fn(),
-          transaction: () => ({
-            objectStore: () => ({
-              get: (key: string) => {
-                const getReq: any = { result: idbStore.get(key) };
-                setTimeout(() => getReq.onsuccess && getReq.onsuccess(), 0);
-                return getReq;
-              },
-              put: (val: ArrayBuffer, key: string) => {
-                idbStore.set(key, val);
-                const putReq: any = {};
-                setTimeout(() => putReq.onsuccess && putReq.onsuccess(), 0);
-                return putReq;
-              }
-            })
-          })
-        }
-      };
-      Promise.resolve().then(() => {
-        if (req.onsuccess) req.onsuccess();
-      });
-      return req;
-    });
-    (window as any).indexedDB = { open: idbOpenSpy };
-
-    audioCtxCreateGainSpy = vi.fn().mockImplementation(() => ({
-      connect: vi.fn(),
-      gain: {
-        value: 1.0,
-        setValueAtTime: vi.fn(),
-        linearRampToValueAtTime: vi.fn()
-      }
-    }));
-    (window as any).AudioContext = class MockAudioContext {
-      currentTime = 10.0;
-      destination = {};
-      createGain = audioCtxCreateGainSpy;
-      decodeAudioData = vi.fn();
-      createBufferSource = vi.fn();
-    };
-
-    saveAudioTimelineSpy = vi.fn();
-    (window as any).marked = marked;
-    (window as any).MiniSearch = MiniSearch;
-    (window as any).google = {
-      script: {
-        run: {
-          withSuccessHandler: (cb: any) => ({
-            getScratchpadNotes: vi.fn(),
-            saveScratchpadNotes: vi.fn(),
-            getSessionList: vi.fn(),
-            getSessionManifest: vi.fn(),
-            getFilePayload: vi.fn(),
-            saveAudioTimeline: (sessionDate: string, json: string) => {
-              saveAudioTimelineSpy(sessionDate, json);
-              if (cb) cb({ status: "saved" });
-            }
-          }),
-          saveAudioTimeline: saveAudioTimelineSpy
-        }
-      }
-    };
-
-    const html = fs.readFileSync("Index.html", "utf8");
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/i);
-    if (!scriptMatch) {
-      throw new Error("Could not find client script in Index.html");
-    }
-    const cleanScript = scriptMatch[1].replace(
-      "<?= sessionDate ?>",
-      "2026-10-31"
-    );
-    const fn = new Function(
-      "window",
-      "document",
-      "marked",
-      "MiniSearch",
-      "google",
-      cleanScript +
-        `
-      return {
-        AudioCache: typeof AudioCache !== "undefined" ? AudioCache : undefined,
-        TabletopMixer: typeof TabletopMixer !== "undefined" ? TabletopMixer : undefined,
-        handleAudioIntent: typeof handleAudioIntent !== "undefined" ? handleAudioIntent : undefined,
-        hasWebGpuSupport: typeof hasWebGpuSupport !== "undefined" ? hasWebGpuSupport : undefined,
-        flushAudioTimeline: typeof flushAudioTimeline !== "undefined" ? flushAudioTimeline : undefined
-      };
-    `
-    );
-    const exported = fn(
-      window,
-      document,
-      marked,
-      MiniSearch,
-      (window as any).google
-    );
-    AudioCache = exported.AudioCache;
-    TabletopMixer = exported.TabletopMixer;
-    handleAudioIntent = exported.handleAudioIntent;
-    hasWebGpuSupport = exported.hasWebGpuSupport;
-    flushAudioTimeline = exported.flushAudioTimeline;
+    const harness = setupClientHarness();
+    AudioCache = harness.AudioCache;
+    TabletopMixer = harness.TabletopMixer;
+    handleAudioIntent = harness.handleAudioIntent;
+    hasWebGpuSupport = harness.hasWebGpuSupport;
+    flushAudioTimeline = harness.flushAudioTimeline;
+    saveAudioTimelineSpy = harness.saveAudioTimelineSpy;
+    idbStore = harness.idbStore;
+    idbOpenSpy = harness.idbOpenSpy;
+    audioCtxCreateGainSpy = harness.audioCtxCreateGainSpy;
   });
 
   describe("Ticket 04: IndexedDB Audio Pre-Caching Engine", () => {

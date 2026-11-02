@@ -1,18 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import fs from "fs";
-import { marked } from "marked";
-import MiniSearch from "minisearch";
+import { setupClientHarness } from "./helpers/client-harness";
 
 describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
-  const store = new Map<string, string>();
-  const mockLocalStorage = {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => store.set(k, v),
-    clear: () => store.clear(),
-    removeItem: (k: string) => store.delete(k)
-  };
-
   let selectPlayerIdentity: (name: string) => void;
   let triggerPtt: () => void;
   let showRuleCard: (
@@ -22,89 +12,21 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
   ) => void;
   let submitRuleFeedback: (vote: string) => void;
   let logRuleFeedbackSpy: ReturnType<typeof vi.fn>;
-  let lastSpeechRecognitionInstance: any;
+  let mockLocalStorage: ReturnType<
+    typeof setupClientHarness
+  >["mockLocalStorage"];
+  let getLastSpeechRecognitionInstance: () => any;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    (window as any).localStorage = mockLocalStorage;
-    (globalThis as any).localStorage = mockLocalStorage;
-    mockLocalStorage.clear();
-
-    lastSpeechRecognitionInstance = null;
-    (window as any).webkitSpeechRecognition = class MockSpeechRecognition {
-      continuous = false;
-      interimResults = false;
-      lang = "";
-      onresult: ((e: any) => void) | null = null;
-      onerror: ((e: any) => void) | null = null;
-      start = vi.fn();
-      stop = vi.fn();
-      constructor() {
-        lastSpeechRecognitionInstance = this;
-      }
-    };
-
-    const html = fs.readFileSync("Index.html", "utf8");
-    const bodyMatch = html.match(/<body>([\s\S]*?)<script>/i);
-    document.body.innerHTML = bodyMatch ? bodyMatch[1] : "";
-
-    logRuleFeedbackSpy = vi.fn();
-    (window as any).marked = marked;
-    (window as any).MiniSearch = MiniSearch;
-    (window as any).google = {
-      script: {
-        run: {
-          withSuccessHandler: () => ({
-            getScratchpadNotes: vi.fn(),
-            saveScratchpadNotes: vi.fn(),
-            getSessionList: vi.fn(),
-            getSessionManifest: vi.fn(),
-            getFilePayload: vi.fn(),
-            saveAudioTimeline: vi.fn(),
-            logRuleFeedback: logRuleFeedbackSpy
-          }),
-          logRuleFeedback: logRuleFeedbackSpy
-        }
-      }
-    };
-
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/i);
-    if (!scriptMatch) {
-      throw new Error("Could not find client script in Index.html");
-    }
-    const cleanScript = scriptMatch[1].replace(
-      "<?= sessionDate ?>",
-      "2026-10-31"
-    );
-    const fn = new Function(
-      "window",
-      "document",
-      "marked",
-      "MiniSearch",
-      "google",
-      "localStorage",
-      cleanScript +
-        `
-      return {
-        selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,
-        triggerPtt: typeof triggerPtt !== "undefined" ? triggerPtt : undefined,
-        showRuleCard: typeof showRuleCard !== "undefined" ? showRuleCard : undefined,
-        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined
-      };
-    `
-    );
-    const exported = fn(
-      window,
-      document,
-      marked,
-      MiniSearch,
-      (window as any).google,
-      mockLocalStorage
-    );
-    selectPlayerIdentity = exported.selectPlayerIdentity;
-    triggerPtt = exported.triggerPtt;
-    showRuleCard = exported.showRuleCard;
-    submitRuleFeedback = exported.submitRuleFeedback;
+    const harness = setupClientHarness();
+    selectPlayerIdentity = harness.selectPlayerIdentity;
+    triggerPtt = harness.triggerPtt;
+    showRuleCard = harness.showRuleCard;
+    submitRuleFeedback = harness.submitRuleFeedback;
+    logRuleFeedbackSpy = harness.logRuleFeedbackSpy;
+    mockLocalStorage = harness.mockLocalStorage;
+    getLastSpeechRecognitionInstance = harness.getLastSpeechRecognitionInstance;
   });
 
   describe("Ticket 07: Responsive Viewport Fork & Identity Selection", () => {
@@ -130,6 +52,7 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       const pttBtn = document.getElementById("ptt-btn")!;
       triggerPtt();
       expect(pttBtn.classList.contains("listening")).toBe(true);
+      const lastSpeechRecognitionInstance = getLastSpeechRecognitionInstance();
       expect(lastSpeechRecognitionInstance).not.toBeNull();
       expect(lastSpeechRecognitionInstance.start).toHaveBeenCalledTimes(1);
 

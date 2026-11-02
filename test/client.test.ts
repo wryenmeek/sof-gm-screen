@@ -1,8 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import fs from "fs";
-import { marked } from "marked";
-import MiniSearch from "minisearch";
+import { describe, it, expect, beforeEach } from "vitest";
+import { setupClientHarness } from "./helpers/client-harness";
 
 describe("Client-Side Logic (Index.html)", () => {
   let parseCustomMarkdown: (content: string) => string;
@@ -27,84 +25,30 @@ describe("Client-Side Logic (Index.html)", () => {
     content: string;
   };
   let indexFilePayload: (payload: any) => void;
+  let updateSearchIndexWithContent: (fileOrPayload: any, raw?: string) => void;
 
   beforeEach(() => {
-    document.body.innerHTML = `
-      <select id="session-select"></select>
-      <input type="text" id="filter-input" value="" />
-      <div id="file-list"></div>
-      <span id="scratchpad-label"></span>
-      <textarea id="scratchpad"></textarea>
-      <span id="save-status"></span>
-      <span id="left-title"></span>
-      <button id="pin-btn"></button>
-      <div id="left-content"></div>
-      <div id="right-pane"></div>
-      <span id="right-title"></span>
-      <div id="right-content"></div>
-    `;
-
-    (window as any).marked = marked;
-    (window as any).MiniSearch = MiniSearch;
-    (window as any).google = {
-      script: {
-        run: {
-          withSuccessHandler: () => ({
-            getScratchpadNotes: vi.fn(),
-            saveScratchpadNotes: vi.fn(),
-            getSessionList: vi.fn(),
-            getSessionManifest: vi.fn(),
-            getFilePayload: vi.fn()
-          })
+    const harness = setupClientHarness({
+      filePayloads: {
+        f1: {
+          id: "f1",
+          name: "[3. Monsters] Muttering_Serpent_Statblock.md",
+          type: "markdown",
+          content: "## Muttering Serpent\n**Armor Class** :: 14"
         }
       }
-    };
-
-    const html = fs.readFileSync("Index.html", "utf8");
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/i);
-    if (!scriptMatch) {
-      throw new Error("Could not find client script in Index.html");
-    }
-    const cleanScript = scriptMatch[1].replace(
-      "<?= sessionDate ?>",
-      "2026-10-31"
-    );
-    const fn = new Function(
-      "window",
-      "document",
-      "marked",
-      "MiniSearch",
-      "google",
-      cleanScript +
-        `
-      return {
-        parseCustomMarkdown,
-        prepareHtmlSrcdoc,
-        createDrivePreviewIframe,
-        renderManifest,
-        filterFiles,
-        tokenizeStatblockAndDossier: typeof tokenizeStatblockAndDossier !== "undefined" ? tokenizeStatblockAndDossier : undefined,
-        indexFilePayload: typeof indexFilePayload !== "undefined" ? indexFilePayload : undefined
-      };
-    `
-    );
-    const funcs = fn(
-      window,
-      document,
-      marked,
-      MiniSearch,
-      (window as any).google
-    );
-    parseCustomMarkdown = funcs.parseCustomMarkdown;
-    prepareHtmlSrcdoc = funcs.prepareHtmlSrcdoc;
-    createDrivePreviewIframe = funcs.createDrivePreviewIframe;
-    renderManifest = funcs.renderManifest;
-    filterFiles = funcs.filterFiles;
-    tokenizeStatblockAndDossier = funcs.tokenizeStatblockAndDossier;
-    indexFilePayload = funcs.indexFilePayload;
+    });
+    parseCustomMarkdown = harness.parseCustomMarkdown;
+    prepareHtmlSrcdoc = harness.prepareHtmlSrcdoc;
+    createDrivePreviewIframe = harness.createDrivePreviewIframe;
+    renderManifest = harness.renderManifest;
+    filterFiles = harness.filterFiles;
+    tokenizeStatblockAndDossier = harness.tokenizeStatblockAndDossier;
+    indexFilePayload = harness.indexFilePayload;
+    updateSearchIndexWithContent = harness.updateSearchIndexWithContent;
   });
 
-  describe("MiniSearch Manifest Indexing (Ticket 01)", () => {
+  describe("MiniSearch Manifest Indexing (Ticket 02 / #16)", () => {
     const sampleManifest = [
       {
         id: "f1",
@@ -132,7 +76,7 @@ describe("Client-Side Logic (Index.html)", () => {
       expect(list.children.length).toBe(3);
 
       // Prefix & multi-token search across non-adjacent tokens (which simple .includes() fails on)
-      filterFiles("monsters serpent");
+      filterFiles("monsters serp");
       expect(list.children.length).toBe(1);
       expect(list.textContent).toContain("Muttering_Serpent_Statblock.md");
 
@@ -142,7 +86,7 @@ describe("Client-Side Logic (Index.html)", () => {
     });
   });
 
-  describe("5e Statblock & Dossier Multi-Field Tokenizer (Ticket 02)", () => {
+  describe("5e Statblock & Dossier Multi-Field Tokenizer (Ticket 03 / #17)", () => {
     const sampleManifest = [
       {
         id: "m1",
@@ -158,7 +102,8 @@ describe("Client-Side Logic (Index.html)", () => {
       }
     ];
 
-    const golemMarkdown = `
+    const golemMarkdown = `\`\`\`markdown
+{{monster,frame}}
 {monster,frame,wide
 ## Singing Golem
 *Large construct, unaligned*
@@ -168,11 +113,33 @@ describe("Client-Side Logic (Index.html)", () => {
 **Damage Vulnerabilities** :: thunder, radiant
 **Damage Immunities** :: poison, psychic
 **Condition Immunities** :: charmed, exhaustion, frightened
+**Senses** :: blindsight 60 ft. (blind beyond this radius), passive Perception 10
+{{descriptive}}
+A resonant construct of bronze and coral.
+}}
 ### Actions
 **Harmonic Slam.** Melee Weapon Attack: +9 to hit.
 **Legendary Resistance (3/Day).** If the golem fails a saving throw, it can choose to succeed instead.
 }
-    `;
+\`\`\``;
+
+    it("strips outer markdown code fences and Homebrewery structural markers so they do not pollute content tokens", () => {
+      expect(tokenizeStatblockAndDossier).toBeDefined();
+      const doc = tokenizeStatblockAndDossier(sampleManifest[0], golemMarkdown);
+      expect(doc.content).not.toContain("```markdown");
+      expect(doc.content).not.toContain("```");
+      expect(doc.content).not.toContain("{{monster,frame}}");
+      expect(doc.content).not.toContain("{{descriptive}}");
+      expect(doc.content).not.toContain("{monster,frame");
+
+      // Also test plain ``` outer fences
+      const plainFenceDoc = tokenizeStatblockAndDossier(
+        sampleManifest[0],
+        "```\n## Coral Drake\n**Speed** :: 40 ft., swim 60 ft.\n```"
+      );
+      expect(plainFenceDoc.content).not.toContain("```");
+      expect(plainFenceDoc.title).toContain("Coral Drake");
+    });
 
     it("extracts title, tags, 5e mechanical properties, and content from Homebrewery statblocks", () => {
       expect(tokenizeStatblockAndDossier).toBeDefined();
@@ -183,14 +150,18 @@ describe("Client-Side Logic (Index.html)", () => {
       expect(doc.properties).toContain(
         "Damage Vulnerabilities thunder, radiant"
       );
+      expect(doc.properties).toContain("Senses blindsight 60 ft.");
+      expect(doc.properties).toContain("Harmonic Slam");
+      expect(doc.properties).toContain("Legendary Resistance");
       expect(doc.content).toContain("Legendary Resistance");
     });
 
-    it("updates the MiniSearch index when a file payload is loaded so mechanics queries match the statblock", () => {
+    it("updates the MiniSearch index in place when a file payload is loaded so mechanics queries match the statblock", () => {
       renderManifest(sampleManifest);
       expect(indexFilePayload).toBeDefined();
+      expect(updateSearchIndexWithContent).toBeDefined();
 
-      indexFilePayload({
+      updateSearchIndexWithContent({
         id: "m1",
         name: "[3. Monsters] Singing_Golem_Statblock.md",
         type: "markdown",
@@ -202,14 +173,18 @@ describe("Client-Side Logic (Index.html)", () => {
       expect(list.children.length).toBe(1);
       expect(list.textContent).toContain("Singing_Golem_Statblock.md");
 
+      filterFiles("blindsight");
+      expect(list.children.length).toBe(1);
+      expect(list.textContent).toContain("Singing_Golem_Statblock.md");
+
       filterFiles("legendary resistance");
       expect(list.children.length).toBe(1);
       expect(list.textContent).toContain("Singing_Golem_Statblock.md");
     });
   });
 
-  describe("BM25+ Ranking, Field Boosting & Keyboard Shortcuts (Ticket 03)", () => {
-    it("ranks boosted title matches above body content matches for the same search term", () => {
+  describe("BM25+ Ranking, Field Boosting, Fuzzy Typo Tolerance & Keyboard Navigation (Ticket 04 / #18)", () => {
+    it("ranks boosted title matches above body content matches for the same search term and recovers from single-character typos", () => {
       const files = [
         {
           id: "doc_lore",
@@ -248,15 +223,22 @@ describe("Client-Side Logic (Index.html)", () => {
       expect(list.children[0].textContent).toContain(
         "Orange_Sludge_Statblock.md"
       );
+
+      // Single-character typo tolerance (fuzzy: 0.2): "orangge sludg" -> matches Orange_Sludge_Statblock.md
+      filterFiles("orangge sludg");
+      expect(list.children.length).toBeGreaterThanOrEqual(1);
+      expect(list.children[0].textContent).toContain(
+        "Orange_Sludge_Statblock.md"
+      );
     });
 
-    it("focuses #filter-input when '/' is pressed outside an input, and clears/blurs on 'Escape'", () => {
+    it("focuses #filter-input when '/' is pressed outside text inputs, ignores '/' inside INPUT/TEXTAREA/contentEditable, and clears/blurs on 'Escape'", () => {
       const files = [
         {
           id: "f1",
-          name: "Map_01.png",
-          simpleName: "Map_01.png",
-          mimeType: "image/png"
+          name: "[3. Monsters] Muttering_Serpent_Statblock.md",
+          simpleName: "Muttering_Serpent_Statblock.md",
+          mimeType: "text/markdown"
         },
         {
           id: "f2",
@@ -267,8 +249,20 @@ describe("Client-Side Logic (Index.html)", () => {
       ];
       renderManifest(files);
       const input = document.getElementById("filter-input") as HTMLInputElement;
+      const scratchpad = document.getElementById(
+        "scratchpad"
+      ) as HTMLTextAreaElement;
 
-      // Dispatch '/' keydown on document
+      // Pressing '/' while focused in textarea must NOT steal focus
+      scratchpad.focus();
+      expect(document.activeElement).toBe(scratchpad);
+      document.dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "/", bubbles: true })
+      );
+      expect(document.activeElement).toBe(scratchpad);
+      scratchpad.blur();
+
+      // Dispatch '/' keydown outside inputs -> focuses #filter-input
       document.dispatchEvent(
         new window.KeyboardEvent("keydown", { key: "/", bubbles: true })
       );
@@ -279,12 +273,44 @@ describe("Client-Side Logic (Index.html)", () => {
       filterFiles("Golem");
       expect(document.getElementById("file-list")!.children.length).toBe(1);
 
-      // Dispatch 'Escape' keydown
+      // Dispatch 'Escape' keydown -> clears query, blurs input, restores full manifest
       document.dispatchEvent(
         new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
       );
       expect(input.value).toBe("");
+      expect(document.activeElement).not.toBe(input);
       expect(document.getElementById("file-list")!.children.length).toBe(2);
+    });
+
+    it("loads selected search result into the primary view pane and highlights its card in gold (.active)", () => {
+      const files = [
+        {
+          id: "f1",
+          name: "[3. Monsters] Muttering_Serpent_Statblock.md",
+          simpleName: "Muttering_Serpent_Statblock.md",
+          mimeType: "text/markdown"
+        },
+        {
+          id: "f2",
+          name: "Golem.md",
+          simpleName: "Golem.md",
+          mimeType: "text/markdown"
+        }
+      ];
+      renderManifest(files);
+      filterFiles("Serpent");
+      const list = document.getElementById("file-list")!;
+      expect(list.children.length).toBe(1);
+
+      const item = list.children[0] as HTMLElement;
+      item.click();
+      expect(item.classList.contains("active")).toBe(true);
+      expect(document.getElementById("left-title")!.textContent).toContain(
+        "Muttering_Serpent_Statblock.md"
+      );
+      expect(document.getElementById("left-content")!.innerHTML).toContain(
+        "Muttering Serpent"
+      );
     });
   });
 

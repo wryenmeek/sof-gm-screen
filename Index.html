@@ -507,13 +507,46 @@
         loadScratchpad();
       };
 
-      // Keyboard shortcut Ctrl+S / Cmd+S for instant saving
-      document.addEventListener("keydown", (e) => {
+      // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
+      function handleGlobalKeydown_(e) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
           e.preventDefault();
           saveNotes();
+          return;
         }
-      });
+        const activeTag =
+          document.activeElement && document.activeElement.tagName
+            ? document.activeElement.tagName.toLowerCase()
+            : "";
+        const isTyping =
+          activeTag === "input" ||
+          activeTag === "textarea" ||
+          activeTag === "select";
+
+        if (e.key === "/" && !isTyping) {
+          e.preventDefault();
+          const filterInput = document.getElementById("filter-input");
+          if (filterInput) {
+            filterInput.focus();
+            if (typeof filterInput.select === "function") filterInput.select();
+          }
+        } else if (e.key === "Escape") {
+          const filterInput = document.getElementById("filter-input");
+          if (
+            filterInput &&
+            (document.activeElement === filterInput || filterInput.value)
+          ) {
+            filterInput.value = "";
+            filterInput.blur();
+            filterFiles("");
+          }
+        }
+      }
+      if (window._sofKeydownHandler) {
+        document.removeEventListener("keydown", window._sofKeydownHandler);
+      }
+      window._sofKeydownHandler = handleGlobalKeydown_;
+      document.addEventListener("keydown", window._sofKeydownHandler);
 
       // Cross-frame link interceptor for relative links inside GM screens
       window.addEventListener("message", (event) => {
@@ -653,6 +686,14 @@
                 .split(/[\s_\-[\]./,:;|()]+/)
                 .filter(Boolean),
             searchOptions: {
+              boost: {
+                title: 3.0,
+                tags: 2.5,
+                properties: 2.0,
+                content: 1.0,
+                name: 1.5,
+                simpleName: 1.5
+              },
               prefix: true,
               fuzzy: 0.2,
               combineWith: "AND"

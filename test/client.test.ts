@@ -208,6 +208,86 @@ describe("Client-Side Logic (Index.html)", () => {
     });
   });
 
+  describe("BM25+ Ranking, Field Boosting & Keyboard Shortcuts (Ticket 03)", () => {
+    it("ranks boosted title matches above body content matches for the same search term", () => {
+      const files = [
+        {
+          id: "doc_lore",
+          name: "Room_04_Ambient_Notes.md",
+          simpleName: "Room_04_Ambient_Notes.md",
+          mimeType: "text/markdown"
+        },
+        {
+          id: "doc_sludge",
+          name: "[3. Monsters] Orange_Sludge_Statblock.md",
+          simpleName: "Orange_Sludge_Statblock.md",
+          mimeType: "text/markdown"
+        }
+      ];
+      renderManifest(files);
+
+      // Room_04 mentions "orange sludge" several times in body content, while doc_sludge has it in the title
+      indexFilePayload({
+        id: "doc_lore",
+        name: "Room_04_Ambient_Notes.md",
+        type: "markdown",
+        content:
+          "# Room 04\nThere is some orange sludge dripping from the pipe. The orange sludge smells acidic."
+      });
+      indexFilePayload({
+        id: "doc_sludge",
+        name: "[3. Monsters] Orange_Sludge_Statblock.md",
+        type: "markdown",
+        content: "## Orange Sludge\n*Large ooze*\n**Armor Class** :: 8"
+      });
+
+      filterFiles("orange sludge");
+      const list = document.getElementById("file-list")!;
+      expect(list.children.length).toBe(2);
+      // Title boost (3.0) + tags boost (2.5) must rank Orange_Sludge_Statblock.md first!
+      expect(list.children[0].textContent).toContain(
+        "Orange_Sludge_Statblock.md"
+      );
+    });
+
+    it("focuses #filter-input when '/' is pressed outside an input, and clears/blurs on 'Escape'", () => {
+      const files = [
+        {
+          id: "f1",
+          name: "Map_01.png",
+          simpleName: "Map_01.png",
+          mimeType: "image/png"
+        },
+        {
+          id: "f2",
+          name: "Golem.md",
+          simpleName: "Golem.md",
+          mimeType: "text/markdown"
+        }
+      ];
+      renderManifest(files);
+      const input = document.getElementById("filter-input") as HTMLInputElement;
+
+      // Dispatch '/' keydown on document
+      document.dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "/", bubbles: true })
+      );
+      expect(document.activeElement).toBe(input);
+
+      // Type a filter query and filter
+      input.value = "Golem";
+      filterFiles("Golem");
+      expect(document.getElementById("file-list")!.children.length).toBe(1);
+
+      // Dispatch 'Escape' keydown
+      document.dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+      expect(input.value).toBe("");
+      expect(document.getElementById("file-list")!.children.length).toBe(2);
+    });
+  });
+
   describe("parseCustomMarkdown", () => {
     it("strips outer ```markdown code fences if present", () => {
       const input = "```markdown\n# Session Lore\n\nThe island awaits.\n```";

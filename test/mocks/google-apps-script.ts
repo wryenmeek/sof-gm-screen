@@ -16,6 +16,10 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   }
 
   const propsStore = new Map<string, string>();
+  const cacheStore = new Map<string, string>();
+  const logs: string[] = [];
+  const triggers: Array<{ handlerFunction: string; weekDay?: string; hour?: number }> = [];
+  let lastCreatedTemplate: Record<string, any> | null = null;
   const sheetRows: any[][] = [];
   const taskStore: Array<{
     id: string;
@@ -115,7 +119,94 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   };
 
   const ScriptApp = {
-    getOAuthToken: () => "mock_oauth_token"
+    WeekDay: {
+      MONDAY: "MONDAY",
+      TUESDAY: "TUESDAY",
+      WEDNESDAY: "WEDNESDAY",
+      THURSDAY: "THURSDAY",
+      FRIDAY: "FRIDAY",
+      SATURDAY: "SATURDAY",
+      SUNDAY: "SUNDAY"
+    },
+    getOAuthToken: () => "mock_oauth_token",
+    getProjectTriggers: vi.fn(() =>
+      triggers.map((t) => ({
+        getHandlerFunction: () => t.handlerFunction
+      }))
+    ),
+    newTrigger: vi.fn((handlerFunction: string) => {
+      let weekDay: string | undefined;
+      let hour: number | undefined;
+      const builder = {
+        timeBased: () => builder,
+        onWeekDay: (wd: string) => {
+          weekDay = wd;
+          return builder;
+        },
+        atHour: (h: number) => {
+          hour = h;
+          return builder;
+        },
+        create: () => {
+          const entry = { handlerFunction, weekDay, hour };
+          triggers.push(entry);
+          return {
+            getHandlerFunction: () => handlerFunction
+          };
+        }
+      };
+      return builder;
+    })
+  };
+
+  const HtmlService = {
+    XFrameOptionsMode: {
+      ALLOWALL: "ALLOWALL"
+    },
+    createTemplateFromFile: vi.fn((fileName: string) => {
+      const tpl: Record<string, any> = {
+        _fileName: fileName,
+        evaluate: () => {
+          const out: Record<string, any> = {
+            template: tpl,
+            title: "",
+            xFrameMode: "",
+            metaTags: [] as Array<{ name: string; content: string }>,
+            setTitle: (t: string) => {
+              out.title = t;
+              return out;
+            },
+            setXFrameOptionsMode: (m: string) => {
+              out.xFrameMode = m;
+              return out;
+            },
+            addMetaTag: (name: string, content: string) => {
+              out.metaTags.push({ name, content });
+              return out;
+            }
+          };
+          return out;
+        }
+      };
+      lastCreatedTemplate = tpl;
+      return tpl;
+    })
+  };
+
+  const Logger = {
+    log: vi.fn((msg: string) => {
+      logs.push(String(msg));
+    }),
+    getLogs: () => logs
+  };
+
+  const CacheService = {
+    getScriptCache: () => ({
+      put: vi.fn((key: string, value: string, _expirationInSeconds?: number) => {
+        cacheStore.set(key, String(value));
+      }),
+      get: vi.fn((key: string) => cacheStore.get(key) ?? null)
+    })
   };
 
   const Utilities = {
@@ -158,7 +249,10 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
       INVITED: "INVITED"
     },
     getDefaultCalendar: () => ({
-      getEventById: (id: string) => mockEvents.get(id) || null
+      getEventById: (id: string) => mockEvents.get(id) || null,
+      getEvents: vi.fn((_startTime: Date, _endTime: Date) =>
+        Array.from(mockEvents.values())
+      )
     })
   };
 
@@ -182,6 +276,9 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   (globalThis as any).DriveApp = DriveApp;
   (globalThis as any).PropertiesService = PropertiesService;
   (globalThis as any).ScriptApp = ScriptApp;
+  (globalThis as any).HtmlService = HtmlService;
+  (globalThis as any).Logger = Logger;
+  (globalThis as any).CacheService = CacheService;
   (globalThis as any).Utilities = Utilities;
   (globalThis as any).MimeType = MimeType;
   (globalThis as any).UrlFetchApp = UrlFetchApp;
@@ -192,10 +289,18 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   return {
     fileStore,
     propsStore,
+    cacheStore,
+    logs,
+    triggers,
+    getLastCreatedTemplate: () => lastCreatedTemplate,
     sheetRows,
     taskStore,
     mockEvents,
     DriveApp,
+    ScriptApp,
+    HtmlService,
+    Logger,
+    CacheService,
     UrlFetchApp,
     SpreadsheetApp,
     CalendarApp,

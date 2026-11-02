@@ -19,7 +19,8 @@ export default [
         Logger: "readonly",
         SpreadsheetApp: "readonly",
         CalendarApp: "readonly",
-        Tasks: "readonly"
+        Tasks: "readonly",
+        CacheService: "readonly"
       }
     },
     rules: {
@@ -37,7 +38,7 @@ export default [
           argsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
           varsIgnorePattern:
-            "^(doGet|getSessionList|getSessionManifest|getFilePayload|getScratchpadNotes|saveScratchpadNotes|saveAudioTimeline|logRuleFeedback|auditCalendarQuorum|extractNarrativePromises|_)"
+            "^(doGet|doPost|getSessionList|getSessionManifest|getFilePayload|getAudioAuthToken|getScratchpadNotes|saveScratchpadNotes|saveAudioTimeline|getRulesGlossary|logRuleFeedback|installGovernanceTriggers|auditCalendarQuorum|extractNarrativePromises|getLatestAudioCue|_)"
         }
       ]
     }

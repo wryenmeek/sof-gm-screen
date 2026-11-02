@@ -3,6 +3,7 @@
   <head>
     <base target="_top" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -492,6 +493,7 @@
       const cache = {};
       let allFiles = [];
       let currentLeftPayload = null;
+      let miniSearch = null;
 
       // Configure marked for tables and line breaks
       marked.setOptions({
@@ -565,6 +567,23 @@
 
       function renderManifest(files) {
         allFiles = files;
+        if (typeof MiniSearch !== "undefined") {
+          miniSearch = new MiniSearch({
+            fields: ["name", "simpleName", "mimeType"],
+            storeFields: ["id", "name", "simpleName", "mimeType"],
+            tokenize: (text) =>
+              text
+                .toLowerCase()
+                .split(/[\s_\-\[\]./]+/)
+                .filter(Boolean),
+            searchOptions: {
+              prefix: true,
+              fuzzy: 0.2,
+              combineWith: "AND"
+            }
+          });
+          miniSearch.addAll(files);
+        }
         filterFiles(document.getElementById("filter-input").value);
       }
 
@@ -573,9 +592,16 @@
         list.innerHTML = "";
         const q = query.toLowerCase().trim();
 
-        const filtered = allFiles.filter((f) =>
-          f.name.toLowerCase().includes(q)
-        );
+        let filtered = allFiles;
+        if (q) {
+          if (miniSearch) {
+            const hits = miniSearch.search(q);
+            const hitMap = new Map(allFiles.map((f) => [f.id, f]));
+            filtered = hits.map((h) => hitMap.get(h.id)).filter(Boolean);
+          } else {
+            filtered = allFiles.filter((f) => f.name.toLowerCase().includes(q));
+          }
+        }
 
         if (filtered.length === 0) {
           list.innerHTML =

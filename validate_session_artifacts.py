@@ -16,18 +16,18 @@ def check_and_fix_html(path, fix=False):
 
     modified = False
 
-    # 1. Check & Fix <base target="_self"> inside <head>
+    # 1. Check & Fix <base target="_self"> inside <head> (accepts self-closing <base target="_self" /> from Prettier)
     if (
         "<head>" in content
-        and '<base target="_self">' not in content
-        and "<base target='_self'>" not in content
+        and '<base target="_self"' not in content
+        and "<base target='_self'" not in content
     ):
         issues.append(
             'MISSING_BASE_SELF: <head> does not contain <base target="_self">.'
         )
         if fix:
             content = content.replace(
-                "<head>", '<head>\n  <base target="_self">'
+                "<head>", '<head>\n  <base target="_self" />'
             )
             modified = True
 

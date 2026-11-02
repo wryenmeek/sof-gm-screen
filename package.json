@@ -30,6 +30,7 @@
     "knip": "^5.43.0",
     "markdownlint-cli2": "^0.17.2",
     "marked": "^18.1.2",
+    "minisearch": "^7.2.0",
     "postcss-html": "^2.0.0",
     "prettier": "^3.5.0",
     "stylelint": "^16.14.1",

@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "fs";
 import { marked } from "marked";
+import MiniSearch from "minisearch";
 
 describe("Client-Side Logic (Index.html)", () => {
   let parseCustomMarkdown: (content: string) => string;
@@ -10,9 +11,27 @@ describe("Client-Side Logic (Index.html)", () => {
     srcUrl: string,
     height?: string
   ) => HTMLIFrameElement;
+  let renderManifest: (files: Array<any>) => void;
+  let filterFiles: (query: string) => void;
 
   beforeEach(() => {
+    document.body.innerHTML = `
+      <select id="session-select"></select>
+      <input type="text" id="filter-input" value="" />
+      <div id="file-list"></div>
+      <span id="scratchpad-label"></span>
+      <textarea id="scratchpad"></textarea>
+      <span id="save-status"></span>
+      <span id="left-title"></span>
+      <button id="pin-btn"></button>
+      <div id="left-content"></div>
+      <div id="right-pane"></div>
+      <span id="right-title"></span>
+      <div id="right-content"></div>
+    `;
+
     (window as any).marked = marked;
+    (window as any).MiniSearch = MiniSearch;
     (window as any).google = {
       script: {
         run: {
@@ -40,20 +59,69 @@ describe("Client-Side Logic (Index.html)", () => {
       "window",
       "document",
       "marked",
+      "MiniSearch",
       "google",
       cleanScript +
         `
       return {
         parseCustomMarkdown,
         prepareHtmlSrcdoc,
-        createDrivePreviewIframe
+        createDrivePreviewIframe,
+        renderManifest,
+        filterFiles
       };
     `
     );
-    const funcs = fn(window, document, marked, (window as any).google);
+    const funcs = fn(
+      window,
+      document,
+      marked,
+      MiniSearch,
+      (window as any).google
+    );
     parseCustomMarkdown = funcs.parseCustomMarkdown;
     prepareHtmlSrcdoc = funcs.prepareHtmlSrcdoc;
     createDrivePreviewIframe = funcs.createDrivePreviewIframe;
+    renderManifest = funcs.renderManifest;
+    filterFiles = funcs.filterFiles;
+  });
+
+  describe("MiniSearch Manifest Indexing (Ticket 01)", () => {
+    const sampleManifest = [
+      {
+        id: "f1",
+        name: "[3. Monsters] Muttering_Serpent_Statblock.md",
+        simpleName: "Muttering_Serpent_Statblock.md",
+        mimeType: "text/markdown"
+      },
+      {
+        id: "f2",
+        name: "[1. Floor Maps] Lapis_Observatory_Level_4.png",
+        simpleName: "Lapis_Observatory_Level_4.png",
+        mimeType: "image/png"
+      },
+      {
+        id: "f3",
+        name: "[3. Monsters] Orange_Sludge_Statblock.md",
+        simpleName: "Orange_Sludge_Statblock.md",
+        mimeType: "text/markdown"
+      }
+    ];
+
+    it("indexes manifest items into MiniSearch and filters with prefix matching and multi-term queries", () => {
+      renderManifest(sampleManifest);
+      const list = document.getElementById("file-list")!;
+      expect(list.children.length).toBe(3);
+
+      // Prefix & multi-token search across non-adjacent tokens (which simple .includes() fails on)
+      filterFiles("monsters serpent");
+      expect(list.children.length).toBe(1);
+      expect(list.textContent).toContain("Muttering_Serpent_Statblock.md");
+
+      // Clearing query restores full alphabetical manifest
+      filterFiles("");
+      expect(list.children.length).toBe(3);
+    });
   });
 
   describe("parseCustomMarkdown", () => {

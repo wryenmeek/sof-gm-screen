@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PROTOTYPE: Raspberry Pi Speech Chunk Classifier & Tiered Fallback State Machine</title>
+  <style>
+    :root {
+      --bg: #121316;
+      --panel: #1b1d22;
+      --border: #2e323b;
+      --text: #e6e8ec;
+      --muted: #9aa0ac;
+      --accent: #d4af37;
+      --ok: #2ea043;
+      --warn: #d29922;
+      --err: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      max-width: 1080px;
+      margin-inline: auto;
+    }
+    .proto-banner {
+      display: inline-block;
+      background: rgba(212, 175, 55, 0.15);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    h1 { margin: 0 0 8px 0; font-size: 24px; }
+    .question-box {
+      background: var(--panel);
+      border-left: 4px solid var(--accent);
+      padding: 14px 18px;
+      border-radius: 6px;
+      margin-bottom: 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .question-box strong { color: var(--text); }
+    .change-callout {
+      background: rgba(212, 175, 55, 0.12);
+      border: 1px solid var(--accent);
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .state-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .state-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .state-value {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge-ok { background: rgba(46, 160, 67, 0.2); color: #56d364; }
+    .badge-warn { background: rgba(210, 153, 34, 0.2); color: #e3b341; }
+    .badge-err { background: rgba(248, 81, 73, 0.2); color: #ff7b72; }
+    h2 { font-size: 17px; margin: 24px 0 10px 0; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    .btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    button {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.active-step {
+      border-color: var(--accent);
+      background: rgba(212, 175, 55, 0.18);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #121316;
+      border-color: var(--accent);
+      font-weight: 700;
+    }
+    .walkthrough-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .walkthrough-desc {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 0;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="proto-banner">Throwaway Logic Prototype — Ticket 06</div>
+  <h1>Raspberry Pi Speech Chunk Classifier & Tiered Fallback State Machine</h1>
+  <div class="question-box">
+    <strong>Question being answered:</strong> Since the Apps Script <code>*.googleusercontent.com</code> iframe blocks direct LAN <code>ws://</code> connections and evicts 1.5GB WebGPU model caches across subdomain rotations, how does moving intent classification onto the Raspberry Pi behave when local Pi inference is healthy (<strong>Tier 1</strong>), when local Pi inference lags or fails and automatically falls back to Gemini 2.5 Flash over HTTPS (<strong>Tier 2</strong>), or when the Raspberry Pi is completely offline and the GM Screen falls back to manual mixer/rule controls (<strong>Tier 3</strong>)?
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 1. PORTABLE PURE STATE MACHINE MODULE (No DOM references)             -->
+  <!-- ===================================================================== -->
+  <script id="portable-audio-intent-machine">
+    const TIER_1_LATENCY_BUDGET_MS = 1500;
+
+    function createInitialPipelineState() {
+      return {
+        activeTier: "TIER_1_PI_LOCAL", // TIER_1_PI_LOCAL | TIER_2_GEMINI_CLOUD | TIER_3_MANUAL_UI
+        piConnection: "ONLINE",        // ONLINE | OFFLINE
+        tier1Health: "HEALTHY",        // HEALTHY | SLOW_TIMEOUT | CRASHED
+        tier2Health: "HEALTHY",        // HEALTHY | OUTAGE
+        vadState: "SILENCE_GATED",     // SILENCE_GATED | SPEECH_CAPTURED
+        lastSpeechChunk: "None",
+        lastInferenceMs: 0,
+         cueTransport: "Apps Script CacheService / HTTPS Webhook",
+        tabletopMixerScore: "score_exploration (Channel 2)",
+        activeRuleCard: "None",
+        fallbackReason: "None — Tier 1 local Pi classifier operating within 1,500ms budget",
+        lastTransitionSummary: "Initial state: Raspberry Pi online, Silero VAD listening on Blue Snowball Cardioid #1."
+      };
+    }
+
+    function classifyPhrase(utterance) {
+      const lower = utterance.toLowerCase();
+      if (lower.includes("initiative") || lower.includes("attack")) {
+        return { intent: "MUSIC_CUE", mood: "combat", rule: null };
+      }
+      if (lower.includes("short rest") || lower.includes("camp")) {
+        return { intent: "MUSIC_CUE", mood: "rest", rule: null };
+      }
+      if (lower.includes("grappl")) {
+        return {
+          intent: "RULE_QUERY",
+          mood: null,
+          rule: "Grappling (PHB p.195): Athletics vs. Athletics/Acrobatics; target speed becomes 0."
+        };
+      }
+      if (lower.includes("misty step")) {
+        return {
+          intent: "RULE_QUERY",
+          mood: null,
+          rule: "Misty Step (2nd-level conjuration): Bonus Action, 30ft teleport to unoccupied space you can see."
+        };
+      }
+      return { intent: "BANTER", mood: null, rule: null };
+    }
+
+    function applyIntentToCockpit(next, classification, sourceLabel) {
+      if (classification.intent === "MUSIC_CUE" && classification.mood) {
+        next.tabletopMixerScore = "score_" + classification.mood + " (4s crossfade via " + sourceLabel + ")";
+        next.lastTransitionSummary =
+          sourceLabel + " classified MUSIC_CUE -> Tabletop Mixer crossfaded Channel 2 to score_" + classification.mood + ".";
+      } else if (classification.intent === "RULE_QUERY" && classification.rule) {
+        next.activeRuleCard = classification.rule + " [via " + sourceLabel + "]";
+        next.lastTransitionSummary =
+          sourceLabel + " classified RULE_QUERY -> Displayed Rule Card on GM Screen & Player Companion.";
+      } else {
+        next.lastTransitionSummary =
+          sourceLabel + " classified utterance as BANTER -> Ignored (no Mood Cue or Rule Card triggered).";
+      }
+    }
+
+    function reduceAudioPipeline(state, action) {
+      const next = Object.assign({}, state);
+      const seq = Math.floor(1000 + Math.random() * 9000);
+
+      switch (action.type) {
+        case "RESET":
+          return createInitialPipelineState();
+
+        case "SET_PI_OFFLINE":
+          next.piConnection = "OFFLINE";
+          next.activeTier = "TIER_3_MANUAL_UI";
+          next.vadState = "SILENCE_GATED";
+          next.cueTransport = "Local Browser Only (Pi Offline)";
+          next.fallbackReason = "Raspberry Pi heartbeat lost -> Automatically switched GM Screen to Tier 3 Manual Cue Mode.";
+          next.lastTransitionSummary = "Pi unplugged/offline: GM Screen automatically degraded to Tier 3 Manual Cue Mode.";
+          return next;
+
+        case "SET_TIER1_SLOW":
+          next.tier1Health = "SLOW_TIMEOUT";
+          next.lastTransitionSummary = "Simulated CPU thermal throttling on Raspberry Pi (local model > 1,500ms budget).";
+          return next;
+
+        case "SET_TIER1_CRASHED":
+          next.tier1Health = "CRASHED";
+          next.lastTransitionSummary = "Simulated local Pi classifier process crash (ONNX/LLM runtime error).";
+          return next;
+
+        case "SET_TIER2_OUTAGE":
+          next.tier2Health = "OUTAGE";
+          next.lastTransitionSummary = "Simulated Gemini Flash cloud API outage / WAN disconnect.";
+          return next;
+
+        case "SPEAK_UTTERANCE": {
+          if (next.piConnection === "OFFLINE") {
+            next.lastTransitionSummary =
+              "Ignored table speech ('" + action.utterance + "') because Raspberry Pi is OFFLINE. Use Tier 3 Manual Controls.";
+            return next;
+          }
+
+          next.vadState = "SPEECH_CAPTURED";
+          next.lastSpeechChunk = "chunk_" + seq + "_16kHz.wav ('" + action.utterance + "')";
+          const classification = classifyPhrase(action.utterance);
+
+          // Try Tier 1 (Local Pi Classifier) first if healthy
+          if (next.tier1Health === "HEALTHY") {
+            next.activeTier = "TIER_1_PI_LOCAL";
+            next.lastInferenceMs = 420;
+            next.fallbackReason = "None — Tier 1 local Pi classifier operating within 1,500ms budget";
+            applyIntentToCockpit(next, classification, "Tier 1 (Pi Local Model, 420ms)");
+            return next;
+          }
+
+          // Tier 1 exceeded 1500ms budget or crashed -> Automatic Failover to Tier 2 (Gemini Flash Cloud API)
+          const failReason =
+            next.tier1Health === "SLOW_TIMEOUT"
+              ? "Tier 1 local Pi model exceeded " + TIER_1_LATENCY_BUDGET_MS + "ms timeout (2,400ms)"
+              : "Tier 1 local Pi model process unavailable";
+
+          if (next.tier2Health === "HEALTHY") {
+            next.activeTier = "TIER_2_GEMINI_CLOUD";
+            next.lastInferenceMs = 780;
+            next.fallbackReason = failReason + " -> Auto-routed Speech Chunk to Tier 2 (Gemini 2.5 Flash HTTPS API).";
+            applyIntentToCockpit(next, classification, "Tier 2 Backup (Gemini 2.5 Flash API, 780ms)");
+            return next;
+          }
+
+          // Both Tier 1 and Tier 2 failed -> Degrade to Tier 3 Manual UI
+          next.activeTier = "TIER_3_MANUAL_UI";
+          next.lastInferenceMs = 0;
+          next.fallbackReason =
+            failReason + " AND Tier 2 Gemini API unreachable -> Degraded to Tier 3 Manual GM Screen Controls.";
+          next.lastTransitionSummary =
+            "Both Tier 1 (Pi Local) and Tier 2 (Gemini Cloud) failed -> Speech Chunk saved to disk for post-session recap; GM Screen switched to Tier 3 Manual Controls.";
+          return next;
+        }
+
+        case "MANUAL_GM_CUE": {
+          next.tabletopMixerScore = "score_" + action.mood + " (4s crossfade via Tier 3 Manual GM Button)";
+          next.lastTransitionSummary =
+            "GM clicked manual '" + action.mood + "' button in GM Screen -> Tabletop Mixer crossfaded Channel 2 immediately.";
+          return next;
+        }
+
+        case "MANUAL_GM_RULE": {
+          const classification = classifyPhrase(action.query);
+          next.activeRuleCard = (classification.rule || action.query) + " [via Tier 3 Manual MiniSearch]";
+          next.lastTransitionSummary =
+            "GM / Player searched '" + action.query + "' -> Displayed Rule Card immediately via in-memory MiniSearch.";
+          return next;
+        }
+
+        default:
+          return next;
+      }
+    }
+  </script>
+
+  <!-- ===================================================================== -->
+  <!-- 2. THROWAWAY INTERACTIVE SHELL                                        -->
+  <!-- ===================================================================== -->
+  <div id="change-banner" class="change-callout"></div>
+  <div id="state-container" class="state-grid"></div>
+
+  <h2>Free-Play Actions (Poke the State Model in Any Order)</h2>
+  <div class="btn-group">
+    <button onclick="dispatch({ type: 'SPEAK_UTTERANCE', utterance: 'Roll for initiative!' })">
+      🎙️ Speak Combat Trigger ("Roll for initiative!")
+    </button>
+    <button onclick="dispatch({ type: 'SPEAK_UTTERANCE', utterance: 'How does grappling work?' })">
+      🎙️ Speak Rule Question ("How does grappling work?")
+    </button>
+    <button onclick="dispatch({ type: 'SPEAK_UTTERANCE', utterance: 'Pass the pretzels please' })">
+      🎙️ Speak Table Banter ("Pass the pretzels please")
+    </button>
+  </div>
+  <div class="btn-group">
+    <button onclick="dispatch({ type: 'SET_TIER1_SLOW' })">
+      ⚠️ Simulate Pi Local Model Lag (&gt;1,500ms)
+    </button>
+    <button onclick="dispatch({ type: 'SET_TIER1_CRASHED' })">
+      💥 Simulate Pi Local Classifier Crash
+    </button>
+    <button onclick="dispatch({ type: 'SET_TIER2_OUTAGE' })">
+      🌐 Simulate Gemini Cloud API Outage
+    </button>
+    <button onclick="dispatch({ type: 'SET_PI_OFFLINE' })">
+      🔌 Simulate Raspberry Pi Unplugged
+    </button>
+    <button onclick="dispatch({ type: 'MANUAL_GM_CUE', mood: 'combat' })">
+      🎛️ Tier 3 Manual Button: Crossfade to Combat
+    </button>
+    <button onclick="dispatch({ type: 'MANUAL_GM_RULE', query: 'Misty Step' })">
+      📖 Tier 3 Manual Search: "Misty Step"
+    </button>
+    <button onclick="dispatch({ type: 'RESET' })">
+      🔄 Reset All Systems Healthy
+    </button>
+  </div>
+
+  <h2>Guided Walkthrough Scenarios</h2>
+  <div class="tabs" id="scenario-tabs"></div>
+  <div class="walkthrough-panel">
+    <p class="walkthrough-desc" id="scenario-desc"></p>
+    <div class="btn-group" id="scenario-steps"></div>
+  </div>
+
+  <script>
+    let currentState = createInitialPipelineState();
+    let currentScenarioIndex = 0;
+    let currentStepIndex = 0;
+
+    const SCENARIOS = [
+      {
+        title: "1. Happy Path (Tier 1 Local Pi Edge Classifier)",
+        desc: "Blue Snowball captures table speech -> Silero VAD slices a 16kHz Speech Chunk -> Local Pi classifier runs in 420ms and pushes a tiny JSON cue to the GM Screen.",
+        steps: [
+          { label: "Step 1: GM says 'Roll for initiative!'", action: { type: "SPEAK_UTTERANCE", utterance: "Roll for initiative!" } },
+          { label: "Step 2: Player asks 'How does grappling work?'", action: { type: "SPEAK_UTTERANCE", utterance: "How does grappling work?" } },
+          { label: "Step 3: Player says 'Pass the pretzels please'", action: { type: "SPEAK_UTTERANCE", utterance: "Pass the pretzels please" } }
+        ]
+      },
+      {
+        title: "2. Pi Local Model Lag -> Auto-Fallback to Tier 2 (Gemini Flash)",
+        desc: "If the local model on the Raspberry Pi exceeds the 1,500ms latency budget or crashes, the Pi automatically sends the voice-gated Speech Chunk to Gemini 2.5 Flash over HTTPS so cues still fire in <1s.",
+        steps: [
+          { label: "Step 1: Simulate Pi Local Classifier exceeding 1,500ms timeout", action: { type: "SET_TIER1_SLOW" } },
+          { label: "Step 2: GM says 'Roll for initiative!' (Watch Tier 2 take over)", action: { type: "SPEAK_UTTERANCE", utterance: "Roll for initiative!" } },
+          { label: "Step 3: Player asks 'How does grappling work?' (Served by Tier 2)", action: { type: "SPEAK_UTTERANCE", utterance: "How does grappling work?" } }
+        ]
+      },
+      {
+        title: "3. Double Failure / Pi Offline -> Tier 3 Manual GM Controls",
+        desc: "If both Tier 1 (Pi Local) and Tier 2 (Gemini Cloud) fail—or the Pi is unplugged—the GM Screen degrades gracefully to Tier 3 Manual Controls without interrupting Tabletop Mixer audio.",
+        steps: [
+          { label: "Step 1: Simulate Pi Local Classifier Crash", action: { type: "SET_TIER1_CRASHED" } },
+          { label: "Step 2: Simulate WAN / Gemini Cloud API Outage", action: { type: "SET_TIER2_OUTAGE" } },
+          { label: "Step 3: Speak 'Roll for initiative!' (Triggers Tier 3 fallback)", action: { type: "SPEAK_UTTERANCE", utterance: "Roll for initiative!" } },
+          { label: "Step 4: GM clicks Manual 'Combat' Mood Cue button", action: { type: "MANUAL_GM_CUE", mood: "combat" } },
+          { label: "Step 5: GM triggers 'Misty Step' via in-memory MiniSearch", action: { type: "MANUAL_GM_RULE", query: "Misty Step" } }
+        ]
+      }
+    ];
+
+    function badgeFor(val) {
+      if (val === "TIER_1_PI_LOCAL" || val === "ONLINE" || val === "HEALTHY") return "badge badge-ok";
+      if (val === "TIER_2_GEMINI_CLOUD" || val === "SLOW_TIMEOUT") return "badge badge-warn";
+      return "badge badge-err";
+    }
+
+    function render() {
+      document.getElementById("change-banner").innerHTML =
+        "<strong>Latest Event:</strong> " + currentState.lastTransitionSummary;
+
+      const fields = [
+        { label: "Active Classifier Tier", value: currentState.activeTier, badge: true },
+        { label: "Raspberry Pi Status", value: currentState.piConnection, badge: true },
+        { label: "Tier 1 (Pi Local Model)", value: currentState.tier1Health, badge: true },
+        { label: "Tier 2 (Gemini Flash Backup)", value: currentState.tier2Health, badge: true },
+        { label: "Silero VAD Gate", value: currentState.vadState, badge: false },
+        { label: "Last Speech Chunk (.wav)", value: currentState.lastSpeechChunk, badge: false },
+        { label: "Classifier Latency", value: currentState.lastInferenceMs ? currentState.lastInferenceMs + " ms" : "N/A", badge: false },
+        { label: "Cue Transport to GM Screen", value: currentState.cueTransport, badge: false },
+        { label: "Tabletop Mixer (Channel 2)", value: currentState.tabletopMixerScore, badge: false },
+        { label: "Active Rule Card", value: currentState.activeRuleCard, badge: false },
+        { label: "Fallback Status & Reason", value: currentState.fallbackReason, badge: false }
+      ];
+
+      document.getElementById("state-container").innerHTML = fields
+        .map(function (f) {
+          const content = f.badge
+            ? '<span class="' + badgeFor(f.value) + '">' + f.value + "</span>"
+            : f.value;
+          return (
+            '<div class="state-card">' +
+            '<div class="state-label">' + f.label + "</div>" +
+            '<div class="state-value">' + content + "</div>" +
+            "</div>"
+          );
+        })
+        .join("");
+
+      const tabsEl = document.getElementById("scenario-tabs");
+      tabsEl.innerHTML = SCENARIOS.map(function (s, idx) {
+        return (
+          '<button class="tab-btn ' +
+          (idx === currentScenarioIndex ? "active" : "") +
+          '" onclick="selectScenario(' +
+          idx +
+          ')">' +
+          s.title +
+          "</button>"
+        );
+      }).join("");
+
+      const scenario = SCENARIOS[currentScenarioIndex];
+      document.getElementById("scenario-desc").textContent = scenario.desc;
+      document.getElementById("scenario-steps").innerHTML = scenario.steps
+        .map(function (step, idx) {
+          return (
+            '<button class="' +
+            (idx === currentStepIndex ? "active-step" : "") +
+            '" onclick="runScenarioStep(' +
+            idx +
+            ')">' +
+            step.label +
+            "</button>"
+          );
+        })
+        .join("");
+    }
+
+    function dispatch(action) {
+      currentState = reduceAudioPipeline(currentState, action);
+      render();
+    }
+
+    function selectScenario(idx) {
+      currentScenarioIndex = idx;
+      currentStepIndex = 0;
+      currentState = createInitialPipelineState();
+      render();
+    }
+
+    function runScenarioStep(idx) {
+      currentStepIndex = idx + 1;
+      dispatch(SCENARIOS[currentScenarioIndex].steps[idx].action);
+    }
+
+    render();
+  </script>
+</body>
+</html>

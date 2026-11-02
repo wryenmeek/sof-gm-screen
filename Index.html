@@ -852,6 +852,7 @@
           });
           miniSearch.addAll(docs);
         }
+        AudioCache.preCacheManifest(files);
         filterFiles(document.getElementById("filter-input").value);
       }
 
@@ -1140,15 +1141,97 @@
       // Ticket 04: IndexedDB Audio Pre-Caching Engine
       const AudioCache = {
         dbName: "sof_audio_cache_v1",
+        storeName: "tracks",
         memoryStore: new Map(),
+        openDb_() {
+          return new Promise((resolve) => {
+            if (
+              typeof window === "undefined" ||
+              !window.indexedDB ||
+              typeof window.indexedDB.open !== "function"
+            ) {
+              resolve(null);
+              return;
+            }
+            try {
+              const req = window.indexedDB.open(this.dbName, 1);
+              req.onupgradeneeded = () => {
+                const db = req.result;
+                if (
+                  db &&
+                  db.objectStoreNames &&
+                  !db.objectStoreNames.contains(this.storeName)
+                ) {
+                  db.createObjectStore(this.storeName);
+                }
+              };
+              req.onsuccess = () => resolve(req.result || null);
+              req.onerror = () => resolve(null);
+            } catch (_e) {
+              resolve(null);
+            }
+          });
+        },
         async has(fileId) {
-          return this.memoryStore.has(fileId);
+          if (this.memoryStore.has(fileId)) return true;
+          const val = await this.get(fileId);
+          return val !== undefined && val !== null;
         },
         async get(fileId) {
-          return this.memoryStore.get(fileId);
+          if (this.memoryStore.has(fileId)) {
+            return this.memoryStore.get(fileId);
+          }
+          const db = await this.openDb_();
+          if (!db) return undefined;
+          return new Promise((resolve) => {
+            try {
+              const tx = db.transaction(this.storeName, "readonly");
+              const store = tx.objectStore(this.storeName);
+              const req = store.get(fileId);
+              req.onsuccess = () => {
+                if (req.result !== undefined && req.result !== null) {
+                  this.memoryStore.set(fileId, req.result);
+                }
+                resolve(req.result);
+              };
+              req.onerror = () => resolve(undefined);
+            } catch (_e) {
+              resolve(undefined);
+            }
+          });
         },
         async set(fileId, arrayBuffer) {
           this.memoryStore.set(fileId, arrayBuffer);
+          const db = await this.openDb_();
+          if (!db) return;
+          return new Promise((resolve) => {
+            try {
+              const tx = db.transaction(this.storeName, "readwrite");
+              const store = tx.objectStore(this.storeName);
+              const req = store.put(arrayBuffer, fileId);
+              req.onsuccess = () => resolve();
+              req.onerror = () => resolve();
+            } catch (_e) {
+              resolve();
+            }
+          });
+        },
+        async fetchAudioBytes_(fileMeta) {
+          const url =
+            (fileMeta && fileMeta.downloadUrl) ||
+            "https://drive.google.com/uc?export=download&id=" + fileMeta.id;
+          if (
+            typeof window !== "undefined" &&
+            typeof window.fetch === "function"
+          ) {
+            try {
+              const res = await window.fetch(url);
+              if (res && res.ok && typeof res.arrayBuffer === "function") {
+                return await res.arrayBuffer();
+              }
+            } catch (_e) {}
+          }
+          return new ArrayBuffer(0);
         },
         async preCacheManifest(files) {
           const audioFiles = (files || []).filter(
@@ -1160,7 +1243,8 @@
           for (let i = 0; i < audioFiles.length; i++) {
             const af = audioFiles[i];
             if (!(await this.has(af.id))) {
-              await this.set(af.id, new ArrayBuffer(0));
+              const bytes = await this.fetchAudioBytes_(af);
+              await this.set(af.id, bytes);
             }
             ready++;
           }
@@ -1174,10 +1258,36 @@
       };
 
       // Ticket 05 & 06: 3-Channel Web Audio API Mixer, Gain Ducking & Sidecar Logger
-      function createGainNode_() {
+      function createGainNode_(ctx, initialGain = 1.0) {
+        if (ctx && typeof ctx.createGain === "function") {
+          const nativeNode = ctx.createGain();
+          if (ctx.destination && typeof nativeNode.connect === "function") {
+            nativeNode.connect(ctx.destination);
+          }
+          const origSet =
+            nativeNode.gain &&
+            typeof nativeNode.gain.setValueAtTime === "function"
+              ? nativeNode.gain.setValueAtTime.bind(nativeNode.gain)
+              : null;
+          const origRamp =
+            nativeNode.gain &&
+            typeof nativeNode.gain.linearRampToValueAtTime === "function"
+              ? nativeNode.gain.linearRampToValueAtTime.bind(nativeNode.gain)
+              : null;
+          nativeNode.gain.value = initialGain;
+          nativeNode.gain.setValueAtTime = function (val, time) {
+            this.value = val;
+            if (origSet) origSet(val, time);
+          };
+          nativeNode.gain.linearRampToValueAtTime = function (val, time) {
+            this.value = val;
+            if (origRamp) origRamp(val, time);
+          };
+          return nativeNode;
+        }
         return {
           gain: {
-            value: 1.0,
+            value: initialGain,
             setValueAtTime(val) {
               this.value = val;
             },
@@ -1189,22 +1299,54 @@
       }
 
       const TabletopMixer = {
-        channel1Gain: createGainNode_(),
-        channel2Gain: createGainNode_(),
-        channel3Gain: createGainNode_(),
+        ctx: null,
+        channel1Gain: createGainNode_(null, 0.2),
+        channel2Gain: createGainNode_(null, 1.0),
+        channel3Gain: createGainNode_(null, 1.0),
         timeline: [],
         duckTimer: null,
         init() {
-          this.channel1Gain = createGainNode_();
-          this.channel1Gain.gain.value = 0.2;
-          this.channel2Gain = createGainNode_();
-          this.channel2Gain.gain.value = 1.0;
-          this.channel3Gain = createGainNode_();
-          this.channel3Gain.gain.value = 1.0;
+          const AudioCtxCtor =
+            typeof window !== "undefined"
+              ? window.AudioContext || window.webkitAudioContext
+              : null;
+          this.ctx =
+            typeof AudioCtxCtor === "function" ? new AudioCtxCtor() : null;
+          this.channel1Gain = createGainNode_(this.ctx, 0.2);
+          this.channel2Gain = createGainNode_(this.ctx, 1.0);
+          this.channel3Gain = createGainNode_(this.ctx, 1.0);
           this.timeline = [];
         },
+        now_() {
+          return this.ctx && typeof this.ctx.currentTime === "number"
+            ? this.ctx.currentTime
+            : 0;
+        },
+        playBufferOnChannel_(trackId, gainNode, loop = false) {
+          if (
+            !this.ctx ||
+            typeof this.ctx.decodeAudioData !== "function" ||
+            typeof this.ctx.createBufferSource !== "function"
+          ) {
+            return;
+          }
+          const rawBuf = AudioCache.memoryStore.get(trackId);
+          if (!rawBuf || rawBuf.byteLength === 0) return;
+          try {
+            const copy = rawBuf.slice(0);
+            this.ctx.decodeAudioData(copy, (decoded) => {
+              if (!decoded) return;
+              const src = this.ctx.createBufferSource();
+              src.buffer = decoded;
+              src.loop = loop;
+              if (typeof src.connect === "function") src.connect(gainNode);
+              if (typeof src.start === "function") src.start(0);
+            });
+          } catch (_e) {}
+        },
         playAmbience(trackId) {
-          this.channel1Gain.gain.setValueAtTime(0.2, 0);
+          this.channel1Gain.gain.setValueAtTime(0.2, this.now_());
+          this.playBufferOnChannel_(trackId, this.channel1Gain, true);
           this.timeline.push({
             timestamp: Date.now(),
             track: trackId,
@@ -1214,8 +1356,10 @@
           });
         },
         crossfadeScore(trackId) {
-          this.channel2Gain.gain.linearRampToValueAtTime(0.0, 2.0);
-          this.channel2Gain.gain.linearRampToValueAtTime(1.0, 4.0);
+          const now = this.now_();
+          this.channel2Gain.gain.linearRampToValueAtTime(0.0, now + 2.0);
+          this.channel2Gain.gain.linearRampToValueAtTime(1.0, now + 4.0);
+          this.playBufferOnChannel_(trackId, this.channel2Gain, true);
           this.timeline.push({
             timestamp: Date.now(),
             track: trackId,
@@ -1227,7 +1371,11 @@
         playSfx(sfxId) {
           const DUCKED_GAIN = 0.4;
           const NORMAL_GAIN = 1.0;
-          this.channel2Gain.gain.linearRampToValueAtTime(DUCKED_GAIN, 0.1);
+          this.channel2Gain.gain.linearRampToValueAtTime(
+            DUCKED_GAIN,
+            this.now_() + 0.1
+          );
+          this.playBufferOnChannel_(sfxId, this.channel3Gain, false);
           this.timeline.push({
             timestamp: Date.now(),
             track: sfxId,
@@ -1237,7 +1385,10 @@
           });
           if (this.duckTimer) clearTimeout(this.duckTimer);
           this.duckTimer = setTimeout(() => {
-            this.channel2Gain.gain.linearRampToValueAtTime(NORMAL_GAIN, 0.4);
+            this.channel2Gain.gain.linearRampToValueAtTime(
+              NORMAL_GAIN,
+              this.now_() + 0.4
+            );
             this.timeline.push({
               timestamp: Date.now(),
               track: sfxId,
@@ -1302,6 +1453,7 @@
       let pttTimer = null;
       let ruleCardTimer = null;
       let activeRuleCard = null;
+      let activeSpeechRecognition = null;
 
       function selectPlayerIdentity(playerName) {
         try {
@@ -1315,6 +1467,22 @@
         if (modal) modal.style.display = "none";
       }
 
+      function matchSpokenRuleQuery_(transcript) {
+        if (!transcript) return null;
+        const lower = transcript.toLowerCase();
+        const keys = Object.keys(DEFAULT_GLOSSARY);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          if (lower.includes(key)) {
+            return {
+              key: key,
+              entry: DEFAULT_GLOSSARY[key]
+            };
+          }
+        }
+        return null;
+      }
+
       function triggerPtt() {
         const btn = document.getElementById("ptt-btn");
         if (!btn) return;
@@ -1324,6 +1492,43 @@
         }
         btn.classList.add("listening");
         btn.textContent = "🔴 Listening (4s)...";
+
+        const SpeechRecognitionCtor =
+          typeof window !== "undefined"
+            ? window.SpeechRecognition || window.webkitSpeechRecognition
+            : null;
+        if (typeof SpeechRecognitionCtor === "function") {
+          try {
+            activeSpeechRecognition = new SpeechRecognitionCtor();
+            activeSpeechRecognition.continuous = false;
+            activeSpeechRecognition.interimResults = false;
+            activeSpeechRecognition.lang = "en-US";
+            activeSpeechRecognition.onresult = (event) => {
+              const transcript =
+                event &&
+                event.results &&
+                event.results[0] &&
+                event.results[0][0] &&
+                event.results[0][0].transcript
+                  ? event.results[0][0].transcript
+                  : "";
+              const matched = matchSpokenRuleQuery_(transcript);
+              if (matched) {
+                showRuleCard(
+                  matched.entry.title,
+                  matched.entry.text,
+                  transcript.toLowerCase()
+                );
+              }
+              stopPtt();
+            };
+            activeSpeechRecognition.onerror = () => stopPtt();
+            if (typeof activeSpeechRecognition.start === "function") {
+              activeSpeechRecognition.start();
+            }
+          } catch (_e) {}
+        }
+
         if (pttTimer) clearTimeout(pttTimer);
         pttTimer = setTimeout(() => {
           stopPtt();
@@ -1332,6 +1537,15 @@
 
       function stopPtt() {
         if (pttTimer) clearTimeout(pttTimer);
+        if (
+          activeSpeechRecognition &&
+          typeof activeSpeechRecognition.stop === "function"
+        ) {
+          try {
+            activeSpeechRecognition.stop();
+          } catch (_e) {}
+        }
+        activeSpeechRecognition = null;
         const btn = document.getElementById("ptt-btn");
         if (btn) {
           btn.classList.remove("listening");
@@ -1389,6 +1603,14 @@
       }
 
       // Ticket 12: In-Browser WebGPU Gemma 4 E2B Audio Intent Classifier Router
+      function hasWebGpuSupport() {
+        return Boolean(
+          typeof window !== "undefined" &&
+            window.navigator &&
+            window.navigator.gpu
+        );
+      }
+
       function handleAudioIntent(intentPayload) {
         if (!intentPayload || !intentPayload.intent) return;
         if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
@@ -1406,6 +1628,17 @@
           showRuleCard(matched.title, matched.text, key);
         }
       }
+
+      window.addEventListener("message", (event) => {
+        if (
+          event &&
+          event.data &&
+          event.data.type === "SOF_AUDIO_INTENT" &&
+          event.data.payload
+        ) {
+          handleAudioIntent(event.data.payload);
+        }
+      });
     </script>
   </body>
 </html>

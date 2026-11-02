@@ -8,8 +8,12 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
   let AudioCache: any;
   let TabletopMixer: any;
   let handleAudioIntent: any;
+  let hasWebGpuSupport: any;
   let flushAudioTimeline: any;
   let saveAudioTimelineSpy: ReturnType<typeof vi.fn>;
+  let idbStore: Map<string, ArrayBuffer>;
+  let idbOpenSpy: ReturnType<typeof vi.fn>;
+  let audioCtxCreateGainSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -35,6 +39,52 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
         </div>
       </div>
     `;
+
+    idbStore = new Map<string, ArrayBuffer>();
+    idbOpenSpy = vi.fn().mockImplementation(() => {
+      const req: any = {
+        result: {
+          objectStoreNames: { contains: () => true },
+          createObjectStore: vi.fn(),
+          transaction: () => ({
+            objectStore: () => ({
+              get: (key: string) => {
+                const getReq: any = { result: idbStore.get(key) };
+                setTimeout(() => getReq.onsuccess && getReq.onsuccess(), 0);
+                return getReq;
+              },
+              put: (val: ArrayBuffer, key: string) => {
+                idbStore.set(key, val);
+                const putReq: any = {};
+                setTimeout(() => putReq.onsuccess && putReq.onsuccess(), 0);
+                return putReq;
+              }
+            })
+          })
+        }
+      };
+      Promise.resolve().then(() => {
+        if (req.onsuccess) req.onsuccess();
+      });
+      return req;
+    });
+    (window as any).indexedDB = { open: idbOpenSpy };
+
+    audioCtxCreateGainSpy = vi.fn().mockImplementation(() => ({
+      connect: vi.fn(),
+      gain: {
+        value: 1.0,
+        setValueAtTime: vi.fn(),
+        linearRampToValueAtTime: vi.fn()
+      }
+    }));
+    (window as any).AudioContext = class MockAudioContext {
+      currentTime = 10.0;
+      destination = {};
+      createGain = audioCtxCreateGainSpy;
+      decodeAudioData = vi.fn();
+      createBufferSource = vi.fn();
+    };
 
     saveAudioTimelineSpy = vi.fn();
     (window as any).marked = marked;
@@ -79,6 +129,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
         AudioCache: typeof AudioCache !== "undefined" ? AudioCache : undefined,
         TabletopMixer: typeof TabletopMixer !== "undefined" ? TabletopMixer : undefined,
         handleAudioIntent: typeof handleAudioIntent !== "undefined" ? handleAudioIntent : undefined,
+        hasWebGpuSupport: typeof hasWebGpuSupport !== "undefined" ? hasWebGpuSupport : undefined,
         flushAudioTimeline: typeof flushAudioTimeline !== "undefined" ? flushAudioTimeline : undefined
       };
     `
@@ -93,35 +144,45 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     AudioCache = exported.AudioCache;
     TabletopMixer = exported.TabletopMixer;
     handleAudioIntent = exported.handleAudioIntent;
+    hasWebGpuSupport = exported.hasWebGpuSupport;
     flushAudioTimeline = exported.flushAudioTimeline;
   });
 
   describe("Ticket 04: IndexedDB Audio Pre-Caching Engine", () => {
-    it("stores and retrieves binary audio ArrayBuffers keyed by Drive fileId and updates progress badge", async () => {
+    it("persists binary audio ArrayBuffers through window.indexedDB and updates progress badge", async () => {
       expect(AudioCache).toBeDefined();
       const fileId = "1hK0jBXVU6Mz47pFSr3M23Y6ZFiCHR8BH";
       const buf = new ArrayBuffer(512);
 
-      expect(await AudioCache.has(fileId)).toBe(false);
-      await AudioCache.set(fileId, buf);
-      expect(await AudioCache.has(fileId)).toBe(true);
+      const hasPromise = AudioCache.has(fileId);
+      await vi.runAllTimersAsync();
+      expect(await hasPromise).toBe(false);
+
+      const setPromise = AudioCache.set(fileId, buf);
+      await vi.runAllTimersAsync();
+      await setPromise;
+      expect(idbOpenSpy).toHaveBeenCalledWith("sof_audio_cache_v1", 1);
+      expect(idbStore.get(fileId)?.byteLength).toBe(512);
 
       const loaded = await AudioCache.get(fileId);
       expect(loaded?.byteLength).toBe(512);
 
-      await AudioCache.preCacheManifest([
+      const preCachePromise = AudioCache.preCacheManifest([
         { id: "a1", name: "Age_of_Sail.mp3", mimeType: "audio/mpeg" },
         { id: "a2", name: "Combat_Score.mp3", mimeType: "audio/mpeg" }
       ]);
+      await vi.runAllTimersAsync();
+      await preCachePromise;
       const badge = document.getElementById("audio-cache-status")!;
       expect(badge.textContent).toContain("Audio: 2/2 ready");
     });
   });
 
   describe("Ticket 05: Web Audio API 3-Channel Mixer & Gain Ducking", () => {
-    it("ducks Channel 2 score gain by -8dB (0.4) when Channel 3 SFX plays and restores to 1.0 after 1.5s", () => {
+    it("instantiates native AudioContext GainNodes, ducks Channel 2 score by -8dB (0.4), and restores to 1.0 after 1.5s", () => {
       expect(TabletopMixer).toBeDefined();
       TabletopMixer.init();
+      expect(audioCtxCreateGainSpy).toHaveBeenCalledTimes(3);
       expect(TabletopMixer.channel2Gain.gain.value).toBe(1.0);
 
       TabletopMixer.playSfx("cannon_barrage_01");
@@ -164,8 +225,12 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
   });
 
   describe("Ticket 12: In-Browser WebGPU Gemma 4 E2B Audio Intent Classifier", () => {
-    it("routes MUSIC_CUE intent directly to TabletopMixer.crossfadeScore and RULE_QUERY to rule card HUD", () => {
+    it("detects WebGPU support and routes MUSIC_CUE and RULE_QUERY intents via direct call or postMessage", () => {
       expect(handleAudioIntent).toBeDefined();
+      expect(hasWebGpuSupport).toBeDefined();
+      (window.navigator as any).gpu = {};
+      expect(hasWebGpuSupport()).toBe(true);
+
       TabletopMixer.init();
 
       handleAudioIntent({

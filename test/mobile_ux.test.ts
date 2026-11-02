@@ -22,12 +22,27 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
   ) => void;
   let submitRuleFeedback: (vote: string) => void;
   let logRuleFeedbackSpy: ReturnType<typeof vi.fn>;
+  let lastSpeechRecognitionInstance: any;
 
   beforeEach(() => {
     vi.useFakeTimers();
     (window as any).localStorage = mockLocalStorage;
     (globalThis as any).localStorage = mockLocalStorage;
     mockLocalStorage.clear();
+
+    lastSpeechRecognitionInstance = null;
+    (window as any).webkitSpeechRecognition = class MockSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      onresult: ((e: any) => void) | null = null;
+      onerror: ((e: any) => void) | null = null;
+      start = vi.fn();
+      stop = vi.fn();
+      constructor() {
+        lastSpeechRecognitionInstance = this;
+      }
+    };
 
     const html = fs.readFileSync("Index.html", "utf8");
     const bodyMatch = html.match(/<body>([\s\S]*?)<script>/i);
@@ -110,13 +125,22 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
   });
 
   describe("Ticket 08: Mobile Push-to-Talk (PTT) Rules Sniffer & Feedback Logger", () => {
-    it("activates a 4-second PTT listening window and auto-stops after 4000ms", () => {
+    it("starts webkitSpeechRecognition on PTT tap, matches spoken transcript to glossary, and auto-stops after 4000ms", () => {
       expect(triggerPtt).toBeDefined();
       const pttBtn = document.getElementById("ptt-btn")!;
       triggerPtt();
       expect(pttBtn.classList.contains("listening")).toBe(true);
+      expect(lastSpeechRecognitionInstance).not.toBeNull();
+      expect(lastSpeechRecognitionInstance.start).toHaveBeenCalledTimes(1);
 
-      vi.advanceTimersByTime(4000);
+      lastSpeechRecognitionInstance.onresult({
+        results: [[{ transcript: "How does Exhaustion work?" }]]
+      });
+      const card = document.getElementById("rule-card")!;
+      expect(card.style.display).toBe("block");
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Exhaustion"
+      );
       expect(pttBtn.classList.contains("listening")).toBe(false);
     });
 

@@ -6,7 +6,7 @@ In-session full-text search across session dossiers, creature statblocks, rules 
 
 The GM Screen requires sub-millisecond search across thousands of campaign entities during active combat. An earlier exploration considered running WASM SQLite in the browser and serializing `.sqlite` database files to Google Drive via Base64 strings. However:
 
-1. Pushing multi-megabyte binary database blobs back and forth across `google.script.run` causes severe serialization latency and memory exhaustion, directly repeating the failure mode resolved for battle maps in [ADR-0004](0004-google-edge-cdn-image-delivery.md).
+1. Pushing multi-megabyte binary database blobs back and forth across `google.script.run` causes severe serialization latency and memory exhaustion, directly repeating the failure mode resolved for Floor Maps in [ADR-0004](0004-google-edge-cdn-image-delivery.md).
 2. The campaign's primary source of truth consists of modular Markdown documents, Google Docs, and HTML encounter dossiers organized by session folders in Google Drive. Forcing this content into SQLite introduces an unnecessary offline build pipeline to parse and serialize document text into relational SQL tables.
 
 ## Decision

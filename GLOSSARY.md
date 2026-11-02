@@ -53,3 +53,41 @@ _Avoid_: Battlemap, dungeon map, plan, diagram.
 **Handout**:
 A player-facing document, prop, translated script, or companion handout referenced during play or linked from an Encounter Dossier.
 _Avoid_: Player doc, companion handout, attachment, paper, handout file.
+
+### Audio, Companion & Campaign Governance
+
+**Tabletop Mixer**:
+The multi-channel audio mixing engine managing continuous ambient loops, thematic musical scores with crossfades, and one-shot sound effects with automatic score ducking during a session.
+_Avoid_: Soundboard, music player, audio controller, synthesizer.
+
+**Mood Cue**:
+A named thematic state transition—such as exploration, tension, combat, or rest—that triggers a musical score crossfade in the Tabletop Mixer.
+_Avoid_: Music trigger, track switch, vibe shift, playlist cue.
+
+**Audio Timeline Sidecar**:
+The chronological event log recording mixer state transitions and track cues during play for post-session recap synchronization.
+_Avoid_: Audio history, playback log, track history, mixer dump.
+
+**Player Companion**:
+The player-facing interface displaying character identity selection, voice rule lookups, and dismissible rule cards without exposing GM-only encounter notes.
+_Avoid_: Mobile app, player view, phone mode, mini screen.
+
+**Push-to-Talk Rules Sniffer**:
+The on-demand voice query listener activated from the Player Companion to capture a spoken rules question and match it against the campaign rules glossary.
+_Avoid_: Voice assistant, always-on mic, speech bot, rule search bar.
+
+**Rule Card**:
+A dismissible quick-reference card displaying a matched game mechanic, spell, or condition summary with player feedback controls.
+_Avoid_: Tooltip, popup, rule modal, glossary toast.
+
+**Speech Chunk**:
+A timestamped, voice-gated audio segment containing active table speech stripped of room silence.
+_Avoid_: Audio clip, recording slice, voice snippet, raw stream.
+
+**Attendance Quorum**:
+The session readiness status calculated from player RSVPs against the campaign minimum attendance threshold and core storyline locks.
+_Avoid_: Headcount, invite check, RSVP tally, roster check.
+
+**Narrative Promise**:
+An in-session GM commitment—such as a pending rules adjudication, custom crafting timer, NPC favor, or plot debt—recorded in Table Notes and tracked as an actionable post-session prep task.
+_Avoid_: Todo item, reminder, action item, quest log.

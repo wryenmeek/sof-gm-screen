@@ -1,0 +1,8 @@
+# Edge Raspberry Pi Classifier & 3-Tier Automatic Fallback
+
+Live audio intent classification (`MUSIC_CUE`, `RULE_QUERY`, `BANTER`) runs on the Raspberry Pi over Silero VAD-gated 16kHz Speech Chunks rather than inside the GM Screen browser tab, governed by a 3-tier automatic fallback state machine and delivered via Apps Script `doPost(e)` + `CacheService`. Google Apps Script's cross-origin `https://n-<dynamic>-script.googleusercontent.com` iframe rotates subdomains across deployments (orphaning 1.5GB WebGPU model caches in `IndexedDB`), omits `allow="webgpu; microphone; local-network-access"`, and blocks direct LAN `ws://192.168.x.x` connections via Mixed Content and Chrome Local Network Access policies. Instead:
+
+1. **Tier 1 (Primary Edge):** The Raspberry Pi slices active speech into `audio_chunks/chunk_NNNN_start_end.wav` using Silero VAD and runs local classification with a strict 1,500ms timeout budget.
+2. **Tier 2 (Cloud Fallback):** If the local Pi model exceeds 1,500ms, errors, or is disabled, the Pi automatically sends the voice-gated Speech Chunk to the Gemini 2.5 Flash structured-JSON API over outbound HTTPS.
+3. **Tier 3 (Manual UI Fallback):** If both Tier 1 and Tier 2 fail or the Pi is offline, the GM Screen exposes 1-click Mood Cue buttons (`Exploration`, `Tension`, `Combat`, `Rest`) and instant MiniSearch Rule Card lookup.
+4. **Zero-Tunnel Cue Transport:** The Pi posts the resulting 80-byte JSON cue over outbound HTTPS to Apps Script `doPost(e)` (authenticated with `SOF_GM_KEY`), which writes to `CacheService` (`sof_latest_audio_cue`) for the GM Screen to consume without requiring LAN TLS certificates or WebRTC audio streaming.

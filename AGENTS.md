@@ -2,6 +2,10 @@
 
 ## Agent skills
 
+### Engineering workflow
+
+End-to-end flow for charting foggy initiatives (`wayfinder`), grilling designs (`grill-with-docs`), publishing specs (`to-spec`) and tracer-bullet tickets (`to-tickets`), implementing via TDD worktrees (`implement`, `implement-spec`), and running two-axis reviews (`code-review`). Read `docs/agents/workflow.md` before planning, speccing, ticketing, or implementing work.
+
 ### Issue tracker
 
 Issues and specs for this repo live as GitHub issues. See `docs/agents/issue-tracker.md`.

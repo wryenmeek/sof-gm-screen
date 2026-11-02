@@ -236,11 +236,11 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   };
 
   const SpreadsheetApp = {
-    openById: vi.fn((_id: string) => ({
-      getSheetByName: vi.fn((_name: string) => ({
+    openById: vi.fn((_id: string): any => ({
+      getSheetByName: vi.fn((_name: string): any => ({
         appendRow: vi.fn((row: any[]) => sheetRows.push(row))
       })),
-      insertSheet: vi.fn((_name: string) => ({
+      insertSheet: vi.fn((_name: string): any => ({
         appendRow: vi.fn((row: any[]) => sheetRows.push(row))
       }))
     }))

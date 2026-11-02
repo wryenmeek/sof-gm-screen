@@ -374,13 +374,13 @@ A resonant construct of bronze and coral.
   });
 
   describe("On-Demand Narrative Promise Extractor Trigger (Ticket 11 / #25)", () => {
-    it("renders #extract-promises-btn in Table Notes header, calls extractNarrativePromises(currentSessionDate), and updates #notes-status", () => {
+    it("renders #extract-promises-btn in Table Notes header, saves notes first, calls extractNarrativePromises(currentSessionDate), and updates #notes-status", () => {
       const harness = setupClientHarness({
+        gmKey: "gm-secret-42",
         extractedPromisesResult: {
           sessionDate: "2026-10-31",
           extractedCount: 3,
           createdCount: 3,
-          created: 3,
           tasks: [
             { id: "t1", title: "Promise A" },
             { id: "t2", title: "Promise B" },
@@ -389,6 +389,9 @@ A resonant construct of bronze and coral.
         }
       });
 
+      const clearCacheBtn = document.getElementById("clear-audio-cache-btn");
+      expect(clearCacheBtn).not.toBeNull();
+
       const btn = document.getElementById(
         "extract-promises-btn"
       ) as HTMLButtonElement | null;
@@ -396,9 +399,20 @@ A resonant construct of bronze and coral.
       expect(btn!.textContent).toContain("✨ Extract Promises to Tasks");
       expect(harness.triggerPromiseExtraction).toBeDefined();
 
+      const scratchpadEl = document.getElementById(
+        "scratchpad"
+      ) as HTMLTextAreaElement;
+      scratchpadEl.value = "# Session Notes\n- Promise: Pog cloak";
+
       harness.triggerPromiseExtraction();
+      expect(harness.saveScratchpadNotesSpy).toHaveBeenCalledWith(
+        "2026-10-31",
+        "# Session Notes\n- Promise: Pog cloak",
+        "gm-secret-42"
+      );
       expect(harness.extractNarrativePromisesSpy).toHaveBeenCalledWith(
-        "2026-10-31"
+        "2026-10-31",
+        "gm-secret-42"
       );
       const statusEl =
         document.getElementById("notes-status") ||

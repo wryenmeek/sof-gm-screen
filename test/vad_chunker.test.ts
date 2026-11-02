@@ -223,4 +223,47 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
     expect(res.webhook_dispatched).toBe(false);
     expect(res.webhook_payload).toBeNull();
   });
+
+  it("uses default_tier2_gemini_classify with Gemini 2.5 Flash responseSchema when tier2_fn is None and GEMINI_API_KEY is set", () => {
+    const pySnippet = [
+      "import io, json, os, urllib.request",
+      "from scripts.rpi_vad_chunker import classify_and_dispatch_chunk",
+      "os.environ['GEMINI_API_KEY'] = 'test-gemini-key'",
+      "captured = {}",
+      "class FakeResp:",
+      "  def __enter__(self): return self",
+      "  def __exit__(self, *a): pass",
+      "  def read(self): return json.dumps({'candidates': [{'content': {'parts': [{'text': json.dumps({'intent': 'MUSIC_CUE', 'mood': 'Combat', 'rule': None})}]}}]}).encode('utf-8')",
+      "def fake_urlopen(req, timeout=10.0):",
+      "  captured['url'] = req.full_url",
+      "  captured['body'] = json.loads(req.data.decode('utf-8'))",
+      "  return FakeResp()",
+      "urllib.request.urlopen = fake_urlopen",
+      "res = classify_and_dispatch_chunk('nonexistent.wav', tier1_fn=None, tier2_fn=None)",
+      "print(json.dumps({'res': res, 'captured': captured}))"
+    ].join("\n");
+
+    const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 15000
+    }).trim();
+
+    const parsed = JSON.parse(out);
+    expect(parsed.res.activeTier).toBe("TIER_2_GEMINI_CLOUD");
+    expect(parsed.res.cue).toEqual({
+      intent: "MUSIC_CUE",
+      mood: "Combat",
+      rule: null
+    });
+    expect(parsed.captured.url).toContain(
+      "gemini-2.5-flash:generateContent?key=test-gemini-key"
+    );
+    expect(parsed.captured.body.generationConfig.responseMimeType).toBe(
+      "application/json"
+    );
+    expect(
+      parsed.captured.body.generationConfig.responseSchema.properties.intent
+    ).toBeDefined();
+  });
 });

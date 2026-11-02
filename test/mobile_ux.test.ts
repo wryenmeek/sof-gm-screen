@@ -60,10 +60,12 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(companionHarness.initCompanionState).toBeDefined();
       (window as any).onload();
 
-      // 1. Companion isolation: body has companion-only-mode, skips getSessionManifest & getScratchpadNotes, calls getRulesGlossary
+      // 1. Companion isolation: body has companion-only-mode, removes #sidebar & #workspace DOM nodes, skips getSessionManifest & getScratchpadNotes, calls getRulesGlossary
       expect(document.body.classList.contains("companion-only-mode")).toBe(
         true
       );
+      expect(document.getElementById("sidebar")).toBeNull();
+      expect(document.getElementById("workspace")).toBeNull();
       expect(companionHarness.getSessionManifestSpy).not.toHaveBeenCalled();
       expect(companionHarness.getScratchpadNotesSpy).not.toHaveBeenCalled();
       expect(companionHarness.getRulesGlossarySpy).toHaveBeenCalledWith(

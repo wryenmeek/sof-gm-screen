@@ -37,6 +37,8 @@ function doGet(e) {
   template.sessionDate = sessionDate;
   template.viewMode =
     e && e.parameter && e.parameter.view === "companion" ? "companion" : "gm";
+  template.gmKey =
+    e && e.parameter && e.parameter.gmKey ? e.parameter.gmKey : "";
   return template
     .evaluate()
     .setTitle("Sea of Fortune GM Dashboard - " + sessionDate)
@@ -574,6 +576,14 @@ function logRuleFeedback(data) {
     let sheet = ss.getSheetByName("Rules_Helper_Feedback");
     if (!sheet) {
       sheet = ss.insertSheet("Rules_Helper_Feedback");
+      sheet.appendRow([
+        "Timestamp ISO",
+        "Session Date",
+        "Player Identity",
+        "Raw Query Phrase",
+        "Matched Rule Title",
+        "Vote"
+      ]);
     }
     sheet.appendRow([
       payload.timestamp,
@@ -694,7 +704,6 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
     }
     return {
       status: "SKIPPED_NO_GUESTS",
-      confirmed: 0,
       confirmedCount: 0,
       quorumMet: false
     };
@@ -753,7 +762,6 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
     return {
       status: "RESCHEDULED",
       quorumMet: false,
-      confirmed: confirmed.length,
       confirmedCount: confirmed.length,
       rescheduledTo: nextStart.toISOString()
     };
@@ -786,7 +794,6 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
   return {
     status: "QUORUM_MET",
     quorumMet: true,
-    confirmed: confirmed.length,
     confirmedCount: confirmed.length,
     weather: hexWeather,
     inGameDate: inGameDate,
@@ -919,7 +926,6 @@ function extractNarrativePromises(sessionDate, gmKey) {
     sessionDate: sessionDate,
     extractedCount: extracted.length,
     createdCount: createdTasks.length,
-    created: createdTasks.length,
     tasks: createdTasks
   };
 }

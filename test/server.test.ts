@@ -214,7 +214,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(smite.summary).toContain("2d8 radiant damage");
     });
 
-    it("appends [timestamp, sessionDate, player, phrase, cardTitle, vote] to Rules_Helper_Feedback sheet when configured", () => {
+    it("appends [timestamp, sessionDate, player, phrase, cardTitle, vote] to Rules_Helper_Feedback sheet when configured, creating header row if sheet is missing", () => {
       mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
       const res = ctx.logRuleFeedback({
         sessionDate: "2026-10-31",
@@ -230,6 +230,32 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(mocks.sheetRows[0][3]).toBe("concentration dc");
       expect(mocks.sheetRows[0][4]).toBe("Concentration");
       expect(mocks.sheetRows[0][5]).toBe("+1");
+
+      // Simulate missing Rules_Helper_Feedback tab -> insertSheet + header row creation
+      mocks.sheetRows.length = 0;
+      mocks.SpreadsheetApp.openById.mockReturnValueOnce({
+        getSheetByName: () => null,
+        insertSheet: () => ({
+          appendRow: (row: any[]) => mocks.sheetRows.push(row)
+        })
+      });
+      ctx.logRuleFeedback({
+        sessionDate: "2026-10-31",
+        player: "Pog",
+        phrase: "misty step",
+        cardTitle: "Misty Step",
+        vote: "+1"
+      });
+      expect(mocks.sheetRows.length).toBe(2);
+      expect(mocks.sheetRows[0]).toEqual([
+        "Timestamp ISO",
+        "Session Date",
+        "Player Identity",
+        "Raw Query Phrase",
+        "Matched Rule Title",
+        "Vote"
+      ]);
+      expect(mocks.sheetRows[1][2]).toBe("Pog");
     });
   });
 
@@ -321,7 +347,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
 
       const res = ctx.auditCalendarQuorum("2026-11-14");
       expect(res.status).toBe("SKIPPED_NO_GUESTS");
-      expect(res.confirmed).toBe(0);
+      expect(res.confirmedCount).toBe(0);
       expect(shifted).toBe(false);
       expect(mocks.logs).toContain(
         "Skipping quorum cancellation: 0 guests invited on event"
@@ -378,7 +404,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
 
       const res = ctx.auditCalendarQuorum("2026-11-14");
       expect(res.status).toBe("QUORUM_MET");
-      expect(res.confirmed).toBe(3);
+      expect(res.confirmedCount).toBe(3);
       expect(res.inGameDate).toBe("Day 19 on Hot Springs Island — Waxing Moon");
       expect(res.weather).toBeDefined();
       expect(res.weather.roll).toBeGreaterThanOrEqual(2);
@@ -481,16 +507,20 @@ describe("Apps Script Server Logic (Code.gs)", () => {
   });
 
   describe("Ticket 19 & 22: doGet View Isolation & getAudioAuthToken", () => {
-    it("sets template.viewMode to 'companion' when ?view=companion is passed and 'gm' otherwise", () => {
-      const gmOut = ctx.doGet({ parameter: { session: "2026-11-14" } });
+    it("sets template.viewMode to 'companion' when ?view=companion is passed and 'gm' otherwise, and passes template.gmKey", () => {
+      const gmOut = ctx.doGet({
+        parameter: { session: "2026-11-14", gmKey: "gm-token-9" }
+      });
       expect(gmOut.template.sessionDate).toBe("2026-11-14");
       expect(gmOut.template.viewMode).toBe("gm");
+      expect(gmOut.template.gmKey).toBe("gm-token-9");
 
       const compOut = ctx.doGet({
         parameter: { session: "2026-11-14", view: "companion" }
       });
       expect(compOut.template.sessionDate).toBe("2026-11-14");
       expect(compOut.template.viewMode).toBe("companion");
+      expect(compOut.template.gmKey).toBe("");
     });
 
     it("guards getAudioAuthToken with assertGmAccess_ and returns ScriptApp.getOAuthToken()", () => {

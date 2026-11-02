@@ -500,6 +500,7 @@
     </style>
   </head>
   <body>
+    <? if (typeof viewMode === "undefined" || viewMode !== "companion") { ?>
     <!-- Left Sidebar -->
     <div id="sidebar">
       <div class="sidebar-section">
@@ -529,6 +530,13 @@
           "
         >
           <div id="audio-cache-status">Audio: 0/0 ready</div>
+          <button
+            id="clear-audio-cache-btn"
+            onclick="AudioCache.clearCache()"
+            title="Clear IndexedDB Audio Cache"
+          >
+            Clear Audio Cache
+          </button>
           <div
             id="classifier-tier-status"
             style="
@@ -645,6 +653,7 @@
         <div id="right-content" class="pane-content"></div>
       </div>
     </div>
+    <? } ?>
 
     <!-- Mobile Player Companion HUD (Tickets 07, 08, 22 & 23) -->
     <div id="player-hud">
@@ -753,11 +762,40 @@
           ? "gm"
           : rawViewModeTemplate;
       }
+      const rawGmKeyTemplate =
+        "<?= typeof gmKey !== 'undefined' ? gmKey : '' ?>";
+      if (
+        typeof window !== "undefined" &&
+        window.INITIAL_GM_KEY === undefined
+      ) {
+        window.INITIAL_GM_KEY = rawGmKeyTemplate.startsWith("<?")
+          ? ""
+          : rawGmKeyTemplate;
+      }
       const cache = {};
       let allFiles = [];
       let currentLeftPayload = null;
       let miniSearch = null;
       let currentPlayerIdentity = "Guest";
+      const NOTES_AUTOSAVE_MS = 60000;
+      let notesAutoSaveTimer = null;
+
+      function getClientGmKey_() {
+        if (typeof window !== "undefined" && window.INITIAL_GM_KEY) {
+          return String(window.INITIAL_GM_KEY);
+        }
+        try {
+          if (
+            typeof window !== "undefined" &&
+            window.location &&
+            window.location.search
+          ) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get("gmKey") || "";
+          }
+        } catch (_e) {}
+        return "";
+      }
 
       // Configure marked for tables and line breaks
       marked.setOptions({
@@ -778,6 +816,17 @@
         );
       }
 
+      function startNotesAutoSave() {
+        if (notesAutoSaveTimer) clearInterval(notesAutoSaveTimer);
+        if (isCompanionMode_()) return null;
+        notesAutoSaveTimer = setInterval(() => {
+          if (!isCompanionMode_()) {
+            saveNotes();
+          }
+        }, NOTES_AUTOSAVE_MS);
+        return notesAutoSaveTimer;
+      }
+
       window.onload = () => {
         initCompanionState();
         if (isCompanionMode_()) {
@@ -791,6 +840,8 @@
         refreshManifest();
         loadScratchpad();
         loadDriveRulesGlossary(currentSessionDate);
+        startNotesAutoSave();
+        pollLatestAudioCue();
       };
 
       // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
@@ -853,6 +904,7 @@
       });
 
       function loadSessionDropdown() {
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((sessions) => {
             const select = document.getElementById("session-select");
@@ -868,7 +920,7 @@
               select.appendChild(opt);
             });
           })
-          .getSessionList();
+          .getSessionList(...(gmKey ? [gmKey] : []));
       }
 
       function switchSession(newSessionDate) {
@@ -883,10 +935,13 @@
         loadScratchpad();
       }
 
+      const loadSession = switchSession;
+
       function refreshManifest() {
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler(renderManifest)
-          .getSessionManifest(currentSessionDate);
+          .getSessionManifest(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
 
       function tokenizeStatblockAndDossier(fileMeta, rawContent = "") {
@@ -1031,7 +1086,26 @@
           });
           miniSearch.addAll(docs);
         }
-        AudioCache.preCacheManifest(files);
+        const gmKey = getClientGmKey_();
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler((token) => {
+            if (token) {
+              AudioCache.oauthToken = token;
+            }
+            AudioCache.preCacheSessionAudio(files);
+          });
+          if (runner && typeof runner.getAudioAuthToken === "function") {
+            runner.getAudioAuthToken(...(gmKey ? [gmKey] : []));
+          } else {
+            AudioCache.preCacheSessionAudio(files);
+          }
+        } else {
+          AudioCache.preCacheSessionAudio(files);
+        }
         filterFiles(document.getElementById("filter-input").value);
       }
 
@@ -1076,6 +1150,35 @@
         });
       }
 
+      function routeAudioAssetToMixer_(fileMeta) {
+        if (!fileMeta || isCompanionMode_()) return;
+        const isAudio =
+          (fileMeta.mimeType && fileMeta.mimeType.startsWith("audio/")) ||
+          (fileMeta.name && /\.(mp3|wav|m4a|ogg)$/i.test(fileMeta.name));
+        if (!isAudio) return;
+        if (!TabletopMixer.ctx) {
+          TabletopMixer.init();
+        }
+        const channel = classifyAudioAssetChannel(fileMeta);
+        const trackKey = fileMeta.name || fileMeta.id;
+        if (channel === 1) {
+          TabletopMixer.playAmbience(trackKey);
+        } else if (channel === 3) {
+          TabletopMixer.triggerSfx(trackKey);
+        } else {
+          TabletopMixer.crossfadeScore(trackKey);
+        }
+      }
+
+      function selectFile(indexOrId, element) {
+        if (typeof indexOrId === "number") {
+          const fileMeta = allFiles[indexOrId];
+          if (!fileMeta) return;
+          return loadFile(fileMeta.id, element);
+        }
+        return loadFile(indexOrId, element);
+      }
+
       function loadFile(fileId, element) {
         document
           .querySelectorAll(".file-item")
@@ -1090,6 +1193,11 @@
           if (matchingEl) matchingEl.classList.add("active");
         }
 
+        const matchedMeta = allFiles.find((f) => f.id === fileId);
+        if (matchedMeta) {
+          routeAudioAssetToMixer_(matchedMeta);
+        }
+
         if (cache[fileId] && cache[fileId].name !== "table_notes.md") {
           renderToLeftPane(cache[fileId]);
           return;
@@ -1099,13 +1207,18 @@
         document.getElementById("left-content").innerHTML =
           '<p style="color:var(--text-muted); text-align:center; margin-top:20vh;">Loading asset...</p>';
 
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((payload) => {
             cache[fileId] = payload;
             indexFilePayload(payload);
             renderToLeftPane(payload);
           })
-          .getFilePayload(fileId, currentSessionDate);
+          .getFilePayload(
+            fileId,
+            currentSessionDate,
+            ...(gmKey ? [gmKey] : [])
+          );
       }
 
       function renderToLeftPane(payload) {
@@ -1291,21 +1404,24 @@
 
       // Scratchpad Live Operations
       function loadScratchpad() {
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((res) => {
             document.getElementById("scratchpad").value = res.content;
             document.getElementById("save-status").textContent =
               "Loaded: " + res.updated;
           })
-          .getScratchpadNotes(currentSessionDate);
+          .getScratchpadNotes(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
 
       function saveNotes() {
-        const content = document.getElementById("scratchpad").value;
+        const scratchpadEl = document.getElementById("scratchpad");
+        const content = scratchpadEl ? scratchpadEl.value : "";
         const status = document.getElementById("save-status");
         if (status) status.textContent = "Saving...";
 
         flushAudioTimeline(currentSessionDate);
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((res) => {
             if (status) status.textContent = "Saved at " + res.updated;
@@ -1314,16 +1430,20 @@
             }
             refreshManifest();
           })
-          .saveScratchpadNotes(currentSessionDate, content);
+          .saveScratchpadNotes(
+            currentSessionDate,
+            content,
+            ...(gmKey ? [gmKey] : [])
+          );
       }
 
-      const saveScratchpad = saveNotes;
-
       function triggerPromiseExtraction() {
+        saveNotes();
         const statusEl =
           document.getElementById("save-status") ||
           document.getElementById("notes-status");
         if (statusEl) statusEl.textContent = "Extracting promises...";
+        const gmKey = getClientGmKey_();
         if (
           typeof google !== "undefined" &&
           google.script &&
@@ -1331,10 +1451,10 @@
         ) {
           const runner = google.script.run.withSuccessHandler((res) => {
             const count =
-              res && typeof res.created === "number"
-                ? res.created
-                : res && typeof res.createdCount === "number"
-                  ? res.createdCount
+              res && typeof res.createdCount === "number"
+                ? res.createdCount
+                : res && typeof res.created === "number"
+                  ? res.created
                   : res && Array.isArray(res.tasks)
                     ? res.tasks.length
                     : 0;
@@ -1343,11 +1463,17 @@
             }
           });
           if (runner && typeof runner.extractNarrativePromises === "function") {
-            runner.extractNarrativePromises(currentSessionDate);
+            runner.extractNarrativePromises(
+              currentSessionDate,
+              ...(gmKey ? [gmKey] : [])
+            );
           } else if (
             typeof google.script.run.extractNarrativePromises === "function"
           ) {
-            google.script.run.extractNarrativePromises(currentSessionDate);
+            google.script.run.extractNarrativePromises(
+              currentSessionDate,
+              ...(gmKey ? [gmKey] : [])
+            );
           }
         }
       }
@@ -1647,25 +1773,7 @@
           if (target && typeof nativeNode.connect === "function") {
             nativeNode.connect(target);
           }
-          const origSet =
-            nativeNode.gain &&
-            typeof nativeNode.gain.setValueAtTime === "function"
-              ? nativeNode.gain.setValueAtTime.bind(nativeNode.gain)
-              : null;
-          const origRamp =
-            nativeNode.gain &&
-            typeof nativeNode.gain.linearRampToValueAtTime === "function"
-              ? nativeNode.gain.linearRampToValueAtTime.bind(nativeNode.gain)
-              : null;
           nativeNode.gain.value = initialGain;
-          nativeNode.gain.setValueAtTime = function (val, time) {
-            this.value = val;
-            if (origSet) origSet(val, time);
-          };
-          nativeNode.gain.linearRampToValueAtTime = function (val, time) {
-            this.value = val;
-            if (origRamp) origRamp(val, time);
-          };
           return nativeNode;
         }
         return {
@@ -1685,8 +1793,9 @@
       const TabletopMixer = {
         ctx: null,
         compressor: null,
+        baseChannel2Gain: 0.5,
         channel1Gain: createGainNode_(null, 0.18),
-        channel2Gain: createGainNode_(null, 1.0),
+        channel2Gain: createGainNode_(null, 0.5),
         channel3Gain: createGainNode_(null, 0.85),
         timeline: [],
         duckTimer: null,
@@ -1711,8 +1820,9 @@
           }
           const masterOut =
             this.compressor || (this.ctx && this.ctx.destination) || null;
+          this.baseChannel2Gain = 0.5;
           this.channel1Gain = createGainNode_(this.ctx, 0.18, masterOut);
-          this.channel2Gain = createGainNode_(this.ctx, 1.0, masterOut);
+          this.channel2Gain = createGainNode_(this.ctx, 0.5, masterOut);
           this.channel3Gain = createGainNode_(this.ctx, 0.85, masterOut);
           this.timeline = [];
         },
@@ -1749,7 +1859,12 @@
           } catch (_e) {}
           return this.timeline;
         },
-        playBufferOnChannel_(trackId, gainNode, loop = false) {
+        playBufferOnChannel_(
+          trackId,
+          gainNode,
+          loop = false,
+          explicitBuffer = null
+        ) {
           if (
             !this.ctx ||
             typeof this.ctx.decodeAudioData !== "function" ||
@@ -1758,7 +1873,8 @@
             return;
           }
           const rec = AudioCache.memoryStore.get(trackId);
-          const rawBuf = rec && rec.buffer ? rec.buffer : rec;
+          const rawBuf =
+            explicitBuffer || (rec && rec.buffer ? rec.buffer : rec);
           if (!rawBuf || rawBuf.byteLength === 0) return;
           try {
             const copy = rawBuf.slice(0);
@@ -1772,9 +1888,14 @@
             });
           } catch (_e) {}
         },
-        playAmbience(trackId) {
+        playAmbience(trackId, audioBuffer = null) {
           this.channel1Gain.gain.setValueAtTime(0.18, this.now_());
-          this.playBufferOnChannel_(trackId, this.channel1Gain, true);
+          this.playBufferOnChannel_(
+            trackId,
+            this.channel1Gain,
+            true,
+            audioBuffer
+          );
           this.logEvent_({
             timestamp: Date.now(),
             track: trackId,
@@ -1783,53 +1904,68 @@
             gain: 0.18
           });
         },
-        crossfadeScore(trackId, _fromTrackId = null, durationSec = 4.0) {
+        crossfadeScore(trackName, audioBuffer = null, durationSec = 4.0) {
           const now = this.now_();
-          const half = durationSec / 2;
-          this.channel2Gain.gain.linearRampToValueAtTime(0.0, now + half);
+          this.channel2Gain.gain.setValueAtTime(0, now);
           this.channel2Gain.gain.linearRampToValueAtTime(
-            1.0,
+            this.baseChannel2Gain,
             now + durationSec
           );
-          this.playBufferOnChannel_(trackId, this.channel2Gain, true);
+          this.playBufferOnChannel_(
+            trackName,
+            this.channel2Gain,
+            true,
+            audioBuffer
+          );
           this.logEvent_({
             timestamp: Date.now(),
-            track: trackId,
+            track: trackName,
             channel: 2,
             eventType: "CROSSFADE",
-            gain: 1.0
+            gain: this.baseChannel2Gain
           });
         },
-        playSfx(sfxId) {
-          const DUCKED_GAIN = 0.398;
-          const NORMAL_GAIN = 1.0;
-          this.channel3Gain.gain.setValueAtTime(0.85, this.now_());
-          this.channel2Gain.gain.linearRampToValueAtTime(
-            DUCKED_GAIN,
-            this.now_() + 0.05
+        triggerSfx(trackName, audioBuffer = null) {
+          const now = this.now_();
+          const duckedGain = Number(
+            (this.baseChannel2Gain * Math.pow(10, -8 / 20)).toFixed(3)
           );
-          this.playBufferOnChannel_(sfxId, this.channel3Gain, false);
+          const normalGain = this.baseChannel2Gain;
+          this.channel3Gain.gain.setValueAtTime(0.85, now);
+          this.channel2Gain.gain.linearRampToValueAtTime(
+            duckedGain,
+            now + 0.05
+          );
+          this.playBufferOnChannel_(
+            trackName,
+            this.channel3Gain,
+            false,
+            audioBuffer
+          );
           this.logEvent_({
             timestamp: Date.now(),
-            track: sfxId,
+            track: trackName,
             channel: 3,
             eventType: "SFX",
-            gain: DUCKED_GAIN
+            gain: duckedGain
           });
           if (this.duckTimer) clearTimeout(this.duckTimer);
           this.duckTimer = setTimeout(() => {
             this.channel2Gain.gain.linearRampToValueAtTime(
-              NORMAL_GAIN,
+              normalGain,
               this.now_() + 0.4
             );
             this.logEvent_({
               timestamp: Date.now(),
-              track: sfxId,
+              track: trackName,
               channel: 2,
               eventType: "RESTORE",
-              gain: NORMAL_GAIN
+              gain: normalGain
             });
           }, 1500);
+        },
+        playSfx(sfxId, audioBuffer = null) {
+          return this.triggerSfx(sfxId, audioBuffer);
         }
       };
 
@@ -1853,6 +1989,7 @@
           return;
         }
         const jsonStr = JSON.stringify(TabletopMixer.timeline);
+        const gmKey = getClientGmKey_();
         if (
           typeof google !== "undefined" &&
           google.script &&
@@ -1860,11 +1997,19 @@
         ) {
           const runner = google.script.run.withSuccessHandler(() => {});
           if (runner && typeof runner.saveAudioTimeline === "function") {
-            runner.saveAudioTimeline(targetSession, jsonStr);
+            runner.saveAudioTimeline(
+              targetSession,
+              jsonStr,
+              ...(gmKey ? [gmKey] : [])
+            );
           } else if (
             typeof google.script.run.saveAudioTimeline === "function"
           ) {
-            google.script.run.saveAudioTimeline(targetSession, jsonStr);
+            google.script.run.saveAudioTimeline(
+              targetSession,
+              jsonStr,
+              ...(gmKey ? [gmKey] : [])
+            );
           }
         }
       }
@@ -1872,49 +2017,73 @@
       // Tickets 07, 08, 22 & 23: Mobile Player Companion HUD, MiniSearch Glossary & PTT Rules Sniffer
       const DEFAULT_GLOSSARY = {
         disadvantage: {
+          id: "srd_disadvantage",
           title: "Disadvantage",
-          type: "Core Mechanic",
-          text: "Roll two d20s and take the lower result."
+          source: "5e SRD Starter Glossary",
+          summary: "Roll two d20s and take the lower result.",
+          tags: "disadvantage core mechanic d20 roll"
         },
         advantage: {
+          id: "srd_advantage",
           title: "Advantage",
-          type: "Core Mechanic",
-          text: "Roll two d20s and take the higher result."
+          source: "5e SRD Starter Glossary",
+          summary: "Roll two d20s and take the higher result.",
+          tags: "advantage core mechanic d20 roll"
         },
         concentration: {
+          id: "srd_concentration",
           title: "Concentration",
-          type: "Core Mechanic",
-          text: "Constitution saving throw (DC 10 or half damage) required to maintain spell."
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Taking damage while concentrating on a spell requires a Constitution saving throw (DC 10 or half the damage taken, whichever is higher). Incapacitated or casting another concentration spell ends it.",
+          tags: "spellcasting constitution save dc damage"
         },
         exhaustion: {
+          id: "srd_exhaustion",
           title: "Exhaustion",
-          type: "Condition",
-          text: "Cumulative -1 penalty per level to d20 tests and speed."
+          source: "5e SRD Starter Glossary",
+          summary: "Cumulative -1 penalty per level to d20 tests and speed.",
+          tags: "exhaustion condition penalty speed"
         },
         teleport: {
+          id: "srd_teleport",
           title: "Teleport",
-          type: "7th-Level Spell",
-          text: "Instantly transport up to 8 willing creatures to a known destination."
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Instantly transport up to 8 willing creatures to a known destination.",
+          tags: "spell teleport conjuration 7th-level"
         },
         misty_step: {
+          id: "srd_misty_step",
           title: "Misty Step",
-          type: "2nd-Level Spell",
-          text: "2nd-level conjuration (bonus action, Self): Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space that you can see."
+          source: "5e SRD Starter Glossary",
+          summary:
+            "2nd-level conjuration (bonus action, Self): Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space that you can see.",
+          tags: "spell bonus action teleport conjuration 2nd-level"
         },
         grappling: {
+          id: "srd_grappling",
           title: "Grappling",
-          type: "Combat Mechanic",
-          text: "Use the Attack action to make a special melee attack: Strength (Athletics) contested by target's Strength (Athletics) or Dexterity (Acrobatics). Target's speed becomes 0."
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Use the Attack action to make a special melee attack: Strength (Athletics) contested by target's Strength (Athletics) or Dexterity (Acrobatics). Target's speed becomes 0.",
+          tags: "combat condition athletics acrobatics grapple speed"
         },
         sneak_attack: {
+          id: "srd_sneak_attack",
           title: "Sneak Attack",
-          type: "Class Feature",
-          text: "Once per turn, deal extra 1d6+ damage to one creature you hit with a finesse or ranged weapon if you have advantage on the attack roll or an ally is within 5 feet."
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Once per turn, deal extra 1d6+ damage to one creature you hit with a finesse or ranged weapon if you have advantage on the attack roll or an ally is within 5 feet of the target.",
+          tags: "rogue class feature finesse advantage damage"
         },
         shield: {
+          id: "srd_shield",
           title: "Shield",
-          type: "1st-Level Spell",
-          text: "1st-level abjuration (reaction when hit by an attack or targeted by magic missile): Until the start of your next turn, you have a +5 bonus to AC."
+          source: "5e SRD Starter Glossary",
+          summary:
+            "1st-level abjuration (reaction when hit by an attack or targeted by magic missile): Until the start of your next turn, you have a +5 bonus to AC and take no damage from magic missile.",
+          tags: "spell reaction abjuration ac defense"
         }
       };
 
@@ -1929,11 +2098,11 @@
         return Object.keys(DEFAULT_GLOSSARY).map((key) => {
           const item = DEFAULT_GLOSSARY[key];
           return {
-            id: "default_" + key,
+            id: item.id || "srd_" + key,
             title: item.title,
-            source: item.type || "Core Mechanic",
-            summary: item.text || "",
-            tags: key.replace(/_/g, " ") + " " + (item.type || "").toLowerCase()
+            source: item.source || "5e SRD Starter Glossary",
+            summary: item.summary || "",
+            tags: item.tags || key.replace(/_/g, " ")
           };
         });
       }
@@ -2003,6 +2172,14 @@
         }
         if (isCompanionMode_()) {
           document.body.classList.add("companion-only-mode");
+          const sidebarEl = document.getElementById("sidebar");
+          if (sidebarEl && typeof sidebarEl.remove === "function") {
+            sidebarEl.remove();
+          }
+          const workspaceEl = document.getElementById("workspace");
+          if (workspaceEl && typeof workspaceEl.remove === "function") {
+            workspaceEl.remove();
+          }
         }
         let savedIdentity = null;
         try {
@@ -2165,7 +2342,7 @@
             if (matched) {
               showRuleCard(
                 matched.entry.title,
-                matched.entry.text,
+                matched.entry.summary || matched.entry.text || "",
                 transcript.toLowerCase()
               );
             }
@@ -2324,16 +2501,19 @@
         };
       }
 
-      function hasWebGpuSupport() {
-        return Boolean(
-          typeof window !== "undefined" &&
-          window.navigator &&
-          window.navigator.gpu
-        );
-      }
+      let lastHandledCueTimestamp_ = null;
 
       function handleAudioIntent(intentPayload) {
         if (!intentPayload || !intentPayload.intent) return;
+        if (
+          intentPayload.timestamp !== undefined &&
+          intentPayload.timestamp !== null
+        ) {
+          if (intentPayload.timestamp === lastHandledCueTimestamp_) {
+            return;
+          }
+          lastHandledCueTimestamp_ = intentPayload.timestamp;
+        }
         const tierLabel = intentPayload.tier || intentPayload.activeTier;
         if (tierLabel) {
           const tierEl = document.getElementById("classifier-tier-status");
@@ -2342,7 +2522,9 @@
           }
         }
         if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
-          TabletopMixer.crossfadeScore(intentPayload.mood);
+          if (!isCompanionMode_()) {
+            TabletopMixer.crossfadeScore(intentPayload.mood);
+          }
         } else if (
           intentPayload.intent === "RULE_QUERY" &&
           intentPayload.rule
@@ -2351,19 +2533,22 @@
           const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
           const matched = (matchedFromSearch && matchedFromSearch.entry) ||
             DEFAULT_GLOSSARY[key] || {
+              id: "rule_" + key,
               title: intentPayload.rule,
-              type: "Rule",
-              text: "Matched table query: " + intentPayload.rule
+              source: "Rule",
+              summary: "Matched table query: " + intentPayload.rule,
+              tags: key
             };
           showRuleCard(
             matched.title,
-            matched.text || matched.summary || "",
+            matched.summary || matched.text || "",
             key
           );
         }
       }
 
       function pollLatestAudioCue() {
+        const gmKey = getClientGmKey_();
         if (
           typeof google !== "undefined" &&
           google.script &&
@@ -2372,11 +2557,11 @@
           const runner =
             google.script.run.withSuccessHandler(handleAudioIntent);
           if (runner && typeof runner.getLatestAudioCue === "function") {
-            runner.getLatestAudioCue();
+            runner.getLatestAudioCue(...(gmKey ? [gmKey] : []));
           } else if (
             typeof google.script.run.getLatestAudioCue === "function"
           ) {
-            google.script.run.getLatestAudioCue();
+            google.script.run.getLatestAudioCue(...(gmKey ? [gmKey] : []));
           }
         }
       }

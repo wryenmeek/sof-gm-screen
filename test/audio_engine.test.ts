@@ -6,7 +6,6 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
   let AudioCache: any;
   let TabletopMixer: any;
   let handleAudioIntent: any;
-  let hasWebGpuSupport: any;
   let flushAudioTimeline: any;
   let saveAudioTimelineSpy: ReturnType<typeof vi.fn>;
   let fetchSpy: ReturnType<typeof vi.fn>;
@@ -18,7 +17,11 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
   let triggerManualMoodCue: any;
   let resolveClassifierTier: any;
   let pollLatestAudioCue: any;
-  let saveScratchpad: any;
+  let saveNotes: any;
+  let startNotesAutoSave: any;
+  let renderManifest: any;
+  let selectFile: any;
+  let saveScratchpadNotesSpy: ReturnType<typeof vi.fn>;
   let mockLocalStorage: any;
 
   beforeEach(() => {
@@ -27,7 +30,6 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     AudioCache = harness.AudioCache;
     TabletopMixer = harness.TabletopMixer;
     handleAudioIntent = harness.handleAudioIntent;
-    hasWebGpuSupport = harness.hasWebGpuSupport;
     flushAudioTimeline = harness.flushAudioTimeline;
     saveAudioTimelineSpy = harness.saveAudioTimelineSpy;
     fetchSpy = harness.fetchSpy;
@@ -39,7 +41,11 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     triggerManualMoodCue = harness.triggerManualMoodCue;
     resolveClassifierTier = harness.resolveClassifierTier;
     pollLatestAudioCue = harness.pollLatestAudioCue;
-    saveScratchpad = harness.saveScratchpad;
+    saveNotes = harness.saveNotes;
+    startNotesAutoSave = harness.startNotesAutoSave;
+    renderManifest = harness.renderManifest;
+    selectFile = harness.selectFile;
+    saveScratchpadNotesSpy = harness.saveScratchpadNotesSpy;
     mockLocalStorage = harness.mockLocalStorage;
   });
 
@@ -158,29 +164,68 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
   });
 
   describe("Ticket 05 & 20: Web Audio API 3-Channel Mixer, Auto-Routing, Master Compressor & SFX Ducking", () => {
-    it("instantiates native AudioContext GainNodes, ducks Channel 2 score by -8dB (0.4), and restores to 1.0 after 1.5s", () => {
+    it("instantiates native AudioContext GainNodes with 0.5 Channel 2 baseline, ducks Channel 2 score by -8dB (0.199), and restores to 0.5 after 1.5s", () => {
       expect(TabletopMixer).toBeDefined();
       TabletopMixer.init();
       expect(audioCtxCreateGainSpy).toHaveBeenCalledTimes(3);
-      expect(TabletopMixer.channel2Gain.gain.value).toBe(1.0);
+      expect(TabletopMixer.baseChannel2Gain).toBe(0.5);
+      expect(TabletopMixer.channel2Gain.gain.value).toBe(0.5);
 
-      TabletopMixer.playSfx("cannon_barrage_01");
-      expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(0.4, 2);
+      TabletopMixer.triggerSfx("cannon_barrage_01");
+      expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(0.199, 3);
 
       vi.advanceTimersByTime(1500);
-      expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(1.0, 2);
+      expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(0.5, 3);
     });
 
-    it("executes a 4-second linear crossfade on Channel 2 score transitions", () => {
+    it("executes a 4-second linear crossfade on Channel 2 score transitions from 0 to 0.5 and auto-routes manifest audio files on selectFile", () => {
       expect(TabletopMixer).toBeDefined();
       TabletopMixer.init();
       TabletopMixer.crossfadeScore("combat_theme_01");
+
+      expect(
+        TabletopMixer.channel2Gain.gain.setValueAtTime
+      ).toHaveBeenCalledWith(0, 10.0);
+      expect(
+        TabletopMixer.channel2Gain.gain.linearRampToValueAtTime
+      ).toHaveBeenCalledWith(0.5, 14.0);
 
       const lastEvent =
         TabletopMixer.timeline[TabletopMixer.timeline.length - 1];
       expect(lastEvent.eventType).toBe("CROSSFADE");
       expect(lastEvent.track).toBe("combat_theme_01");
       expect(lastEvent.channel).toBe(2);
+      expect(lastEvent.gain).toBe(0.5);
+
+      // Auto-routing when an audio asset in the manifest is selected
+      renderManifest([
+        {
+          id: "aud_1",
+          name: "[Ambience] Ocean_Waves.mp3",
+          simpleName: "Ocean_Waves.mp3",
+          mimeType: "audio/mpeg"
+        },
+        {
+          id: "aud_2",
+          name: "[SFX] Cannon_Shot.wav",
+          simpleName: "Cannon_Shot.wav",
+          mimeType: "audio/wav"
+        }
+      ]);
+      selectFile(0);
+      expect(
+        TabletopMixer.timeline.some(
+          (e: any) =>
+            e.eventType === "LOOP" && e.track === "[Ambience] Ocean_Waves.mp3"
+        )
+      ).toBe(true);
+      selectFile(1);
+      expect(
+        TabletopMixer.timeline.some(
+          (e: any) =>
+            e.eventType === "SFX" && e.track === "[SFX] Cannon_Shot.wav"
+        )
+      ).toBe(true);
     });
 
     it("classifies audio assets into Channels 1/2/3, routes all 3 channels through a master DynamicsCompressorNode, and triggers Tier 3 manual Mood Cue buttons", () => {
@@ -254,14 +299,15 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       expect(parsed.some((e: any) => e.eventType === "SFX")).toBe(true);
     });
 
-    it("immediately writes every cue to localStorage write-ahead log, hydrates on reload, and co-flushes inside saveScratchpad()", () => {
+    it("immediately writes every cue to localStorage write-ahead log, hydrates on reload, co-flushes inside saveNotes(), and auto-saves every 60s", () => {
       expect(TabletopMixer.hydrateFromLocalStorage).toBeDefined();
-      expect(saveScratchpad).toBeDefined();
+      expect(saveNotes).toBeDefined();
+      expect(startNotesAutoSave).toBeDefined();
 
       TabletopMixer.init();
       TabletopMixer.playAmbience("amb_harbor_bells.mp3");
       TabletopMixer.crossfadeScore("score_tension.mp3");
-      TabletopMixer.playSfx("sfx_kraken_roar.wav");
+      TabletopMixer.triggerSfx("sfx_kraken_roar.wav");
       vi.advanceTimersByTime(1500); // Triggers RESTORE event
 
       const walRaw = mockLocalStorage.getItem("sof_audio_timeline_2026-10-31");
@@ -279,50 +325,83 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       TabletopMixer.hydrateFromLocalStorage("2026-10-31");
       expect(TabletopMixer.timeline).toHaveLength(4);
 
-      // Saving Table Notes via saveScratchpad() co-flushes the audio timeline
+      // Saving Table Notes via saveNotes() co-flushes the audio timeline
       const scratchpadEl = document.getElementById(
         "scratchpad"
       ) as HTMLTextAreaElement;
       scratchpadEl.value = "# Live Notes\n- Kraken surfaced";
-      saveScratchpad();
+      saveNotes();
 
       expect(saveAudioTimelineSpy).toHaveBeenCalledTimes(1);
       const [flushedSession, flushedJson] = saveAudioTimelineSpy.mock.calls[0];
       expect(flushedSession).toBe("2026-10-31");
       expect(JSON.parse(flushedJson)).toHaveLength(4);
+
+      // 60-second auto-save interval triggers saveNotes()
+      saveScratchpadNotesSpy.mockClear();
+      const timerId = startNotesAutoSave();
+      vi.advanceTimersByTime(60000);
+      expect(saveScratchpadNotesSpy).toHaveBeenCalledWith(
+        "2026-10-31",
+        "# Live Notes\n- Kraken surfaced"
+      );
+      clearInterval(timerId);
     });
   });
 
   describe("Ticket 12 & 26: 3-Tier Edge Classifier Failover, Cue Polling & Intent Router", () => {
-    it("detects WebGPU support and routes MUSIC_CUE and RULE_QUERY intents via direct call or postMessage", () => {
+    it("routes MUSIC_CUE and RULE_QUERY intents, deduplicates by timestamp, and keeps companion mode muted", () => {
       expect(handleAudioIntent).toBeDefined();
-      expect(hasWebGpuSupport).toBeDefined();
-      (window.navigator as any).gpu = {};
-      expect(hasWebGpuSupport()).toBe(true);
 
       TabletopMixer.init();
 
       handleAudioIntent({
         intent: "MUSIC_CUE",
         mood: "combat",
-        rule: null
+        rule: null,
+        timestamp: 1730500000001
       });
       expect(
-        TabletopMixer.timeline.some(
+        TabletopMixer.timeline.filter(
           (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
         )
-      ).toBe(true);
+      ).toHaveLength(1);
+
+      // Duplicate timestamp is ignored
+      handleAudioIntent({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        rule: null,
+        timestamp: 1730500000001
+      });
+      expect(
+        TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
 
       handleAudioIntent({
         intent: "RULE_QUERY",
         mood: null,
-        rule: "concentration"
+        rule: "concentration",
+        timestamp: 1730500000002
       });
       const ruleCard = document.getElementById("rule-card")!;
       expect(ruleCard.style.display).toBe("block");
       expect(document.getElementById("card-title")!.textContent).toContain(
         "Concentration"
       );
+
+      // Companion mode stays 100% muted on MUSIC_CUE
+      const companionHarness = setupClientHarness({ viewMode: "companion" });
+      companionHarness.TabletopMixer.init();
+      companionHarness.handleAudioIntent({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        rule: null,
+        timestamp: 1730500000003
+      });
+      expect(companionHarness.TabletopMixer.timeline).toHaveLength(0);
     });
 
     it("resolves 3-tier classifier state machine and polls getLatestAudioCue() to update #classifier-tier-status and trigger cues", () => {

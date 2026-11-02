@@ -17,6 +17,7 @@ const cachedScript = scriptMatch[1].replace("<?= sessionDate ?>", "2026-10-31");
 export interface ClientHarnessOptions {
   sessionDate?: string;
   viewMode?: "gm" | "companion";
+  gmKey?: string;
   initialLocalStorage?: Record<string, string>;
   filePayloads?: Record<string, any>;
   rulesGlossary?: Array<any>;
@@ -29,6 +30,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   document.body.className = "";
   document.body.innerHTML = cachedBodyHtml;
   (window as any).INITIAL_VIEW_MODE = options.viewMode || "gm";
+  (window as any).INITIAL_GM_KEY = options.gmKey || "";
   const filterInput = document.getElementById(
     "filter-input"
   ) as HTMLInputElement | null;
@@ -119,14 +121,21 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   (window as any).indexedDB = { open: idbOpenSpy };
 
   // Web Audio API mock
-  const audioCtxCreateGainSpy = vi.fn().mockImplementation(() => ({
-    connect: vi.fn(),
-    gain: {
+  const audioCtxCreateGainSpy = vi.fn().mockImplementation(() => {
+    const gainParam: any = {
       value: 1.0,
-      setValueAtTime: vi.fn(),
-      linearRampToValueAtTime: vi.fn()
-    }
-  }));
+      setValueAtTime: vi.fn((val: number) => {
+        gainParam.value = val;
+      }),
+      linearRampToValueAtTime: vi.fn((val: number) => {
+        gainParam.value = val;
+      })
+    };
+    return {
+      connect: vi.fn(),
+      gain: gainParam
+    };
+  });
   const audioCtxCreateCompressorSpy = vi.fn().mockImplementation(() => ({
     connect: vi.fn(),
     threshold: { value: -18 },
@@ -179,8 +188,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     script: {
       run: {
         withSuccessHandler: (cb: any) => ({
-          getScratchpadNotes: (sessionDate: string) => {
-            getScratchpadNotesSpy(sessionDate);
+          getScratchpadNotes: (...args: any[]) => {
+            getScratchpadNotesSpy(...args);
             if (cb)
               cb({
                 id: "notes_1",
@@ -188,34 +197,35 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
                 updated: "10:00:00 AM"
               });
           },
-          saveScratchpadNotes: (sessionDate: string, content: string) => {
-            saveScratchpadNotesSpy(sessionDate, content);
+          saveScratchpadNotes: (...args: any[]) => {
+            saveScratchpadNotesSpy(...args);
             if (cb) cb({ id: "notes_1", updated: "10:01:00 AM" });
           },
-          getSessionList: () => {
-            getSessionListSpy();
+          getSessionList: (...args: any[]) => {
+            getSessionListSpy(...args);
             if (cb) cb(["2026-10-31"]);
           },
-          getSessionManifest: (sessionDate: string) => {
-            getSessionManifestSpy(sessionDate);
+          getSessionManifest: (...args: any[]) => {
+            getSessionManifestSpy(...args);
             if (cb) cb([]);
           },
-          getFilePayload: (fileId: string, sessionDate: string) => {
-            getFilePayloadSpy(fileId, sessionDate);
+          getFilePayload: (...args: any[]) => {
+            getFilePayloadSpy(...args);
+            const fileId = args[0];
             if (cb && filePayloads[fileId]) {
               cb(filePayloads[fileId]);
             }
           },
-          saveAudioTimeline: (sessionDate: string, json: string) => {
-            saveAudioTimelineSpy(sessionDate, json);
+          saveAudioTimeline: (...args: any[]) => {
+            saveAudioTimelineSpy(...args);
             if (cb) cb({ status: "saved" });
           },
           logRuleFeedback: (payload: any) => {
             logRuleFeedbackSpy(payload);
             if (cb) cb({ status: "logged" });
           },
-          getAudioAuthToken: (gmKey?: string) => {
-            getAudioAuthTokenSpy(gmKey);
+          getAudioAuthToken: (...args: any[]) => {
+            getAudioAuthTokenSpy(...args);
             if (cb) cb(options.audioAuthToken || "mock_oauth_token");
           },
           getRulesGlossary: (sessionDate: string) => {
@@ -224,15 +234,15 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
               cb(options.rulesGlossary);
             }
           },
-          extractNarrativePromises: (sessionDate: string) => {
-            extractNarrativePromisesSpy(sessionDate);
+          extractNarrativePromises: (...args: any[]) => {
+            extractNarrativePromisesSpy(...args);
+            const sessionDate = args[0];
             if (cb) {
               cb(
                 options.extractedPromisesResult || {
                   sessionDate,
                   extractedCount: 2,
                   createdCount: 2,
-                  created: 2,
                   tasks: [
                     { id: "t1", title: "Promise 1" },
                     { id: "t2", title: "Promise 2" }
@@ -241,8 +251,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
               );
             }
           },
-          getLatestAudioCue: (gmKey?: string) => {
-            getLatestAudioCueSpy(gmKey);
+          getLatestAudioCue: (...args: any[]) => {
+            getLatestAudioCueSpy(...args);
             if (cb && options.latestAudioCue !== undefined) {
               cb(options.latestAudioCue);
             }
@@ -273,6 +283,9 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         renderManifest,
         filterFiles,
         loadFile,
+        selectFile: typeof selectFile !== "undefined" ? selectFile : undefined,
+        loadSession: typeof loadSession !== "undefined" ? loadSession : undefined,
+        startNotesAutoSave: typeof startNotesAutoSave !== "undefined" ? startNotesAutoSave : undefined,
         tokenizeStatblockAndDossier: typeof tokenizeStatblockAndDossier !== "undefined" ? tokenizeStatblockAndDossier : undefined,
         indexFilePayload: typeof indexFilePayload !== "undefined" ? indexFilePayload : undefined,
         updateSearchIndexWithContent: typeof updateSearchIndexWithContent !== "undefined" ? updateSearchIndexWithContent : undefined,
@@ -283,10 +296,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         handleAudioIntent: typeof handleAudioIntent !== "undefined" ? handleAudioIntent : undefined,
         resolveClassifierTier: typeof resolveClassifierTier !== "undefined" ? resolveClassifierTier : undefined,
         pollLatestAudioCue: typeof pollLatestAudioCue !== "undefined" ? pollLatestAudioCue : undefined,
-        hasWebGpuSupport: typeof hasWebGpuSupport !== "undefined" ? hasWebGpuSupport : undefined,
         flushAudioTimeline: typeof flushAudioTimeline !== "undefined" ? flushAudioTimeline : undefined,
         saveNotes: typeof saveNotes !== "undefined" ? saveNotes : undefined,
-        saveScratchpad: typeof saveScratchpad !== "undefined" ? saveScratchpad : undefined,
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
         initCompanionState: typeof initCompanionState !== "undefined" ? initCompanionState : undefined,
         selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,

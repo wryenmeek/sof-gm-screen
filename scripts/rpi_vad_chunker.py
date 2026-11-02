@@ -10,6 +10,7 @@ and dispatches non-BANTER cues to Apps Script doPost(e).
 """
 
 import argparse
+import base64
 import json
 import math
 import os
@@ -211,6 +212,90 @@ def _normalize_tier_output(
     }
 
 
+def default_tier2_gemini_classify(
+    wav_path: str, timeout_s: float = 10.0
+) -> dict[str, Any]:
+    """Calls Gemini 2.5 Flash over HTTPS with structured JSON output schema {intent, mood, rule}."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY environment variable is not set")
+
+    audio_b64 = ""
+    if wav_path and os.path.exists(wav_path):
+        with open(wav_path, "rb") as wf:
+            audio_b64 = base64.b64encode(wf.read()).decode("ascii")
+
+    parts: list[dict[str, Any]] = [
+        {
+            "text": (
+                "Classify this tabletop RPG speech audio chunk into JSON with "
+                "intent (MUSIC_CUE, RULE_QUERY, or BANTER), mood (nullable string), "
+                "and rule (nullable string)."
+            )
+        }
+    ]
+    if audio_b64:
+        parts.append(
+            {
+                "inlineData": {
+                    "mimeType": "audio/wav",
+                    "data": audio_b64,
+                }
+            }
+        )
+
+    request_body = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "intent": {
+                        "type": "STRING",
+                        "enum": ["MUSIC_CUE", "RULE_QUERY", "BANTER"],
+                    },
+                    "mood": {"type": "STRING", "nullable": True},
+                    "rule": {"type": "STRING", "nullable": True},
+                },
+                "required": ["intent"],
+            },
+        },
+    }
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={api_key}"
+    )
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    t0 = time.monotonic()
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        raw_resp = json.loads(resp.read().decode("utf-8"))
+    latency_ms = (time.monotonic() - t0) * 1000.0
+
+    cue_text = (
+        raw_resp.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "{}")
+    )
+    parsed_cue = json.loads(cue_text) if isinstance(cue_text, str) else cue_text
+    return {
+        "status": "OK",
+        "latency_ms": latency_ms,
+        "cue": {
+            "intent": parsed_cue.get("intent", "BANTER"),
+            "mood": parsed_cue.get("mood"),
+            "rule": parsed_cue.get("rule"),
+        },
+    }
+
+
 def post_cue_webhook(
     webhook_url: str, payload: dict[str, Any], timeout_s: float = 5.0
 ) -> dict[str, Any]:
@@ -266,11 +351,15 @@ def classify_and_dispatch_chunk(
             and tier1_result.get("latency_ms", float("inf")) <= timeout_ms
         )
 
-        if not tier1_ok and tier2_fn is not None:
+        effective_tier2_fn = tier2_fn
+        if effective_tier2_fn is None and os.environ.get("GEMINI_API_KEY"):
+            effective_tier2_fn = default_tier2_gemini_classify
+
+        if not tier1_ok and effective_tier2_fn is not None:
             tier2_invoked = True
             t0 = time.monotonic()
             try:
-                raw_t2 = tier2_fn(wav_path)
+                raw_t2 = effective_tier2_fn(wav_path)
                 measured_ms = (time.monotonic() - t0) * 1000.0
                 tier2_result = _normalize_tier_output(raw_t2, measured_ms)
             except Exception as exc:
@@ -317,9 +406,6 @@ def classify_and_dispatch_chunk(
         "webhook_payload": webhook_payload,
         "webhook_response": webhook_response,
     }
-
-
-classify_speech_chunk = classify_and_dispatch_chunk
 
 
 def _run_cli() -> None:

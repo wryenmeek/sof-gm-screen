@@ -565,16 +565,92 @@
           .getSessionManifest(currentSessionDate);
       }
 
+      function tokenizeStatblockAndDossier(fileMeta, rawContent = "") {
+        const name = (fileMeta && fileMeta.name) || "";
+        const simpleName = (fileMeta && fileMeta.simpleName) || name;
+        const mimeType = (fileMeta && fileMeta.mimeType) || "";
+
+        const tagMatches = name.match(/\[([^\]]+)\]/g) || [];
+        const tags = tagMatches
+          .map((t) => t.replace(/[[\]]/g, ""))
+          .concat(mimeType)
+          .join(" ");
+
+        let title = simpleName.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ");
+        const propLines = [];
+
+        if (rawContent) {
+          const hMatch = rawContent.match(/^#{1,3}\s+(.+)$/m);
+          if (hMatch) {
+            title += " " + hMatch[1].trim();
+          }
+
+          const propRegex = /\*\*([^*]+)\*\*\s*(?:::|:)\s*([^\n\r]+)/g;
+          let pMatch;
+          while ((pMatch = propRegex.exec(rawContent)) !== null) {
+            const propKey = pMatch[1].trim();
+            const propVal = pMatch[2].trim();
+            const extraSynonyms = /vulnerabilities/i.test(propKey)
+              ? " vulnerability vulnerable"
+              : /immunities/i.test(propKey)
+                ? " immunity immune"
+                : /resistances/i.test(propKey)
+                  ? " resistance resistant"
+                  : "";
+            propLines.push(propKey + " " + propVal + extraSynonyms);
+          }
+        }
+
+        return {
+          id: fileMeta.id,
+          name: name,
+          simpleName: simpleName,
+          mimeType: mimeType,
+          title: title.trim(),
+          tags: tags.trim(),
+          properties: propLines.join(" | "),
+          content: rawContent
+        };
+      }
+
+      function indexFilePayload(payload) {
+        if (!payload || !payload.id || !miniSearch) return;
+        const existingMeta = allFiles.find((f) => f.id === payload.id) || {
+          id: payload.id,
+          name: payload.name || "",
+          simpleName: payload.name || "",
+          mimeType: payload.type || ""
+        };
+        const rawText =
+          payload.type === "markdown" || payload.type === "html"
+            ? payload.content || ""
+            : "";
+        const doc = tokenizeStatblockAndDossier(existingMeta, rawText);
+        if (miniSearch.has(payload.id)) {
+          miniSearch.replace(doc);
+        } else {
+          miniSearch.add(doc);
+        }
+      }
+
       function renderManifest(files) {
         allFiles = files;
         if (typeof MiniSearch !== "undefined") {
           miniSearch = new MiniSearch({
-            fields: ["name", "simpleName", "mimeType"],
+            fields: [
+              "title",
+              "tags",
+              "properties",
+              "content",
+              "name",
+              "simpleName",
+              "mimeType"
+            ],
             storeFields: ["id", "name", "simpleName", "mimeType"],
             tokenize: (text) =>
               text
                 .toLowerCase()
-                .split(/[\s_\-\[\]./]+/)
+                .split(/[\s_\-[\]./,:;|()]+/)
                 .filter(Boolean),
             searchOptions: {
               prefix: true,
@@ -582,7 +658,15 @@
               combineWith: "AND"
             }
           });
-          miniSearch.addAll(files);
+          const docs = files.map((f) => {
+            const cached = cache[f.id];
+            const rawText =
+              cached && (cached.type === "markdown" || cached.type === "html")
+                ? cached.content
+                : "";
+            return tokenizeStatblockAndDossier(f, rawText);
+          });
+          miniSearch.addAll(docs);
         }
         filterFiles(document.getElementById("filter-input").value);
       }
@@ -654,6 +738,7 @@
         google.script.run
           .withSuccessHandler((payload) => {
             cache[fileId] = payload;
+            indexFilePayload(payload);
             renderToLeftPane(payload);
           })
           .getFilePayload(fileId, currentSessionDate);

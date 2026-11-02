@@ -224,4 +224,3 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
     expect(res.webhook_payload).toBeNull();
   });
 });
-

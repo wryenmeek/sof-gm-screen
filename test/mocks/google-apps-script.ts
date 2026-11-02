@@ -18,7 +18,11 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   const propsStore = new Map<string, string>();
   const cacheStore = new Map<string, string>();
   const logs: string[] = [];
-  const triggers: Array<{ handlerFunction: string; weekDay?: string; hour?: number }> = [];
+  const triggers: Array<{
+    handlerFunction: string;
+    weekDay?: string;
+    hour?: number;
+  }> = [];
   let lastCreatedTemplate: Record<string, any> | null = null;
   const sheetRows: any[][] = [];
   const taskStore: Array<{
@@ -202,9 +206,11 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
 
   const CacheService = {
     getScriptCache: () => ({
-      put: vi.fn((key: string, value: string, _expirationInSeconds?: number) => {
-        cacheStore.set(key, String(value));
-      }),
+      put: vi.fn(
+        (key: string, value: string, _expirationInSeconds?: number) => {
+          cacheStore.set(key, String(value));
+        }
+      ),
       get: vi.fn((key: string) => cacheStore.get(key) ?? null)
     })
   };

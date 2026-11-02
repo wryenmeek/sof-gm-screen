@@ -372,4 +372,39 @@ A resonant construct of bronze and coral.
       expect(iframe.style.borderRadius).toBe("6px");
     });
   });
+
+  describe("On-Demand Narrative Promise Extractor Trigger (Ticket 11 / #25)", () => {
+    it("renders #extract-promises-btn in Table Notes header, calls extractNarrativePromises(currentSessionDate), and updates #notes-status", () => {
+      const harness = setupClientHarness({
+        extractedPromisesResult: {
+          sessionDate: "2026-10-31",
+          extractedCount: 3,
+          createdCount: 3,
+          created: 3,
+          tasks: [
+            { id: "t1", title: "Promise A" },
+            { id: "t2", title: "Promise B" },
+            { id: "t3", title: "Promise C" }
+          ]
+        }
+      });
+
+      const btn = document.getElementById(
+        "extract-promises-btn"
+      ) as HTMLButtonElement | null;
+      expect(btn).not.toBeNull();
+      expect(btn!.textContent).toContain("✨ Extract Promises to Tasks");
+      expect(harness.triggerPromiseExtraction).toBeDefined();
+
+      harness.triggerPromiseExtraction();
+      expect(harness.extractNarrativePromisesSpy).toHaveBeenCalledWith(
+        "2026-10-31"
+      );
+      const statusEl =
+        document.getElementById("notes-status") ||
+        document.getElementById("save-status");
+      expect(statusEl).not.toBeNull();
+      expect(statusEl!.textContent).toContain("3");
+    });
+  });
 });

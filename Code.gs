@@ -387,8 +387,7 @@ function parseGlossaryFileContent_(fileName, rawContent) {
           const title = String(item.title || item.name).trim();
           entries.push({
             id:
-              item.id ||
-              fileName.replace(/\W+/g, "_").toLowerCase() + "_" + i,
+              item.id || fileName.replace(/\W+/g, "_").toLowerCase() + "_" + i,
             title: title,
             source: item.source || fileName,
             summary: String(item.summary || item.description || "").trim(),
@@ -683,7 +682,9 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
   }
 
   if (!event) {
-    throw new Error("Calendar event not found: " + (targetDateStr || "upcoming"));
+    throw new Error(
+      "Calendar event not found: " + (targetDateStr || "upcoming")
+    );
   }
 
   const guests = event.getGuestList() || [];

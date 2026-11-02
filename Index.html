@@ -442,10 +442,34 @@
 
       #rule-card {
         display: none;
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 1000;
+        max-width: 420px;
+        width: calc(100% - 40px);
         background: #161b26;
         border: 2px solid var(--gold);
         border-radius: 10px;
         padding: 16px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+      }
+
+      #rule-card.visible {
+        display: block;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .companion-only-mode #sidebar,
+      .companion-only-mode #workspace {
+        display: none !important;
+      }
+
+      .companion-only-mode #player-hud {
+        display: flex !important;
       }
 
       @media (width <= 768px) {
@@ -496,7 +520,66 @@
           placeholder="🔍 Filter maps, statblocks, notes..."
           oninput="filterFiles(this.value)"
         />
-        <div id="audio-cache-status">Audio: 0/0 ready</div>
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+          "
+        >
+          <div id="audio-cache-status">Audio: 0/0 ready</div>
+          <div
+            id="classifier-tier-status"
+            style="
+              font-size: 10px;
+              color: var(--gold-light);
+              font-family: &quot;Fira Code&quot;, monospace;
+            "
+          >
+            Tier: TIER_3_MANUAL_UI
+          </div>
+        </div>
+        <div
+          id="mixer-mood-bar"
+          style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center"
+        >
+          <button
+            class="mood-cue-btn"
+            data-mood="exploration"
+            onclick="triggerManualMoodCue('exploration')"
+          >
+            Exploration
+          </button>
+          <button
+            class="mood-cue-btn"
+            data-mood="tension"
+            onclick="triggerManualMoodCue('tension')"
+          >
+            Tension
+          </button>
+          <button
+            class="mood-cue-btn"
+            data-mood="combat"
+            onclick="triggerManualMoodCue('combat')"
+          >
+            Combat
+          </button>
+          <button
+            class="mood-cue-btn"
+            data-mood="rest"
+            onclick="triggerManualMoodCue('rest')"
+          >
+            Rest
+          </button>
+          <button
+            id="save-timeline-btn"
+            onclick="flushAudioTimeline(currentSessionDate)"
+            title="Save Audio Timeline Sidecar"
+          >
+            💾 Save Timeline
+          </button>
+        </div>
 
         <div id="file-list">Loading files...</div>
       </div>
@@ -505,13 +588,21 @@
       <div id="scratchpad-container">
         <div class="scratchpad-header">
           <span id="scratchpad-label">table_notes.md (<?= sessionDate ?>)</span>
+          <button
+            id="extract-promises-btn"
+            onclick="triggerPromiseExtraction()"
+          >
+            ✨ Extract Promises to Tasks
+          </button>
         </div>
         <textarea
           id="scratchpad"
           placeholder="Loading session table notes..."
         ></textarea>
         <div class="scratchpad-controls">
-          <span id="save-status">Loading...</span>
+          <span id="notes-status"
+            ><span id="save-status">Loading...</span></span
+          >
           <button class="primary" onclick="saveNotes()">Save (Ctrl+S)</button>
         </div>
       </div>
@@ -555,9 +646,9 @@
       </div>
     </div>
 
-    <!-- Mobile Player Companion HUD (Tickets 07 & 08) -->
+    <!-- Mobile Player Companion HUD (Tickets 07, 08, 22 & 23) -->
     <div id="player-hud">
-      <header class="mobile-header">
+      <header class="mobile-header player-header">
         <span
           style="
             font-family: Cinzel, serif;
@@ -566,7 +657,18 @@
           "
           >⚔️ Sea of Fortune</span
         >
-        <span id="player-tag">Player: Guest</span>
+        <span
+          id="player-session-date"
+          style="
+            font-family: &quot;Fira Code&quot;, monospace;
+            font-size: 12px;
+            color: var(--cyan);
+          "
+          ><?= sessionDate ?></span
+        >
+        <span id="player-identity-display"
+          ><span id="player-tag">Player: Guest</span></span
+        >
       </header>
 
       <div id="identity-modal" class="id-modal">
@@ -607,36 +709,55 @@
         </button>
       </div>
 
-      <button id="ptt-btn" onclick="triggerPtt()">🎙️ Tap to Ask Rule</button>
+      <input
+        type="search"
+        id="ptt-dictation-input"
+        placeholder="🎙️ Tap & Dictate or Type Rule..."
+        oninput="handleDictationInput(this.value)"
+        onkeydown="handleDictationKeydown(event)"
+        style="
+          width: 100%;
+          background: #0f172a;
+          color: var(--text);
+          border: 1px solid var(--gold);
+          border-radius: 8px;
+          padding: 12px;
+          font-size: 15px;
+        "
+      />
 
-      <div id="rule-card">
-        <h2 id="card-title">Rule Title</h2>
-        <div id="card-type">Mechanic</div>
-        <p id="card-text">Rule description...</p>
-        <div style="display: flex; gap: 8px; margin-top: 12px">
-          <button
-            id="btn-up"
-            class="primary"
-            onclick="submitRuleFeedback('+1')"
-          >
-            👍 Helpful
-          </button>
-          <button id="btn-down" onclick="submitRuleFeedback('-1')">
-            👎 Irrelevant
-          </button>
-          <button id="btn-dismiss" onclick="dismissRuleCard()">
-            ✕ Dismiss
-          </button>
-        </div>
+      <button id="ptt-btn" onclick="triggerPtt()">🎙️ Tap to Ask Rule</button>
+    </div>
+
+    <div id="rule-card">
+      <h2 id="card-title">Rule Title</h2>
+      <div id="card-type">Mechanic</div>
+      <p id="card-text">Rule description...</p>
+      <div style="display: flex; gap: 8px; margin-top: 12px">
+        <button id="btn-up" class="primary" onclick="submitRuleFeedback('+1')">
+          👍 Helpful
+        </button>
+        <button id="btn-down" onclick="submitRuleFeedback('-1')">
+          👎 Irrelevant
+        </button>
+        <button id="btn-dismiss" onclick="dismissRuleCard()">✕ Dismiss</button>
       </div>
     </div>
 
     <script>
       let currentSessionDate = "<?= sessionDate ?>";
+      const rawViewModeTemplate =
+        "<?= typeof viewMode !== 'undefined' ? viewMode : 'gm' ?>";
+      if (typeof window !== "undefined" && !window.INITIAL_VIEW_MODE) {
+        window.INITIAL_VIEW_MODE = rawViewModeTemplate.startsWith("<?")
+          ? "gm"
+          : rawViewModeTemplate;
+      }
       const cache = {};
       let allFiles = [];
       let currentLeftPayload = null;
       let miniSearch = null;
+      let currentPlayerIdentity = "Guest";
 
       // Configure marked for tables and line breaks
       marked.setOptions({
@@ -644,10 +765,32 @@
         breaks: true
       });
 
+      function isCompanionMode_() {
+        const search =
+          (typeof window !== "undefined" &&
+            window.location &&
+            window.location.search) ||
+          "";
+        return (
+          (typeof window !== "undefined" &&
+            window.INITIAL_VIEW_MODE === "companion") ||
+          search.includes("view=companion")
+        );
+      }
+
       window.onload = () => {
+        initCompanionState();
+        if (isCompanionMode_()) {
+          document.body.classList.add("companion-only-mode");
+          loadDriveRulesGlossary(currentSessionDate);
+          return;
+        }
+        AudioCache.pruneStaleEntries();
+        TabletopMixer.hydrateFromLocalStorage(currentSessionDate);
         loadSessionDropdown();
         refreshManifest();
         loadScratchpad();
+        loadDriveRulesGlossary(currentSessionDate);
       };
 
       // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
@@ -1160,12 +1303,12 @@
       function saveNotes() {
         const content = document.getElementById("scratchpad").value;
         const status = document.getElementById("save-status");
-        status.textContent = "Saving...";
+        if (status) status.textContent = "Saving...";
 
-        flushAudioTimeline();
+        flushAudioTimeline(currentSessionDate);
         google.script.run
           .withSuccessHandler((res) => {
-            status.textContent = "Saved at " + res.updated;
+            if (status) status.textContent = "Saved at " + res.updated;
             if (res.id && cache[res.id]) {
               delete cache[res.id];
             }
@@ -1174,11 +1317,47 @@
           .saveScratchpadNotes(currentSessionDate, content);
       }
 
-      // Ticket 04: IndexedDB Audio Pre-Caching Engine
+      const saveScratchpad = saveNotes;
+
+      function triggerPromiseExtraction() {
+        const statusEl =
+          document.getElementById("save-status") ||
+          document.getElementById("notes-status");
+        if (statusEl) statusEl.textContent = "Extracting promises...";
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler((res) => {
+            const count =
+              res && typeof res.created === "number"
+                ? res.created
+                : res && typeof res.createdCount === "number"
+                  ? res.createdCount
+                  : res && Array.isArray(res.tasks)
+                    ? res.tasks.length
+                    : 0;
+            if (statusEl) {
+              statusEl.textContent = "Extracted " + count + " promise task(s)";
+            }
+          });
+          if (runner && typeof runner.extractNarrativePromises === "function") {
+            runner.extractNarrativePromises(currentSessionDate);
+          } else if (
+            typeof google.script.run.extractNarrativePromises === "function"
+          ) {
+            google.script.run.extractNarrativePromises(currentSessionDate);
+          }
+        }
+      }
+
+      // Ticket 04 & 19: IndexedDB Audio Pre-Caching Engine & Drive v3 Bearer Fetch
       const AudioCache = {
         dbName: "sof_audio_cache_v1",
         storeName: "tracks",
         memoryStore: new Map(),
+        oauthToken: "session-oauth-token",
         openDb_() {
           return new Promise((resolve) => {
             if (
@@ -1208,97 +1387,265 @@
             }
           });
         },
+        normalizeRecord_(fileId, val, lastAccessed = Date.now()) {
+          if (val && typeof val === "object" && "buffer" in val) {
+            return {
+              fileId: val.fileId || fileId,
+              buffer: val.buffer,
+              lastAccessed:
+                typeof val.lastAccessed === "number"
+                  ? val.lastAccessed
+                  : lastAccessed,
+              byteLength: val.buffer ? val.buffer.byteLength : 0
+            };
+          }
+          return {
+            fileId: fileId,
+            buffer: val,
+            lastAccessed: lastAccessed,
+            byteLength: val && val.byteLength ? val.byteLength : 0
+          };
+        },
         async has(fileId) {
           if (this.memoryStore.has(fileId)) return true;
-          const val = await this.get(fileId);
-          return val !== undefined && val !== null;
-        },
-        async get(fileId) {
-          if (this.memoryStore.has(fileId)) {
-            return this.memoryStore.get(fileId);
-          }
           const db = await this.openDb_();
-          if (!db) return undefined;
+          if (!db) return false;
           return new Promise((resolve) => {
             try {
               const tx = db.transaction(this.storeName, "readonly");
               const store = tx.objectStore(this.storeName);
               const req = store.get(fileId);
-              req.onsuccess = () => {
-                if (req.result !== undefined && req.result !== null) {
-                  this.memoryStore.set(fileId, req.result);
-                }
-                resolve(req.result);
-              };
-              req.onerror = () => resolve(undefined);
+              req.onsuccess = () =>
+                resolve(req.result !== undefined && req.result !== null);
+              req.onerror = () => resolve(false);
             } catch (_e) {
-              resolve(undefined);
+              resolve(false);
             }
           });
         },
-        async set(fileId, arrayBuffer) {
-          this.memoryStore.set(fileId, arrayBuffer);
+        async get(fileId) {
+          let record = this.memoryStore.get(fileId);
+          if (!record) {
+            const db = await this.openDb_();
+            if (db) {
+              record = await new Promise((resolve) => {
+                try {
+                  const tx = db.transaction(this.storeName, "readonly");
+                  const store = tx.objectStore(this.storeName);
+                  const req = store.get(fileId);
+                  req.onsuccess = () => resolve(req.result);
+                  req.onerror = () => resolve(undefined);
+                } catch (_e) {
+                  resolve(undefined);
+                }
+              });
+            }
+          }
+          if (record === undefined || record === null) return undefined;
+          const normalized = this.normalizeRecord_(fileId, record, Date.now());
+          normalized.lastAccessed = Date.now();
+          this.memoryStore.set(fileId, normalized);
+          this.putTrack(fileId, normalized.buffer, normalized.lastAccessed);
+          return normalized.buffer;
+        },
+        async putTrack(fileId, buffer, lastAccessed = Date.now()) {
+          const record = this.normalizeRecord_(fileId, buffer, lastAccessed);
+          this.memoryStore.set(fileId, record);
           const db = await this.openDb_();
-          if (!db) return;
+          if (!db) return record;
           return new Promise((resolve) => {
             try {
               const tx = db.transaction(this.storeName, "readwrite");
               const store = tx.objectStore(this.storeName);
-              const req = store.put(arrayBuffer, fileId);
-              req.onsuccess = () => resolve();
-              req.onerror = () => resolve();
+              const req = store.put(record, fileId);
+              req.onsuccess = () => resolve(record);
+              req.onerror = () => resolve(record);
             } catch (_e) {
-              resolve();
+              resolve(record);
             }
           });
         },
-        async fetchAudioBytes_(fileMeta) {
+        async set(fileId, arrayBuffer, lastAccessed = Date.now()) {
+          return this.putTrack(fileId, arrayBuffer, lastAccessed);
+        },
+        async pruneStaleEntries(maxAgeMs = 30 * 86400 * 1000) {
+          const now = Date.now();
+          let pruned = 0;
+          for (const [k, rec] of Array.from(this.memoryStore.entries())) {
+            const norm = this.normalizeRecord_(k, rec);
+            if (now - norm.lastAccessed > maxAgeMs) {
+              this.memoryStore.delete(k);
+              pruned++;
+            }
+          }
+          const db = await this.openDb_();
+          if (!db) return pruned;
+          return new Promise((resolve) => {
+            try {
+              const tx = db.transaction(this.storeName, "readwrite");
+              const store = tx.objectStore(this.storeName);
+              if (typeof store.getAll === "function") {
+                const req = store.getAll();
+                req.onsuccess = () => {
+                  const all = Array.isArray(req.result) ? req.result : [];
+                  let pending = 0;
+                  for (let i = 0; i < all.length; i++) {
+                    const item = all[i];
+                    if (
+                      item &&
+                      item.fileId &&
+                      typeof item.lastAccessed === "number" &&
+                      now - item.lastAccessed > maxAgeMs
+                    ) {
+                      this.memoryStore.delete(item.fileId);
+                      if (typeof store.delete === "function") {
+                        pending++;
+                        const delReq = store.delete(item.fileId);
+                        const done = () => {
+                          pending--;
+                          if (pending === 0) resolve(pruned);
+                        };
+                        delReq.onsuccess = done;
+                        delReq.onerror = done;
+                      }
+                    }
+                  }
+                  if (pending === 0) resolve(pruned);
+                };
+                req.onerror = () => resolve(pruned);
+              } else {
+                resolve(pruned);
+              }
+            } catch (_e) {
+              resolve(pruned);
+            }
+          });
+        },
+        async clearCache() {
+          this.memoryStore.clear();
+          const db = await this.openDb_();
+          if (db) {
+            await new Promise((resolve) => {
+              try {
+                const tx = db.transaction(this.storeName, "readwrite");
+                const store = tx.objectStore(this.storeName);
+                if (typeof store.clear === "function") {
+                  const req = store.clear();
+                  req.onsuccess = () => resolve();
+                  req.onerror = () => resolve();
+                } else {
+                  resolve();
+                }
+              } catch (_e) {
+                resolve();
+              }
+            });
+          }
+          const statusEl = document.getElementById("audio-cache-status");
+          if (statusEl) {
+            statusEl.textContent = "Audio: 0/0 ready";
+          }
+        },
+        async fetchDriveAudioBearer(fileId, oauthToken) {
+          const token = oauthToken || this.oauthToken || "session-oauth-token";
           const url =
-            (fileMeta && fileMeta.downloadUrl) ||
-            "https://drive.google.com/uc?export=download&id=" + fileMeta.id;
+            "https://www.googleapis.com/drive/v3/files/" +
+            encodeURIComponent(fileId) +
+            "?alt=media";
+          let buffer = new ArrayBuffer(0);
           if (
             typeof window !== "undefined" &&
             typeof window.fetch === "function"
           ) {
             try {
-              const res = await window.fetch(url);
+              const res = await window.fetch(url, {
+                headers: { Authorization: "Bearer " + token }
+              });
               if (res && res.ok && typeof res.arrayBuffer === "function") {
-                return await res.arrayBuffer();
+                buffer = await res.arrayBuffer();
               }
             } catch (_e) {}
           }
-          return new ArrayBuffer(0);
+          await this.putTrack(fileId, buffer, Date.now());
+          return buffer;
         },
-        async preCacheManifest(files) {
+        async fetchAudioBytes_(fileMeta) {
+          return this.fetchDriveAudioBearer(
+            fileMeta.id,
+            (fileMeta && fileMeta.oauthToken) || this.oauthToken
+          );
+        },
+        async preCacheSessionAudio(files, fetchFn) {
           const audioFiles = (files || []).filter(
             (f) =>
               (f.mimeType && f.mimeType.startsWith("audio/")) ||
               (f.name && /\.(mp3|wav|m4a|ogg)$/i.test(f.name))
           );
+          const statusEl = document.getElementById("audio-cache-status");
+          if (statusEl) {
+            statusEl.textContent = "Audio: 0/" + audioFiles.length + " ready";
+          }
           let ready = 0;
           for (let i = 0; i < audioFiles.length; i++) {
             const af = audioFiles[i];
-            if (!(await this.has(af.id))) {
-              const bytes = await this.fetchAudioBytes_(af);
-              await this.set(af.id, bytes);
+            if (await this.has(af.id)) {
+              await this.get(af.id);
+            } else if (typeof fetchFn === "function") {
+              const bytes = await fetchFn(af);
+              await this.putTrack(af.id, bytes, Date.now());
+            } else {
+              await this.fetchDriveAudioBearer(
+                af.id,
+                (af && af.oauthToken) || this.oauthToken
+              );
             }
             ready++;
-          }
-          const statusEl = document.getElementById("audio-cache-status");
-          if (statusEl) {
-            statusEl.textContent =
-              "Audio: " + ready + "/" + audioFiles.length + " ready";
+            if (statusEl) {
+              statusEl.textContent =
+                "Audio: " + ready + "/" + audioFiles.length + " ready";
+            }
           }
           return ready;
+        },
+        async preCacheManifest(files, fetchFn) {
+          return this.preCacheSessionAudio(files, fetchFn);
         }
       };
 
-      // Ticket 05 & 06: 3-Channel Web Audio API Mixer, Gain Ducking & Sidecar Logger
-      function createGainNode_(ctx, initialGain = 1.0) {
+      // Ticket 05, 06, 20 & 21: 3-Channel Web Audio API Mixer, Auto-Routing, Master Compressor, Gain Ducking & Sidecar Logger
+      function classifyAudioAssetChannel(asset) {
+        const raw =
+          typeof asset === "string"
+            ? asset
+            : (asset && (asset.name || asset.simpleName || asset.id)) || "";
+        const lower = String(raw).toLowerCase();
+        if (lower.includes("[ambience]") || /(?:^|[\s/\]])amb_/.test(lower)) {
+          return 1;
+        }
+        if (
+          lower.includes("[sfx]") ||
+          /(?:^|[\s/\]])sfx_/.test(lower) ||
+          lower.startsWith("sfx_")
+        ) {
+          return 3;
+        }
+        if (
+          lower.includes("[score]") ||
+          lower.includes("[music]") ||
+          /(?:^|[\s/\]])score_/.test(lower) ||
+          lower.startsWith("score_")
+        ) {
+          return 2;
+        }
+        return 2;
+      }
+
+      function createGainNode_(ctx, initialGain = 1.0, destinationNode = null) {
         if (ctx && typeof ctx.createGain === "function") {
           const nativeNode = ctx.createGain();
-          if (ctx.destination && typeof nativeNode.connect === "function") {
-            nativeNode.connect(ctx.destination);
+          const target = destinationNode || ctx.destination;
+          if (target && typeof nativeNode.connect === "function") {
+            nativeNode.connect(target);
           }
           const origSet =
             nativeNode.gain &&
@@ -1322,6 +1669,7 @@
           return nativeNode;
         }
         return {
+          connect() {},
           gain: {
             value: initialGain,
             setValueAtTime(val) {
@@ -1336,9 +1684,10 @@
 
       const TabletopMixer = {
         ctx: null,
-        channel1Gain: createGainNode_(null, 0.2),
+        compressor: null,
+        channel1Gain: createGainNode_(null, 0.18),
         channel2Gain: createGainNode_(null, 1.0),
-        channel3Gain: createGainNode_(null, 1.0),
+        channel3Gain: createGainNode_(null, 0.85),
         timeline: [],
         duckTimer: null,
         init() {
@@ -1348,15 +1697,57 @@
               : null;
           this.ctx =
             typeof AudioCtxCtor === "function" ? new AudioCtxCtor() : null;
-          this.channel1Gain = createGainNode_(this.ctx, 0.2);
-          this.channel2Gain = createGainNode_(this.ctx, 1.0);
-          this.channel3Gain = createGainNode_(this.ctx, 1.0);
+          this.compressor =
+            this.ctx && typeof this.ctx.createDynamicsCompressor === "function"
+              ? this.ctx.createDynamicsCompressor()
+              : null;
+          if (
+            this.compressor &&
+            this.ctx &&
+            this.ctx.destination &&
+            typeof this.compressor.connect === "function"
+          ) {
+            this.compressor.connect(this.ctx.destination);
+          }
+          const masterOut =
+            this.compressor || (this.ctx && this.ctx.destination) || null;
+          this.channel1Gain = createGainNode_(this.ctx, 0.18, masterOut);
+          this.channel2Gain = createGainNode_(this.ctx, 1.0, masterOut);
+          this.channel3Gain = createGainNode_(this.ctx, 0.85, masterOut);
           this.timeline = [];
         },
         now_() {
           return this.ctx && typeof this.ctx.currentTime === "number"
             ? this.ctx.currentTime
             : 0;
+        },
+        logEvent_(entry) {
+          this.timeline.push(entry);
+          try {
+            if (typeof localStorage !== "undefined" && localStorage) {
+              localStorage.setItem(
+                "sof_audio_timeline_" + (currentSessionDate || "default"),
+                JSON.stringify(this.timeline)
+              );
+            }
+          } catch (_e) {}
+        },
+        hydrateFromLocalStorage(sessionDate = currentSessionDate) {
+          const targetSession = sessionDate || currentSessionDate || "default";
+          try {
+            if (typeof localStorage !== "undefined" && localStorage) {
+              const raw = localStorage.getItem(
+                "sof_audio_timeline_" + targetSession
+              );
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                  this.timeline = parsed;
+                }
+              }
+            }
+          } catch (_e) {}
+          return this.timeline;
         },
         playBufferOnChannel_(trackId, gainNode, loop = false) {
           if (
@@ -1366,7 +1757,8 @@
           ) {
             return;
           }
-          const rawBuf = AudioCache.memoryStore.get(trackId);
+          const rec = AudioCache.memoryStore.get(trackId);
+          const rawBuf = rec && rec.buffer ? rec.buffer : rec;
           if (!rawBuf || rawBuf.byteLength === 0) return;
           try {
             const copy = rawBuf.slice(0);
@@ -1381,22 +1773,26 @@
           } catch (_e) {}
         },
         playAmbience(trackId) {
-          this.channel1Gain.gain.setValueAtTime(0.2, this.now_());
+          this.channel1Gain.gain.setValueAtTime(0.18, this.now_());
           this.playBufferOnChannel_(trackId, this.channel1Gain, true);
-          this.timeline.push({
+          this.logEvent_({
             timestamp: Date.now(),
             track: trackId,
             channel: 1,
             eventType: "LOOP",
-            gain: 0.2
+            gain: 0.18
           });
         },
-        crossfadeScore(trackId) {
+        crossfadeScore(trackId, _fromTrackId = null, durationSec = 4.0) {
           const now = this.now_();
-          this.channel2Gain.gain.linearRampToValueAtTime(0.0, now + 2.0);
-          this.channel2Gain.gain.linearRampToValueAtTime(1.0, now + 4.0);
+          const half = durationSec / 2;
+          this.channel2Gain.gain.linearRampToValueAtTime(0.0, now + half);
+          this.channel2Gain.gain.linearRampToValueAtTime(
+            1.0,
+            now + durationSec
+          );
           this.playBufferOnChannel_(trackId, this.channel2Gain, true);
-          this.timeline.push({
+          this.logEvent_({
             timestamp: Date.now(),
             track: trackId,
             channel: 2,
@@ -1405,14 +1801,15 @@
           });
         },
         playSfx(sfxId) {
-          const DUCKED_GAIN = 0.4;
+          const DUCKED_GAIN = 0.398;
           const NORMAL_GAIN = 1.0;
+          this.channel3Gain.gain.setValueAtTime(0.85, this.now_());
           this.channel2Gain.gain.linearRampToValueAtTime(
             DUCKED_GAIN,
-            this.now_() + 0.1
+            this.now_() + 0.05
           );
           this.playBufferOnChannel_(sfxId, this.channel3Gain, false);
-          this.timeline.push({
+          this.logEvent_({
             timestamp: Date.now(),
             track: sfxId,
             channel: 3,
@@ -1425,7 +1822,7 @@
               NORMAL_GAIN,
               this.now_() + 0.4
             );
-            this.timeline.push({
+            this.logEvent_({
               timestamp: Date.now(),
               track: sfxId,
               channel: 2,
@@ -1436,7 +1833,22 @@
         }
       };
 
-      function flushAudioTimeline() {
+      const activeMixer = TabletopMixer;
+
+      function triggerManualMoodCue(mood) {
+        if (!mood) return;
+        if (!activeMixer.ctx) {
+          activeMixer.init();
+        }
+        const normMood = String(mood).trim().toLowerCase();
+        activeMixer.crossfadeScore("score_" + normMood, null, 4.0);
+      }
+
+      function flushAudioTimeline(sessionDate = currentSessionDate) {
+        const targetSession = sessionDate || currentSessionDate;
+        if (!TabletopMixer.timeline || TabletopMixer.timeline.length === 0) {
+          TabletopMixer.hydrateFromLocalStorage(targetSession);
+        }
         if (!TabletopMixer.timeline || TabletopMixer.timeline.length === 0) {
           return;
         }
@@ -1448,16 +1860,16 @@
         ) {
           const runner = google.script.run.withSuccessHandler(() => {});
           if (runner && typeof runner.saveAudioTimeline === "function") {
-            runner.saveAudioTimeline(currentSessionDate, jsonStr);
+            runner.saveAudioTimeline(targetSession, jsonStr);
           } else if (
             typeof google.script.run.saveAudioTimeline === "function"
           ) {
-            google.script.run.saveAudioTimeline(currentSessionDate, jsonStr);
+            google.script.run.saveAudioTimeline(targetSession, jsonStr);
           }
         }
       }
 
-      // Tickets 07 & 08: Mobile Player Companion HUD & PTT Rules Sniffer
+      // Tickets 07, 08, 22 & 23: Mobile Player Companion HUD, MiniSearch Glossary & PTT Rules Sniffer
       const DEFAULT_GLOSSARY = {
         disadvantage: {
           title: "Disadvantage",
@@ -1483,13 +1895,125 @@
           title: "Teleport",
           type: "7th-Level Spell",
           text: "Instantly transport up to 8 willing creatures to a known destination."
+        },
+        misty_step: {
+          title: "Misty Step",
+          type: "2nd-Level Spell",
+          text: "2nd-level conjuration (bonus action, Self): Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space that you can see."
+        },
+        grappling: {
+          title: "Grappling",
+          type: "Combat Mechanic",
+          text: "Use the Attack action to make a special melee attack: Strength (Athletics) contested by target's Strength (Athletics) or Dexterity (Acrobatics). Target's speed becomes 0."
+        },
+        sneak_attack: {
+          title: "Sneak Attack",
+          type: "Class Feature",
+          text: "Once per turn, deal extra 1d6+ damage to one creature you hit with a finesse or ranged weapon if you have advantage on the attack roll or an ally is within 5 feet."
+        },
+        shield: {
+          title: "Shield",
+          type: "1st-Level Spell",
+          text: "1st-level abjuration (reaction when hit by an attack or targeted by magic missile): Until the start of your next turn, you have a +5 bonus to AC."
         }
       };
 
+      let rulesMiniSearch = null;
       let pttTimer = null;
+      let dictationDebounceTimer = null;
       let ruleCardTimer = null;
       let activeRuleCard = null;
       let activeSpeechRecognition = null;
+
+      function getDefaultGlossaryDocs_() {
+        return Object.keys(DEFAULT_GLOSSARY).map((key) => {
+          const item = DEFAULT_GLOSSARY[key];
+          return {
+            id: "default_" + key,
+            title: item.title,
+            source: item.type || "Core Mechanic",
+            summary: item.text || "",
+            tags: key.replace(/_/g, " ") + " " + (item.type || "").toLowerCase()
+          };
+        });
+      }
+
+      function indexRulesGlossary(entries = []) {
+        if (typeof MiniSearch === "undefined") return;
+        rulesMiniSearch = new MiniSearch({
+          fields: ["title", "tags", "summary"],
+          storeFields: ["id", "title", "source", "summary", "tags"],
+          searchOptions: {
+            prefix: true,
+            fuzzy: 0.2,
+            boost: { title: 3.0, tags: 2.0, summary: 1.0 }
+          }
+        });
+        const merged = [];
+        const seenTitles = new Set();
+        const incoming = Array.isArray(entries) ? entries : [];
+        for (let i = 0; i < incoming.length; i++) {
+          const e = incoming[i];
+          if (!e || !e.title) continue;
+          const normTitle = String(e.title).trim().toLowerCase();
+          if (seenTitles.has(normTitle)) continue;
+          seenTitles.add(normTitle);
+          merged.push({
+            id: e.id || "rule_" + i + "_" + normTitle.replace(/\W+/g, "_"),
+            title: String(e.title).trim(),
+            source: e.source || e.type || "Campaign Glossary",
+            summary: String(e.summary || e.text || "").trim(),
+            tags: String(e.tags || normTitle)
+          });
+        }
+        const defaults = getDefaultGlossaryDocs_();
+        for (let j = 0; j < defaults.length; j++) {
+          const d = defaults[j];
+          const normTitle = d.title.toLowerCase();
+          if (!seenTitles.has(normTitle)) {
+            seenTitles.add(normTitle);
+            merged.push(d);
+          }
+        }
+        rulesMiniSearch.addAll(merged);
+      }
+
+      indexRulesGlossary([]);
+
+      function updatePlayerIdentityDom_(playerName) {
+        currentPlayerIdentity = playerName;
+        const tag = document.getElementById("player-tag");
+        const display = document.getElementById("player-identity-display");
+        if (tag) {
+          tag.textContent = "Player: " + playerName;
+        } else if (display) {
+          display.textContent = "Player: " + playerName;
+        }
+        const modal = document.getElementById("identity-modal");
+        if (modal) {
+          modal.classList.add("hidden");
+          modal.style.display = "none";
+        }
+      }
+
+      function initCompanionState() {
+        const sessionDateEl = document.getElementById("player-session-date");
+        if (sessionDateEl) {
+          sessionDateEl.textContent = currentSessionDate;
+        }
+        if (isCompanionMode_()) {
+          document.body.classList.add("companion-only-mode");
+        }
+        let savedIdentity = null;
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            savedIdentity = localStorage.getItem("sof_player_identity");
+          }
+        } catch (_e) {}
+        if (savedIdentity) {
+          updatePlayerIdentityDom_(savedIdentity);
+        }
+      }
 
       function selectPlayerIdentity(playerName) {
         try {
@@ -1497,19 +2021,63 @@
             localStorage.setItem("sof_player_identity", playerName);
           }
         } catch (_e) {}
-        const tag = document.getElementById("player-tag");
-        if (tag) tag.textContent = "Player: " + playerName;
-        const modal = document.getElementById("identity-modal");
-        if (modal) modal.style.display = "none";
+        updatePlayerIdentityDom_(playerName);
+      }
+
+      function loadDriveRulesGlossary(sessionDate = currentSessionDate) {
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler((entries) => {
+            if (entries) {
+              indexRulesGlossary(entries);
+            }
+          });
+          if (runner && typeof runner.getRulesGlossary === "function") {
+            runner.getRulesGlossary(sessionDate || currentSessionDate);
+          }
+        }
       }
 
       function matchSpokenRuleQuery_(transcript) {
-        if (!transcript) return null;
-        const lower = transcript.toLowerCase();
+        if (!transcript || !String(transcript).trim()) return null;
+        const query = String(transcript).trim();
+        if (!rulesMiniSearch && typeof MiniSearch !== "undefined") {
+          indexRulesGlossary([]);
+        }
+        if (rulesMiniSearch) {
+          const hits = rulesMiniSearch.search(query, {
+            prefix: true,
+            fuzzy: 0.2,
+            boost: { title: 3.0, tags: 2.0, summary: 1.0 }
+          });
+          if (hits && hits.length > 0) {
+            const top = hits[0];
+            return {
+              key: top.id || top.title.toLowerCase(),
+              id: top.id,
+              title: top.title,
+              source: top.source || "Core Mechanic",
+              summary: top.summary,
+              text: top.summary,
+              entry: {
+                id: top.id,
+                title: top.title,
+                type: top.source || "Core Mechanic",
+                source: top.source || "Core Mechanic",
+                summary: top.summary,
+                text: top.summary
+              }
+            };
+          }
+        }
+        const lower = query.toLowerCase();
         const keys = Object.keys(DEFAULT_GLOSSARY);
         for (let i = 0; i < keys.length; i++) {
           const key = keys[i];
-          if (lower.includes(key)) {
+          if (lower.includes(key.replace(/_/g, " ")) || lower.includes(key)) {
             return {
               key: key,
               entry: DEFAULT_GLOSSARY[key]
@@ -1519,6 +2087,45 @@
         return null;
       }
 
+      function executeDictationQuery_(rawQuery) {
+        const cleaned = String(rawQuery || "").trim();
+        if (!cleaned) return;
+        const matched = matchSpokenRuleQuery_(cleaned);
+        if (matched && matched.entry) {
+          showRuleCard(matched.entry, cleaned);
+        }
+      }
+
+      function handleDictationInput(val) {
+        if (dictationDebounceTimer) clearTimeout(dictationDebounceTimer);
+        dictationDebounceTimer = setTimeout(() => {
+          executeDictationQuery_(val);
+        }, 900);
+      }
+
+      function handleDictationKeydown(e) {
+        if (e && e.key === "Enter") {
+          e.preventDefault();
+          if (dictationDebounceTimer) clearTimeout(dictationDebounceTimer);
+          const inputEl = document.getElementById("ptt-dictation-input");
+          const val =
+            (e.target && e.target.value) || (inputEl && inputEl.value) || "";
+          executeDictationQuery_(val);
+        }
+      }
+
+      const dictationElInit = document.getElementById("ptt-dictation-input");
+      if (dictationElInit) {
+        dictationElInit.addEventListener("keydown", handleDictationKeydown);
+      }
+
+      function focusDictationFallback_() {
+        const dictationInput = document.getElementById("ptt-dictation-input");
+        if (dictationInput && typeof dictationInput.focus === "function") {
+          dictationInput.focus();
+        }
+      }
+
       function triggerPtt() {
         const btn = document.getElementById("ptt-btn");
         if (!btn) return;
@@ -1526,43 +2133,55 @@
           stopPtt();
           return;
         }
-        btn.classList.add("listening");
-        btn.textContent = "🔴 Listening (4s)...";
 
         const SpeechRecognitionCtor =
           typeof window !== "undefined"
             ? window.SpeechRecognition || window.webkitSpeechRecognition
             : null;
-        if (typeof SpeechRecognitionCtor === "function") {
-          try {
-            activeSpeechRecognition = new SpeechRecognitionCtor();
-            activeSpeechRecognition.continuous = false;
-            activeSpeechRecognition.interimResults = false;
-            activeSpeechRecognition.lang = "en-US";
-            activeSpeechRecognition.onresult = (event) => {
-              const transcript =
-                event &&
-                event.results &&
-                event.results[0] &&
-                event.results[0][0] &&
-                event.results[0][0].transcript
-                  ? event.results[0][0].transcript
-                  : "";
-              const matched = matchSpokenRuleQuery_(transcript);
-              if (matched) {
-                showRuleCard(
-                  matched.entry.title,
-                  matched.entry.text,
-                  transcript.toLowerCase()
-                );
-              }
-              stopPtt();
-            };
-            activeSpeechRecognition.onerror = () => stopPtt();
-            if (typeof activeSpeechRecognition.start === "function") {
-              activeSpeechRecognition.start();
+        if (typeof SpeechRecognitionCtor !== "function") {
+          stopPtt();
+          focusDictationFallback_();
+          return;
+        }
+
+        btn.classList.add("listening");
+        btn.textContent = "🔴 Listening (4s)...";
+
+        try {
+          activeSpeechRecognition = new SpeechRecognitionCtor();
+          activeSpeechRecognition.continuous = false;
+          activeSpeechRecognition.interimResults = false;
+          activeSpeechRecognition.lang = "en-US";
+          activeSpeechRecognition.onresult = (event) => {
+            const transcript =
+              event &&
+              event.results &&
+              event.results[0] &&
+              event.results[0][0] &&
+              event.results[0][0].transcript
+                ? event.results[0][0].transcript
+                : "";
+            const matched = matchSpokenRuleQuery_(transcript);
+            if (matched) {
+              showRuleCard(
+                matched.entry.title,
+                matched.entry.text,
+                transcript.toLowerCase()
+              );
             }
-          } catch (_e) {}
+            stopPtt();
+          };
+          activeSpeechRecognition.onerror = () => {
+            stopPtt();
+            focusDictationFallback_();
+          };
+          if (typeof activeSpeechRecognition.start === "function") {
+            activeSpeechRecognition.start();
+          }
+        } catch (_e) {
+          stopPtt();
+          focusDictationFallback_();
+          return;
         }
 
         if (pttTimer) clearTimeout(pttTimer);
@@ -1589,18 +2208,39 @@
         }
       }
 
-      function showRuleCard(ruleTitle, ruleText, heardPhrase = "") {
+      function showRuleCard(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
         const card = document.getElementById("rule-card");
         const titleEl = document.getElementById("card-title");
+        const typeEl = document.getElementById("card-type");
         const textEl = document.getElementById("card-text");
         if (!card || !titleEl) return;
+
+        let ruleTitle = "";
+        let ruleText = "";
+        let ruleSource = "Mechanic";
+        let heardPhrase = "";
+
+        if (ruleOrTitle && typeof ruleOrTitle === "object") {
+          ruleTitle = ruleOrTitle.title || ruleOrTitle.name || "";
+          ruleText = ruleOrTitle.summary || ruleOrTitle.text || "";
+          ruleSource = ruleOrTitle.source || ruleOrTitle.type || "Mechanic";
+          heardPhrase = String(textOrPhrase || ruleTitle.toLowerCase());
+        } else {
+          ruleTitle = String(ruleOrTitle || "");
+          ruleText = String(textOrPhrase || "");
+          heardPhrase = String(maybePhrase || ruleTitle.toLowerCase());
+        }
+
         activeRuleCard = {
           cardTitle: ruleTitle,
+          source: ruleSource,
           text: ruleText,
-          phrase: heardPhrase || ruleTitle.toLowerCase()
+          phrase: heardPhrase
         };
         titleEl.textContent = ruleTitle;
+        if (typeEl) typeEl.textContent = ruleSource;
         if (textEl) textEl.textContent = ruleText;
+        card.classList.add("visible");
         card.style.display = "block";
         if (ruleCardTimer) clearTimeout(ruleCardTimer);
         ruleCardTimer = setTimeout(() => {
@@ -1611,34 +2251,79 @@
       function dismissRuleCard() {
         if (ruleCardTimer) clearTimeout(ruleCardTimer);
         const card = document.getElementById("rule-card");
-        if (card) card.style.display = "none";
+        if (card) {
+          card.classList.remove("visible");
+          card.style.display = "none";
+        }
       }
 
       function submitRuleFeedback(vote) {
-        let player = "Guest";
+        let player = currentPlayerIdentity || "Guest";
         try {
           if (typeof localStorage !== "undefined" && localStorage) {
-            player = localStorage.getItem("sof_player_identity") || "Guest";
+            player = localStorage.getItem("sof_player_identity") || player;
           }
         } catch (_e) {}
         const payload = {
+          sessionDate: currentSessionDate,
           player: player,
           phrase: (activeRuleCard && activeRuleCard.phrase) || "",
           cardTitle: (activeRuleCard && activeRuleCard.cardTitle) || "",
+          source:
+            (activeRuleCard && activeRuleCard.source) || "D&D 5e Glossary",
           vote: vote
         };
         if (
           typeof google !== "undefined" &&
           google.script &&
-          google.script.run &&
-          typeof google.script.run.logRuleFeedback === "function"
+          google.script.run
         ) {
-          google.script.run.logRuleFeedback(payload);
+          const runner = google.script.run.withSuccessHandler(() => {});
+          if (runner && typeof runner.logRuleFeedback === "function") {
+            runner.logRuleFeedback(payload);
+          } else if (typeof google.script.run.logRuleFeedback === "function") {
+            google.script.run.logRuleFeedback(payload);
+          }
         }
         dismissRuleCard();
       }
 
-      // Ticket 12: In-Browser WebGPU Gemma 4 E2B Audio Intent Classifier Router
+      // Ticket 12 & 26: 3-Tier Edge Classifier Failover & Audio Intent Router
+      const TIER_1_LATENCY_BUDGET_MS = 1500;
+
+      function resolveClassifierTier(state, chunkResult) {
+        if (state && state.piConnection === "OFFLINE") {
+          return {
+            activeTier: "TIER_3_MANUAL_UI",
+            reason: "Pi offline -> Manual UI controls active"
+          };
+        }
+        if (
+          chunkResult &&
+          chunkResult.tier1Status === "OK" &&
+          chunkResult.tier1LatencyMs <= TIER_1_LATENCY_BUDGET_MS
+        ) {
+          return {
+            activeTier: "TIER_1_PI_LOCAL",
+            cue: chunkResult.cue,
+            reason: "Tier 1 local Pi model"
+          };
+        }
+        if (chunkResult && chunkResult.tier2Status === "OK") {
+          return {
+            activeTier: "TIER_2_GEMINI_CLOUD",
+            cue: chunkResult.cue,
+            reason:
+              "Tier 1 exceeded 1500ms or failed -> Auto-routed Speech Chunk to Tier 2 Gemini 2.5 Flash"
+          };
+        }
+        return {
+          activeTier: "TIER_3_MANUAL_UI",
+          reason:
+            "Tier 1 & Tier 2 unavailable -> Degraded to Tier 3 Manual GM Screen Controls"
+        };
+      }
+
       function hasWebGpuSupport() {
         return Boolean(
           typeof window !== "undefined" &&
@@ -1649,6 +2334,13 @@
 
       function handleAudioIntent(intentPayload) {
         if (!intentPayload || !intentPayload.intent) return;
+        const tierLabel = intentPayload.tier || intentPayload.activeTier;
+        if (tierLabel) {
+          const tierEl = document.getElementById("classifier-tier-status");
+          if (tierEl) {
+            tierEl.textContent = "Tier: " + tierLabel;
+          }
+        }
         if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
           TabletopMixer.crossfadeScore(intentPayload.mood);
         } else if (
@@ -1656,12 +2348,36 @@
           intentPayload.rule
         ) {
           const key = intentPayload.rule.toLowerCase();
-          const matched = DEFAULT_GLOSSARY[key] || {
-            title: intentPayload.rule,
-            type: "Rule",
-            text: "Matched table query: " + intentPayload.rule
-          };
-          showRuleCard(matched.title, matched.text, key);
+          const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
+          const matched = (matchedFromSearch && matchedFromSearch.entry) ||
+            DEFAULT_GLOSSARY[key] || {
+              title: intentPayload.rule,
+              type: "Rule",
+              text: "Matched table query: " + intentPayload.rule
+            };
+          showRuleCard(
+            matched.title,
+            matched.text || matched.summary || "",
+            key
+          );
+        }
+      }
+
+      function pollLatestAudioCue() {
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner =
+            google.script.run.withSuccessHandler(handleAudioIntent);
+          if (runner && typeof runner.getLatestAudioCue === "function") {
+            runner.getLatestAudioCue();
+          } else if (
+            typeof google.script.run.getLatestAudioCue === "function"
+          ) {
+            google.script.run.getLatestAudioCue();
+          }
         }
       }
 

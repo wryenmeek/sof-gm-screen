@@ -14,6 +14,6 @@ Issues and specs for this repo live as GitHub issues. See `docs/agents/issue-tra
 
 Canonical triage roles mapped 1:1 (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
 
-### Domain docs
+### Domain docs & coding standards
 
-Single-context layout (`GLOSSARY.md` and `docs/adr/` at repo root). See `docs/agents/domain.md`.
+Single-context layout (`GLOSSARY.md`, `CODING_STANDARDS.md`, and `docs/adr/` at repo root). See `docs/agents/domain.md` and `CODING_STANDARDS.md`.

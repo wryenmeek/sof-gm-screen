@@ -8,7 +8,7 @@
     "typecheck:server": "mkdir -p node_modules/.cache && cp Code.gs node_modules/.cache/Code.js && tsc --lib es2022 --types google-apps-script --noEmit --allowJs --checkJs node_modules/.cache/Code.js",
     "typecheck:tests": "tsc -p tsconfig.json --noEmit",
     "typecheck": "npm run typecheck:server && npm run typecheck:tests",
-    "lint:js": "eslint Code.gs test/**/*.ts",
+    "lint:js": "python3 validate_session_artifacts.py --extract-client-js && eslint Code.gs .vitest/Index.client.js test/**/*.ts",
     "lint:css": "stylelint Index.html",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\"",
     "format:check": "prettier --check \"**/*.{html,gs,js,ts,css,md,json}\" --ignore-path .prettierignore",

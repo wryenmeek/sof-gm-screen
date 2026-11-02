@@ -35,10 +35,45 @@ export default [
       "no-unused-vars": [
         "warn",
         {
+          vars: "local",
           argsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
-          varsIgnorePattern:
-            "^(doGet|doPost|getSessionList|getSessionManifest|getFilePayload|getAudioAuthToken|getScratchpadNotes|saveScratchpadNotes|saveAudioTimeline|getRulesGlossary|logRuleFeedback|installGovernanceTriggers|auditCalendarQuorum|extractNarrativePromises|getLatestAudioCue|_)"
+          varsIgnorePattern: "^_"
+        }
+      ]
+    }
+  },
+  {
+    files: [".vitest/Index.client.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "script",
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        navigator: "readonly",
+        localStorage: "readonly",
+        URLSearchParams: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        console: "readonly",
+        marked: "readonly",
+        MiniSearch: "readonly",
+        google: "readonly"
+      }
+    },
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "no-useless-escape": "off",
+      "no-unused-vars": [
+        "warn",
+        {
+          vars: "local",
+          argsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          varsIgnorePattern: "^_"
         }
       ]
     }

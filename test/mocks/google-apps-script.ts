@@ -16,6 +16,13 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   }
 
   const propsStore = new Map<string, string>();
+  const sheetRows: any[][] = [];
+  const taskStore: Array<{
+    id: string;
+    title: string;
+    notes?: string;
+    due?: string;
+  }> = [];
 
   const DriveApp = {
     getFileById: vi.fn((id: string) => {
@@ -84,7 +91,7 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
         },
         createFile: (name: string, content: string, mimeType: string) => {
           const newFile: MockFile = {
-            id: "new_file_" + Date.now(),
+            id: "new_file_" + Date.now() + "_" + Math.random(),
             name,
             mimeType,
             size: content.length,
@@ -120,10 +127,55 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   };
 
   const UrlFetchApp = {
-    fetch: vi.fn((_url: string) => ({
-      getContentText: () => "<p>Exported Google Doc HTML</p>",
-      getResponseCode: () => 200
+    fetch: vi.fn(
+      (
+        _url: string,
+        _opts?: any
+      ): { getContentText: () => string; getResponseCode: () => number } => ({
+        getContentText: (): string => "<p>Exported Google Doc HTML</p>",
+        getResponseCode: (): number => 200
+      })
+    )
+  };
+
+  const SpreadsheetApp = {
+    openById: vi.fn((_id: string) => ({
+      getSheetByName: vi.fn((_name: string) => ({
+        appendRow: vi.fn((row: any[]) => sheetRows.push(row))
+      })),
+      insertSheet: vi.fn((_name: string) => ({
+        appendRow: vi.fn((row: any[]) => sheetRows.push(row))
+      }))
     }))
+  };
+
+  const mockEvents = new Map<string, any>();
+  const CalendarApp = {
+    GuestStatus: {
+      YES: "YES",
+      NO: "NO",
+      MAYBE: "MAYBE",
+      INVITED: "INVITED"
+    },
+    getDefaultCalendar: () => ({
+      getEventById: (id: string) => mockEvents.get(id) || null
+    })
+  };
+
+  const Tasks = {
+    Tasks: {
+      list: vi.fn((_listId: string) => ({ items: [...taskStore] })),
+      insert: vi.fn((task: any, _listId: string) => {
+        const created = {
+          id: "task_" + (taskStore.length + 1),
+          title: task.title,
+          notes: task.notes,
+          due: task.due
+        };
+        taskStore.push(created);
+        return created;
+      })
+    }
   };
 
   // Assign to global
@@ -133,6 +185,20 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
   (globalThis as any).Utilities = Utilities;
   (globalThis as any).MimeType = MimeType;
   (globalThis as any).UrlFetchApp = UrlFetchApp;
+  (globalThis as any).SpreadsheetApp = SpreadsheetApp;
+  (globalThis as any).CalendarApp = CalendarApp;
+  (globalThis as any).Tasks = Tasks;
 
-  return { fileStore, propsStore, DriveApp, UrlFetchApp };
+  return {
+    fileStore,
+    propsStore,
+    sheetRows,
+    taskStore,
+    mockEvents,
+    DriveApp,
+    UrlFetchApp,
+    SpreadsheetApp,
+    CalendarApp,
+    Tasks
+  };
 }

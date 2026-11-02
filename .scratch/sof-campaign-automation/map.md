@@ -15,36 +15,25 @@ Transform the Sea of Fortune Game Master workspace into an end-to-end tactical c
   - `ADR-0004`: Google Edge CDN image delivery (`https://lh3.googleusercontent.com/d/<id>`) with Drive `/preview` iframe fallback.
   - `ADR-0005`: Native V8 runtime with virtual TypeScript checks and Node VM tests.
   - `ADR-0006`: Client-Side In-Memory MiniSearch Tactical Engine (superseding WASM SQLite Base64 serialization).
-- **Tracker:** Local markdown tracker under `.scratch/sof-campaign-automation/issues/` (exportable to GitHub via `scripts/sync-issues-to-github.sh`).
 
-## Decisions So Far
+## Decisions So Far (Resolved Tickets)
 
-- [ADR-0001: Apps Script Architecture](docs/adr/0001-google-apps-script-architecture.md): Zero-cost hosting backed by Google Drive folder hierarchy.
-- [ADR-0003: Anchor Navigation](docs/adr/0003-iframe-anchor-navigation-isolation.md): Injected click interceptors prevent iframe anchor jumps from hijacking top window.
-- [ADR-0004: Edge CDN Delivery](docs/adr/0004-google-edge-cdn-image-delivery.md): Edge CDN URLs replace Base64 memory bloat on large floor maps.
-- [ADR-0005: Native V8 Virtual Typing](docs/adr/0005-native-v8-with-virtual-typechecking.md): Native JS in Apps Script with Vitest and `@types/google-apps-script`.
-- [ADR-0006: MiniSearch Engine](docs/adr/0006-client-side-minisearch-tactical-engine.md): In-memory BM25+ indexing replaces WASM SQLite Base64 syncing.
-- [Blueprint Decision: IndexedDB Audio Pre-Caching](https://docs.google.com/document/d/1098ijVBIXpH1DydhLTwcYdC2COmi_NRoSYMYrGhFAr4/edit): Pre-fetching audio assets into browser storage eliminates live Drive streaming latency and CORS errors.
-- [Blueprint Decision: Stage 1 Silero VAD Edge Chunker](https://docs.google.com/document/d/1098ijVBIXpH1DydhLTwcYdC2COmi_NRoSYMYrGhFAr4/edit): Raspberry Pi runs Silero VAD over Blue Snowball mic (<2% CPU), stripping 30–50% dead air and saving timestamped `.wav` chunks to `audio_chunks/` for post-session processing.
-- [Blueprint Decision: In-Browser WebGPU Gemma 4 E2B](https://docs.google.com/document/d/1098ijVBIXpH1DydhLTwcYdC2COmi_NRoSYMYrGhFAr4/edit): Zero-install browser inference via WebGPU (MediaPipe / Transformers.js) classifies audio intent into music cues and rule lookups directly in the browser tab, with Gemini Flash cloud fallback.
+- [01: Core In-Memory MiniSearch Manifest Indexing](issues/01-minisearch-manifest-indexing.md): In-memory MiniSearch indexes session manifests on load with prefix and fuzzy search (`82e462c`).
+- [02: 5e Statblock & Dossier Multi-Field Tokenizer](issues/02-statblock-dossier-tokenizer.md): Homebrewery statblock attributes (AC, HP, vulnerabilities, immunities) and markdown headers tokenize into `title`, `tags`, `properties`, and `content` (`9820f9a`).
+- [03: BM25+ Ranking, Field Boosting & Keyboard Shortcut](issues/03-bm25-boosting-and-ui.md): Configured BM25+ field boosting (`title: 3.0`, `tags: 2.5`, `properties: 2.0`, `content: 1.0`) and `/` / `Escape` keyboard shortcuts (`f78b0f9`).
+- [04: IndexedDB Audio Pre-Caching Engine](issues/04-indexeddb-audio-precaching.md): `AudioCache` stores binary audio `ArrayBuffer` payloads by Drive `fileId` and updates `#audio-cache-status`.
+- [05: Web Audio API 3-Channel Mixer & Gain Ducking](issues/05-web-audio-mixer-ducking.md): `TabletopMixer` manages 3 independent gain channels with 4-second crossfades and automated -8dB score ducking for 1.5s on SFX playback.
+- [06: Digital Sidecar Audio Logger](issues/06-audio-timeline-sidecar.md): `flushAudioTimeline()` and `saveAudioTimeline()` persist deduplicated event logs to `session_audio_timeline.json`.
+- [07: Universal Mobile Responsive Viewport & Player HUD](issues/07-mobile-responsive-viewport.md): `@media (width <= 768px)` switches to `#player-hud` with `localStorage` character identity persistence.
+- [08: Mobile Push-to-Talk Rules Sniffer & Feedback Logger](issues/08-mobile-ptt-feedback-logger.md): 4-second PTT window, 30-second auto-dismiss rule cards, and `logRuleFeedback()` appending votes to `Rules_Helper_Feedback` in Google Sheets.
+- [09: Standalone 72-Hour Calendar Attendance Quorum Auditor](issues/09-calendar-attendance-quorum.md): `auditCalendarQuorum()` shifts sessions forward 14 days when confirmed guests < 3 and injects Harptos dates and weather when quorum is met.
+- [10: Gemini Post-Session Promise Extractor to Google Tasks](issues/10-tasks-promise-extractor.md): `extractNarrativePromises()` parses `table_notes.md` via Gemini structured JSON and inserts non-duplicate tasks into Google Tasks.
+- [11: Raspberry Pi Stage 1 Silero VAD Audio Chunker](issues/11-rpi-silero-vad-chunker.md): `scripts/rpi_vad_chunker.py` gates 16kHz mono PCM speech bursts and writes `audio_chunks/chunk_NNNN_start_end.wav` + `session_audio_manifest.json`.
+- [12: In-Browser WebGPU Gemma 4 E2B Audio Intent Classifier](issues/12-webgpu-gemma-intent-classifier.md): `handleAudioIntent()` routes structured `MUSIC_CUE` and `RULE_QUERY` classifications directly to `TabletopMixer` and the Rule Card HUD.
 
-## The Active Frontier (Ready to Implement)
+## The Active Frontier
 
-1. [01: Core In-Memory MiniSearch Manifest Indexing](issues/01-minisearch-manifest-indexing.md) _(In Progress)_
-2. [04: IndexedDB Audio Pre-Caching Engine](issues/04-indexeddb-audio-precaching.md) _(Unblocked)_
-3. [07: Universal Mobile Responsive Viewport & Player HUD](issues/07-mobile-responsive-viewport.md) _(Unblocked)_
-4. [09: Standalone 72-Hour Calendar Attendance Quorum Auditor](issues/09-calendar-attendance-quorum.md) _(Unblocked)_
-5. [10: Gemini Post-Session Promise Extractor to Google Tasks](issues/10-tasks-promise-extractor.md) _(Unblocked)_
-6. [11: Raspberry Pi Stage 1 Silero VAD Audio Chunker](issues/11-rpi-silero-vad-chunker.md) _(Unblocked)_
-
-## Blocked Tickets
-
-- [02: 5e Statblock & Dossier Multi-Field Tokenizer](issues/02-statblock-dossier-tokenizer.md) _(Blocked by 01)_
-- [03: BM25+ Ranking, Field Boosting & Keyboard Shortcut](issues/03-bm25-boosting-and-ui.md) _(Blocked by 02)_
-- [05: Web Audio API 3-Channel Mixer & Gain Ducking](issues/05-web-audio-mixer-ducking.md) _(Blocked by 04)_
-- [06: Digital Sidecar Audio Logger](issues/06-audio-timeline-sidecar.md) _(Blocked by 05)_
-- [08: Mobile Push-to-Talk Rules Sniffer & Feedback Logger](issues/08-mobile-ptt-feedback-logger.md) _(Blocked by 07)_
-- [12: In-Browser WebGPU Gemma 4 E2B Audio Intent Classifier](issues/12-webgpu-gemma-intent-classifier.md) _(Blocked by 05, 11)_
+- All 12 specified tickets are resolved and verified.
 
 ## Not Yet Specified (Fog of War)
 

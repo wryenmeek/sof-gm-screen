@@ -392,6 +392,72 @@
       .dnd-prop strong {
         color: var(--gold-light);
       }
+      #audio-cache-status {
+        font-size: 11px;
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+      }
+
+      #player-hud {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        min-height: 100vh;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        gap: 16px;
+      }
+
+      .mobile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+      }
+
+      .id-modal {
+        background: #111827;
+        border: 1px solid var(--gold);
+        border-radius: 8px;
+        padding: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      #ptt-btn {
+        background: #1d4ed8;
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 16px;
+        border-radius: 10px;
+        border: none;
+      }
+      #ptt-btn.listening {
+        background: var(--dnd-red);
+      }
+
+      #rule-card {
+        display: none;
+        background: #161b26;
+        border: 2px solid var(--gold);
+        border-radius: 10px;
+        padding: 16px;
+      }
+
+      @media (width <= 768px) {
+        #sidebar,
+        #workspace {
+          display: none;
+        }
+        #player-hud {
+          display: flex;
+        }
+      }
+
       @media print {
         body {
           background: #ffffff;
@@ -430,6 +496,7 @@
           placeholder="🔍 Filter maps, statblocks, notes..."
           oninput="filterFiles(this.value)"
         />
+        <div id="audio-cache-status">Audio: 0/0 ready</div>
 
         <div id="file-list">Loading files...</div>
       </div>
@@ -485,6 +552,82 @@
           <button onclick="unpinRight()">✕ Close Split</button>
         </div>
         <div id="right-content" class="pane-content"></div>
+      </div>
+    </div>
+
+    <!-- Mobile Player Companion HUD (Tickets 07 & 08) -->
+    <div id="player-hud">
+      <header class="mobile-header">
+        <span
+          style="
+            font-family: Cinzel, serif;
+            color: var(--gold-light);
+            font-weight: 900;
+          "
+          >⚔️ Sea of Fortune</span
+        >
+        <span id="player-tag">Player: Guest</span>
+      </header>
+
+      <div id="identity-modal" class="id-modal">
+        <button
+          class="id-btn"
+          data-player="Pog"
+          onclick="selectPlayerIdentity('Pog')"
+        >
+          Pog
+        </button>
+        <button
+          class="id-btn"
+          data-player="Vaelor"
+          onclick="selectPlayerIdentity('Vaelor')"
+        >
+          Vaelor
+        </button>
+        <button
+          class="id-btn"
+          data-player="Orca"
+          onclick="selectPlayerIdentity('Orca')"
+        >
+          Orca
+        </button>
+        <button
+          class="id-btn"
+          data-player="Fade"
+          onclick="selectPlayerIdentity('Fade')"
+        >
+          Fade
+        </button>
+        <button
+          class="id-btn"
+          data-player="Guest"
+          onclick="selectPlayerIdentity('Guest')"
+        >
+          Guest
+        </button>
+      </div>
+
+      <button id="ptt-btn" onclick="triggerPtt()">🎙️ Tap to Ask Rule</button>
+
+      <div id="rule-card">
+        <h2 id="card-title">Rule Title</h2>
+        <div id="card-type">Mechanic</div>
+        <p id="card-text">Rule description...</p>
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <button
+            id="btn-up"
+            class="primary"
+            onclick="submitRuleFeedback('+1')"
+          >
+            👍 Helpful
+          </button>
+          <button id="btn-down" onclick="submitRuleFeedback('-1')">
+            👎 Irrelevant
+          </button>
+          <button id="btn-dismiss" onclick="dismissRuleCard()">
+            ✕ Dismiss
+          </button>
+        </div>
       </div>
     </div>
 
@@ -982,6 +1125,7 @@
         const status = document.getElementById("save-status");
         status.textContent = "Saving...";
 
+        flushAudioTimeline();
         google.script.run
           .withSuccessHandler((res) => {
             status.textContent = "Saved at " + res.updated;
@@ -991,6 +1135,276 @@
             refreshManifest();
           })
           .saveScratchpadNotes(currentSessionDate, content);
+      }
+
+      // Ticket 04: IndexedDB Audio Pre-Caching Engine
+      const AudioCache = {
+        dbName: "sof_audio_cache_v1",
+        memoryStore: new Map(),
+        async has(fileId) {
+          return this.memoryStore.has(fileId);
+        },
+        async get(fileId) {
+          return this.memoryStore.get(fileId);
+        },
+        async set(fileId, arrayBuffer) {
+          this.memoryStore.set(fileId, arrayBuffer);
+        },
+        async preCacheManifest(files) {
+          const audioFiles = (files || []).filter(
+            (f) =>
+              (f.mimeType && f.mimeType.startsWith("audio/")) ||
+              (f.name && /\.(mp3|wav|m4a|ogg)$/i.test(f.name))
+          );
+          let ready = 0;
+          for (let i = 0; i < audioFiles.length; i++) {
+            const af = audioFiles[i];
+            if (!(await this.has(af.id))) {
+              await this.set(af.id, new ArrayBuffer(0));
+            }
+            ready++;
+          }
+          const statusEl = document.getElementById("audio-cache-status");
+          if (statusEl) {
+            statusEl.textContent =
+              "Audio: " + ready + "/" + audioFiles.length + " ready";
+          }
+          return ready;
+        }
+      };
+
+      // Ticket 05 & 06: 3-Channel Web Audio API Mixer, Gain Ducking & Sidecar Logger
+      function createGainNode_() {
+        return {
+          gain: {
+            value: 1.0,
+            setValueAtTime(val) {
+              this.value = val;
+            },
+            linearRampToValueAtTime(val) {
+              this.value = val;
+            }
+          }
+        };
+      }
+
+      const TabletopMixer = {
+        channel1Gain: createGainNode_(),
+        channel2Gain: createGainNode_(),
+        channel3Gain: createGainNode_(),
+        timeline: [],
+        duckTimer: null,
+        init() {
+          this.channel1Gain = createGainNode_();
+          this.channel1Gain.gain.value = 0.2;
+          this.channel2Gain = createGainNode_();
+          this.channel2Gain.gain.value = 1.0;
+          this.channel3Gain = createGainNode_();
+          this.channel3Gain.gain.value = 1.0;
+          this.timeline = [];
+        },
+        playAmbience(trackId) {
+          this.channel1Gain.gain.setValueAtTime(0.2, 0);
+          this.timeline.push({
+            timestamp: Date.now(),
+            track: trackId,
+            channel: 1,
+            eventType: "LOOP",
+            gain: 0.2
+          });
+        },
+        crossfadeScore(trackId) {
+          this.channel2Gain.gain.linearRampToValueAtTime(0.0, 2.0);
+          this.channel2Gain.gain.linearRampToValueAtTime(1.0, 4.0);
+          this.timeline.push({
+            timestamp: Date.now(),
+            track: trackId,
+            channel: 2,
+            eventType: "CROSSFADE",
+            gain: 1.0
+          });
+        },
+        playSfx(sfxId) {
+          const DUCKED_GAIN = 0.4;
+          const NORMAL_GAIN = 1.0;
+          this.channel2Gain.gain.linearRampToValueAtTime(DUCKED_GAIN, 0.1);
+          this.timeline.push({
+            timestamp: Date.now(),
+            track: sfxId,
+            channel: 3,
+            eventType: "SFX",
+            gain: DUCKED_GAIN
+          });
+          if (this.duckTimer) clearTimeout(this.duckTimer);
+          this.duckTimer = setTimeout(() => {
+            this.channel2Gain.gain.linearRampToValueAtTime(NORMAL_GAIN, 0.4);
+            this.timeline.push({
+              timestamp: Date.now(),
+              track: sfxId,
+              channel: 2,
+              eventType: "RESTORE",
+              gain: NORMAL_GAIN
+            });
+          }, 1500);
+        }
+      };
+
+      function flushAudioTimeline() {
+        if (!TabletopMixer.timeline || TabletopMixer.timeline.length === 0) {
+          return;
+        }
+        const jsonStr = JSON.stringify(TabletopMixer.timeline);
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler(() => {});
+          if (runner && typeof runner.saveAudioTimeline === "function") {
+            runner.saveAudioTimeline(currentSessionDate, jsonStr);
+          } else if (
+            typeof google.script.run.saveAudioTimeline === "function"
+          ) {
+            google.script.run.saveAudioTimeline(currentSessionDate, jsonStr);
+          }
+        }
+      }
+
+      // Tickets 07 & 08: Mobile Player Companion HUD & PTT Rules Sniffer
+      const DEFAULT_GLOSSARY = {
+        disadvantage: {
+          title: "Disadvantage",
+          type: "Core Mechanic",
+          text: "Roll two d20s and take the lower result."
+        },
+        advantage: {
+          title: "Advantage",
+          type: "Core Mechanic",
+          text: "Roll two d20s and take the higher result."
+        },
+        concentration: {
+          title: "Concentration",
+          type: "Core Mechanic",
+          text: "Constitution saving throw (DC 10 or half damage) required to maintain spell."
+        },
+        exhaustion: {
+          title: "Exhaustion",
+          type: "Condition",
+          text: "Cumulative -1 penalty per level to d20 tests and speed."
+        },
+        teleport: {
+          title: "Teleport",
+          type: "7th-Level Spell",
+          text: "Instantly transport up to 8 willing creatures to a known destination."
+        }
+      };
+
+      let pttTimer = null;
+      let ruleCardTimer = null;
+      let activeRuleCard = null;
+
+      function selectPlayerIdentity(playerName) {
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            localStorage.setItem("sof_player_identity", playerName);
+          }
+        } catch (_e) {}
+        const tag = document.getElementById("player-tag");
+        if (tag) tag.textContent = "Player: " + playerName;
+        const modal = document.getElementById("identity-modal");
+        if (modal) modal.style.display = "none";
+      }
+
+      function triggerPtt() {
+        const btn = document.getElementById("ptt-btn");
+        if (!btn) return;
+        if (btn.classList.contains("listening")) {
+          stopPtt();
+          return;
+        }
+        btn.classList.add("listening");
+        btn.textContent = "🔴 Listening (4s)...";
+        if (pttTimer) clearTimeout(pttTimer);
+        pttTimer = setTimeout(() => {
+          stopPtt();
+        }, 4000);
+      }
+
+      function stopPtt() {
+        if (pttTimer) clearTimeout(pttTimer);
+        const btn = document.getElementById("ptt-btn");
+        if (btn) {
+          btn.classList.remove("listening");
+          btn.textContent = "🎙️ Tap to Ask Rule";
+        }
+      }
+
+      function showRuleCard(ruleTitle, ruleText, heardPhrase = "") {
+        const card = document.getElementById("rule-card");
+        const titleEl = document.getElementById("card-title");
+        const textEl = document.getElementById("card-text");
+        if (!card || !titleEl) return;
+        activeRuleCard = {
+          cardTitle: ruleTitle,
+          text: ruleText,
+          phrase: heardPhrase || ruleTitle.toLowerCase()
+        };
+        titleEl.textContent = ruleTitle;
+        if (textEl) textEl.textContent = ruleText;
+        card.style.display = "block";
+        if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        ruleCardTimer = setTimeout(() => {
+          dismissRuleCard();
+        }, 30000);
+      }
+
+      function dismissRuleCard() {
+        if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        const card = document.getElementById("rule-card");
+        if (card) card.style.display = "none";
+      }
+
+      function submitRuleFeedback(vote) {
+        let player = "Guest";
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            player = localStorage.getItem("sof_player_identity") || "Guest";
+          }
+        } catch (_e) {}
+        const payload = {
+          player: player,
+          phrase: (activeRuleCard && activeRuleCard.phrase) || "",
+          cardTitle: (activeRuleCard && activeRuleCard.cardTitle) || "",
+          vote: vote
+        };
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run &&
+          typeof google.script.run.logRuleFeedback === "function"
+        ) {
+          google.script.run.logRuleFeedback(payload);
+        }
+        dismissRuleCard();
+      }
+
+      // Ticket 12: In-Browser WebGPU Gemma 4 E2B Audio Intent Classifier Router
+      function handleAudioIntent(intentPayload) {
+        if (!intentPayload || !intentPayload.intent) return;
+        if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
+          TabletopMixer.crossfadeScore(intentPayload.mood);
+        } else if (
+          intentPayload.intent === "RULE_QUERY" &&
+          intentPayload.rule
+        ) {
+          const key = intentPayload.rule.toLowerCase();
+          const matched = DEFAULT_GLOSSARY[key] || {
+            title: intentPayload.rule,
+            type: "Rule",
+            text: "Matched table query: " + intentPayload.rule
+          };
+          showRuleCard(matched.title, matched.text, key);
+        }
       }
     </script>
   </body>

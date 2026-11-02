@@ -5,6 +5,7 @@
 
 const SESSIONS_ROOT_ID = "1MnppB86ysCIlqS-c023Ss96rx5vHEnjT";
 const GOOGLE_EDGE_CDN_PREFIX = "https://lh3.googleusercontent.com/d/";
+const FEEDBACK_SHEET_PROP = "SOF_FEEDBACK_SHEET_ID";
 
 /**
  * Returns Google Edge CDN direct URL for a given file ID.
@@ -56,10 +57,10 @@ function getSessionManifest(sessionDate) {
     // 1. Files & Shortcuts in current folder
     const files = f.getFiles();
     while (files.hasNext()) {
-      let file = files.next();
+      const file = files.next();
       let mime = file.getMimeType();
       let id = file.getId();
-      let name = file.getName();
+      const name = file.getName();
 
       // If shortcut, resolve via Drive v3 API
       if (mime === "application/vnd.google-apps.shortcut") {
@@ -239,6 +240,242 @@ function saveScratchpadNotes(sessionDate, content) {
   return {
     id: file.getId(),
     updated: new Date().toLocaleTimeString()
+  };
+}
+
+/**
+ * Ticket 06: Saves or appends digital sidecar audio timeline events to session_audio_timeline.json.
+ */
+function saveAudioTimeline(sessionDate, jsonString) {
+  const folder = resolveSessionFolder_(sessionDate);
+  const fileName = "session_audio_timeline.json";
+  const files = folder.getFilesByName(fileName);
+  const incomingEvents = JSON.parse(jsonString || "[]");
+  let merged = incomingEvents;
+  let file;
+
+  if (files.hasNext()) {
+    file = files.next();
+    try {
+      const existing = JSON.parse(file.getBlob().getDataAsString() || "[]");
+      if (Array.isArray(existing)) {
+        const seenTimestamps = new Set(existing.map((e) => e.timestamp));
+        const newOnly = incomingEvents.filter(
+          (e) => !seenTimestamps.has(e.timestamp)
+        );
+        merged = existing.concat(newOnly);
+      }
+    } catch (_e) {}
+    file.setContent(JSON.stringify(merged, null, 2));
+  } else {
+    file = folder.createFile(
+      fileName,
+      JSON.stringify(merged, null, 2),
+      "application/json"
+    );
+  }
+
+  return {
+    id: file.getId(),
+    count: merged.length,
+    updated: new Date().toLocaleTimeString()
+  };
+}
+
+/**
+ * Ticket 08: Logs crowdsourced player rule card feedback to Rules_Helper_Feedback in Google Sheets.
+ */
+function logRuleFeedback(data) {
+  const props = PropertiesService.getScriptProperties();
+  const sheetId = props.getProperty(FEEDBACK_SHEET_PROP);
+  const payload = {
+    timestamp: new Date().toISOString(),
+    player: (data && data.player) || "Guest",
+    phrase: (data && (data.phrase || data.heardPhrase)) || "",
+    cardTitle: (data && data.cardTitle) || "",
+    source: (data && data.source) || "D&D 5e Glossary",
+    vote: (data && data.vote) || "+1"
+  };
+
+  if (sheetId && typeof SpreadsheetApp !== "undefined") {
+    const ss = SpreadsheetApp.openById(sheetId);
+    let sheet = ss.getSheetByName("Rules_Helper_Feedback");
+    if (!sheet) {
+      sheet = ss.insertSheet("Rules_Helper_Feedback");
+      sheet.appendRow([
+        "Timestamp",
+        "Player",
+        "Heard Phrase",
+        "Matched Card",
+        "Vote",
+        "Source File"
+      ]);
+    }
+    sheet.appendRow([
+      payload.timestamp,
+      payload.player,
+      payload.phrase,
+      payload.cardTitle,
+      payload.vote,
+      payload.source
+    ]);
+  }
+
+  return { status: "logged", entry: payload };
+}
+
+/**
+ * Ticket 09: Audits Calendar event RSVP attendance 72 hours prior to Saturday sessions.
+ * Reschedules forward by 14 days if fewer than 3 players confirm YES, or injects Harptos weather context.
+ */
+function auditCalendarQuorum(eventId, inGameContext) {
+  if (typeof CalendarApp === "undefined") {
+    throw new Error("CalendarApp service is unavailable.");
+  }
+  const cal = CalendarApp.getDefaultCalendar();
+  const event = cal.getEventById(eventId);
+  if (!event) {
+    throw new Error("Calendar event not found: " + eventId);
+  }
+
+  const guests = event.getGuestList();
+  const confirmed = guests.filter(
+    (g) => g.getGuestStatus() === CalendarApp.GuestStatus.YES
+  );
+  const quorumMet = confirmed.length >= 3;
+
+  if (!quorumMet) {
+    const start = event.getStartTime();
+    const end = event.getEndTime();
+    const nextStart = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const nextEnd = new Date(end.getTime() + 14 * 24 * 60 * 60 * 1000);
+    event.setTime(nextStart, nextEnd);
+    event.setDescription(
+      "[RESCHEDULED: Quorum < 3 confirmed players (" +
+        confirmed.length +
+        "/3)] Shifted to next alternate Saturday."
+    );
+    return {
+      quorumMet: false,
+      confirmedCount: confirmed.length,
+      rescheduledTo: nextStart.toISOString()
+    };
+  }
+
+  const ctx = inGameContext || {
+    harptosDate: "14 Tarsakh, 1494 DR",
+    planarAlignment: "Astral Coterminous",
+    weather: "Warm sulfur mist, calm shoals"
+  };
+  const briefing =
+    "=== Sea of Fortune Tactical Brief ===\n" +
+    "Harptos Date: " +
+    ctx.harptosDate +
+    "\n" +
+    "Planar Alignment: " +
+    ctx.planarAlignment +
+    "\n" +
+    "Weather: " +
+    ctx.weather;
+  event.setDescription(briefing);
+
+  return {
+    quorumMet: true,
+    confirmedCount: confirmed.length,
+    description: briefing
+  };
+}
+
+/**
+ * Ticket 10: Extracts narrative promises, crafting timers, and open rulings from table_notes.md
+ * via Gemini structured JSON output and inserts non-duplicate entries into Google Tasks.
+ */
+function extractNarrativePromises(sessionDate, taskListId) {
+  const listId = taskListId || "@default";
+  const scratchpad = getScratchpadNotes(sessionDate);
+  const notesText = scratchpad.content || "";
+
+  const props = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty("GEMINI_API_KEY") || "mock_key";
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+    apiKey;
+
+  const requestBody = {
+    contents: [
+      {
+        parts: [
+          {
+            text:
+              "Extract open GM promises, custom crafting countdowns, and pending rulings from these session notes:\n\n" +
+              notesText
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      responseMimeType: "application/json"
+    }
+  };
+
+  const response = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(requestBody),
+    muteHttpExceptions: true
+  });
+
+  const rawJson = JSON.parse(response.getContentText());
+  let extracted = [];
+  if (
+    rawJson &&
+    rawJson.candidates &&
+    rawJson.candidates[0] &&
+    rawJson.candidates[0].content &&
+    rawJson.candidates[0].content.parts &&
+    rawJson.candidates[0].content.parts[0]
+  ) {
+    const parsed = JSON.parse(rawJson.candidates[0].content.parts[0].text);
+    extracted = parsed.tasks || [];
+  } else if (rawJson && Array.isArray(rawJson.tasks)) {
+    extracted = rawJson.tasks;
+  }
+
+  const createdTasks = [];
+  if (typeof Tasks !== "undefined" && Tasks.Tasks) {
+    const existingResp = Tasks.Tasks.list(listId);
+    const existingItems = (existingResp && existingResp.items) || [];
+    const existingTitles = new Set(existingItems.map((t) => t.title));
+
+    for (let i = 0; i < extracted.length; i++) {
+      const item = extracted[i];
+      if (!item.title || existingTitles.has(item.title)) {
+        continue;
+      }
+      const inserted = Tasks.Tasks.insert(
+        {
+          title: item.title,
+          notes:
+            "[Session " +
+            sessionDate +
+            " | " +
+            (item.category || "Promise") +
+            "] " +
+            (item.notes || ""),
+          due: item.due || undefined
+        },
+        listId
+      );
+      existingTitles.add(item.title);
+      createdTasks.push(inserted);
+    }
+  }
+
+  return {
+    sessionDate: sessionDate,
+    extractedCount: extracted.length,
+    createdCount: createdTasks.length,
+    tasks: createdTasks
   };
 }
 

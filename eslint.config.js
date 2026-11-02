@@ -16,7 +16,10 @@ export default [
         ScriptApp: "readonly",
         PropertiesService: "readonly",
         MimeType: "readonly",
-        Logger: "readonly"
+        Logger: "readonly",
+        SpreadsheetApp: "readonly",
+        CalendarApp: "readonly",
+        Tasks: "readonly"
       }
     },
     rules: {
@@ -34,7 +37,7 @@ export default [
           argsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
           varsIgnorePattern:
-            "^(doGet|getSessionList|getSessionManifest|getFilePayload|getScratchpadNotes|saveScratchpadNotes|_)"
+            "^(doGet|getSessionList|getSessionManifest|getFilePayload|getScratchpadNotes|saveScratchpadNotes|saveAudioTimeline|logRuleFeedback|auditCalendarQuorum|extractNarrativePromises|_)"
         }
       ]
     }

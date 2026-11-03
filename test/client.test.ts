@@ -374,7 +374,7 @@ A resonant construct of bronze and coral.
   });
 
   describe("On-Demand Narrative Promise Extractor Trigger (Ticket 11 / #25)", () => {
-    it("renders #extract-promises-btn in Table Notes header, saves notes first, calls extractNarrativePromises(currentSessionDate), and updates #notes-status", () => {
+    it("renders #extract-promises-btn in Table Notes header, saves notes first, calls extractNarrativePromises(currentSessionDate), and updates #notes-status", async () => {
       const harness = setupClientHarness({
         gmKey: "gm-secret-42",
         extractedPromisesResult: {
@@ -404,7 +404,7 @@ A resonant construct of bronze and coral.
       ) as HTMLTextAreaElement;
       scratchpadEl.value = "# Session Notes\n- Promise: Pog cloak";
 
-      harness.triggerPromiseExtraction();
+      await harness.triggerPromiseExtraction();
       expect(harness.saveScratchpadNotesSpy).toHaveBeenCalledWith(
         "2026-10-31",
         "# Session Notes\n- Promise: Pog cloak",

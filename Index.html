@@ -408,6 +408,9 @@
         color: var(--text);
         gap: 16px;
       }
+      body.companion-only-mode #player-hud {
+        display: flex;
+      }
 
       .mobile-header {
         display: flex;
@@ -463,25 +466,6 @@
         display: none !important;
       }
 
-      .companion-only-mode #sidebar,
-      .companion-only-mode #workspace {
-        display: none !important;
-      }
-
-      .companion-only-mode #player-hud {
-        display: flex !important;
-      }
-
-      @media (width <= 768px) {
-        #sidebar,
-        #workspace {
-          display: none;
-        }
-        #player-hud {
-          display: flex;
-        }
-      }
-
       @media print {
         body {
           background: #ffffff;
@@ -499,7 +483,7 @@
       }
     </style>
   </head>
-  <body>
+  <body class="<?= viewMode === 'companion' ? 'companion-only-mode' : '' ?>">
     <? if (typeof viewMode === "undefined" || viewMode !== "companion") { ?>
     <!-- Left Sidebar -->
     <div id="sidebar">
@@ -821,7 +805,7 @@
         if (isCompanionMode_()) return null;
         notesAutoSaveTimer = setInterval(() => {
           if (!isCompanionMode_()) {
-            saveNotes();
+            void saveNotes().catch(() => {});
           }
         }, NOTES_AUTOSAVE_MS);
         return notesAutoSaveTimer;
@@ -834,6 +818,7 @@
           loadDriveRulesGlossary(currentSessionDate);
           return;
         }
+        installAudioUnlockHandler_();
         AudioCache.pruneStaleEntries();
         TabletopMixer.hydrateFromLocalStorage(currentSessionDate);
         loadSessionDropdown();
@@ -925,6 +910,7 @@
 
       function switchSession(newSessionDate) {
         currentSessionDate = newSessionDate;
+        TabletopMixer.hydrateFromLocalStorage(currentSessionDate);
         document.getElementById("file-list").innerHTML = "Loading files...";
         document.getElementById("scratchpad-label").textContent =
           "table_notes.md (" + currentSessionDate + ")";
@@ -1162,11 +1148,11 @@
         const channel = classifyAudioAssetChannel(fileMeta);
         const trackKey = fileMeta.name || fileMeta.id;
         if (channel === 1) {
-          TabletopMixer.playAmbience(trackKey);
+          TabletopMixer.playAmbience(fileMeta.id, null, trackKey);
         } else if (channel === 3) {
-          TabletopMixer.triggerSfx(trackKey);
+          TabletopMixer.triggerSfx(fileMeta.id, null, trackKey);
         } else {
-          TabletopMixer.crossfadeScore(trackKey);
+          TabletopMixer.crossfadeScore(fileMeta.id, null, 4.0, trackKey);
         }
       }
 
@@ -1422,60 +1408,85 @@
 
         flushAudioTimeline(currentSessionDate);
         const gmKey = getClientGmKey_();
-        google.script.run
-          .withSuccessHandler((res) => {
-            if (status) status.textContent = "Saved at " + res.updated;
-            if (res.id && cache[res.id]) {
-              delete cache[res.id];
-            }
-            refreshManifest();
-          })
-          .saveScratchpadNotes(
-            currentSessionDate,
-            content,
-            ...(gmKey ? [gmKey] : [])
-          );
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler((res) => {
+              if (status) status.textContent = "Saved at " + res.updated;
+              if (res.id && cache[res.id]) {
+                delete cache[res.id];
+              }
+              refreshManifest();
+              resolve(res);
+            })
+            .withFailureHandler((error) => {
+              if (status) {
+                status.textContent =
+                  "Save failed: " +
+                  (error && error.message ? error.message : error);
+              }
+              reject(error);
+            })
+            .saveScratchpadNotes(
+              currentSessionDate,
+              content,
+              ...(gmKey ? [gmKey] : [])
+            );
+        });
       }
 
       function triggerPromiseExtraction() {
-        saveNotes();
         const statusEl =
           document.getElementById("save-status") ||
           document.getElementById("notes-status");
-        if (statusEl) statusEl.textContent = "Extracting promises...";
+        if (statusEl) statusEl.textContent = "Saving before extraction...";
         const gmKey = getClientGmKey_();
-        if (
-          typeof google !== "undefined" &&
-          google.script &&
-          google.script.run
-        ) {
-          const runner = google.script.run.withSuccessHandler((res) => {
-            const count =
-              res && typeof res.createdCount === "number"
-                ? res.createdCount
-                : res && typeof res.created === "number"
-                  ? res.created
-                  : res && Array.isArray(res.tasks)
-                    ? res.tasks.length
-                    : 0;
+        return saveNotes()
+          .then(
+            () =>
+              new Promise((resolve, reject) => {
+                if (
+                  typeof google === "undefined" ||
+                  !google.script ||
+                  !google.script.run
+                ) {
+                  reject(new Error("Apps Script RPC is unavailable"));
+                  return;
+                }
+                const runner = google.script.run
+                  .withSuccessHandler((res) => {
+                    const count =
+                      res && typeof res.createdCount === "number"
+                        ? res.createdCount
+                        : res && typeof res.created === "number"
+                          ? res.created
+                          : res && Array.isArray(res.tasks)
+                            ? res.tasks.length
+                            : 0;
+                    if (statusEl) {
+                      statusEl.textContent =
+                        "Extracted " + count + " promise task(s)";
+                    }
+                    resolve(res);
+                  })
+                  .withFailureHandler(reject);
+                if (typeof runner.extractNarrativePromises !== "function") {
+                  reject(new Error("Narrative extraction RPC is unavailable"));
+                  return;
+                }
+                runner.extractNarrativePromises(
+                  currentSessionDate,
+                  ...(gmKey ? [gmKey] : [])
+                );
+              })
+          )
+          .catch((error) => {
             if (statusEl) {
-              statusEl.textContent = "Extracted " + count + " promise task(s)";
+              statusEl.textContent =
+                "Extraction stopped: " +
+                (error && error.message ? error.message : error);
             }
+            return null;
           });
-          if (runner && typeof runner.extractNarrativePromises === "function") {
-            runner.extractNarrativePromises(
-              currentSessionDate,
-              ...(gmKey ? [gmKey] : [])
-            );
-          } else if (
-            typeof google.script.run.extractNarrativePromises === "function"
-          ) {
-            google.script.run.extractNarrativePromises(
-              currentSessionDate,
-              ...(gmKey ? [gmKey] : [])
-            );
-          }
-        }
       }
 
       // Ticket 04 & 19: IndexedDB Audio Pre-Caching Engine & Drive v3 Bearer Fetch
@@ -1794,6 +1805,8 @@
         ctx: null,
         compressor: null,
         baseChannel2Gain: 0.5,
+        activeScorePlayback: null,
+        scorePlaybackRequestId: 0,
         channel1Gain: createGainNode_(null, 0.18),
         channel2Gain: createGainNode_(null, 0.5),
         channel3Gain: createGainNode_(null, 0.85),
@@ -1824,7 +1837,6 @@
           this.channel1Gain = createGainNode_(this.ctx, 0.18, masterOut);
           this.channel2Gain = createGainNode_(this.ctx, 0.5, masterOut);
           this.channel3Gain = createGainNode_(this.ctx, 0.85, masterOut);
-          this.timeline = [];
         },
         now_() {
           return this.ctx && typeof this.ctx.currentTime === "number"
@@ -1844,6 +1856,7 @@
         },
         hydrateFromLocalStorage(sessionDate = currentSessionDate) {
           const targetSession = sessionDate || currentSessionDate || "default";
+          this.timeline = [];
           try {
             if (typeof localStorage !== "undefined" && localStorage) {
               const raw = localStorage.getItem(
@@ -1863,19 +1876,20 @@
           trackId,
           gainNode,
           loop = false,
-          explicitBuffer = null
+          explicitBuffer = null,
+          onSource = null
         ) {
           if (
             !this.ctx ||
             typeof this.ctx.decodeAudioData !== "function" ||
             typeof this.ctx.createBufferSource !== "function"
           ) {
-            return;
+            return false;
           }
           const rec = AudioCache.memoryStore.get(trackId);
           const rawBuf =
             explicitBuffer || (rec && rec.buffer ? rec.buffer : rec);
-          if (!rawBuf || rawBuf.byteLength === 0) return;
+          if (!rawBuf || rawBuf.byteLength === 0) return false;
           try {
             const copy = rawBuf.slice(0);
             this.ctx.decodeAudioData(copy, (decoded) => {
@@ -1884,11 +1898,23 @@
               src.buffer = decoded;
               src.loop = loop;
               if (typeof src.connect === "function") src.connect(gainNode);
-              if (typeof src.start === "function") src.start(0);
+              const shouldStart =
+                typeof onSource !== "function" || onSource(src) !== false;
+              if (shouldStart && typeof src.start === "function") {
+                src.start(0);
+              } else {
+                if (typeof src.disconnect === "function") src.disconnect();
+                if (typeof gainNode.disconnect === "function") {
+                  gainNode.disconnect();
+                }
+              }
             });
-          } catch (_e) {}
+            return true;
+          } catch (_e) {
+            return false;
+          }
         },
-        playAmbience(trackId, audioBuffer = null) {
+        playAmbience(trackId, audioBuffer = null, trackName = trackId) {
           this.channel1Gain.gain.setValueAtTime(0.18, this.now_());
           this.playBufferOnChannel_(
             trackId,
@@ -1898,34 +1924,101 @@
           );
           this.logEvent_({
             timestamp: Date.now(),
-            track: trackId,
+            track: trackName,
             channel: 1,
             eventType: "LOOP",
             gain: 0.18
           });
         },
-        crossfadeScore(trackName, audioBuffer = null, durationSec = 4.0) {
-          const now = this.now_();
-          this.channel2Gain.gain.setValueAtTime(0, now);
-          this.channel2Gain.gain.linearRampToValueAtTime(
-            this.baseChannel2Gain,
-            now + durationSec
-          );
-          this.playBufferOnChannel_(
-            trackName,
-            this.channel2Gain,
+        crossfadeScore(
+          trackId,
+          audioBuffer = null,
+          durationSec = 4.0,
+          trackName = trackId
+        ) {
+          const duration = Math.max(Number(durationSec) || 0, 0);
+          this.scorePlaybackRequestId += 1;
+          const requestId = this.scorePlaybackRequestId;
+          const incomingGain = createGainNode_(this.ctx, 0, this.channel2Gain);
+          const incomingTargetGain = 1.0;
+          const scheduled = this.playBufferOnChannel_(
+            trackId,
+            incomingGain,
             true,
-            audioBuffer
+            audioBuffer,
+            (source) => {
+              if (requestId !== this.scorePlaybackRequestId) return false;
+              const transitionStart = this.now_();
+              incomingGain.gain.setValueAtTime(0, transitionStart);
+              incomingGain.gain.linearRampToValueAtTime(
+                incomingTargetGain,
+                transitionStart + duration
+              );
+
+              const outgoing = this.activeScorePlayback;
+              if (outgoing) {
+                const outgoingGain = outgoing.gainNode.gain;
+                if (typeof outgoingGain.cancelScheduledValues === "function") {
+                  outgoingGain.cancelScheduledValues(transitionStart);
+                }
+                outgoingGain.setValueAtTime(
+                  outgoingGain.value,
+                  transitionStart
+                );
+                outgoingGain.linearRampToValueAtTime(
+                  0,
+                  transitionStart + duration
+                );
+                outgoing.source.onended = () => {
+                  if (typeof outgoing.source.disconnect === "function") {
+                    outgoing.source.disconnect();
+                  }
+                  if (typeof outgoing.gainNode.disconnect === "function") {
+                    outgoing.gainNode.disconnect();
+                  }
+                  if (this.activeScorePlayback === outgoing) {
+                    this.activeScorePlayback = null;
+                  }
+                };
+                if (typeof outgoing.source.stop === "function") {
+                  outgoing.source.stop(transitionStart + duration);
+                }
+              }
+
+              const playback = {
+                source,
+                gainNode: incomingGain,
+                trackId
+              };
+              this.activeScorePlayback = playback;
+              source.onended = () => {
+                if (typeof source.disconnect === "function") {
+                  source.disconnect();
+                }
+                if (typeof incomingGain.disconnect === "function") {
+                  incomingGain.disconnect();
+                }
+                if (this.activeScorePlayback === playback) {
+                  this.activeScorePlayback = null;
+                }
+              };
+              return true;
+            }
           );
-          this.logEvent_({
-            timestamp: Date.now(),
-            track: trackName,
-            channel: 2,
-            eventType: "CROSSFADE",
-            gain: this.baseChannel2Gain
-          });
+          if (!scheduled && typeof incomingGain.disconnect === "function") {
+            incomingGain.disconnect();
+          }
+          if (scheduled) {
+            this.logEvent_({
+              timestamp: Date.now(),
+              track: trackName,
+              channel: 2,
+              eventType: "CROSSFADE",
+              gain: this.baseChannel2Gain
+            });
+          }
         },
-        triggerSfx(trackName, audioBuffer = null) {
+        triggerSfx(trackId, audioBuffer = null, trackName = trackId) {
           const now = this.now_();
           const duckedGain = Number(
             (this.baseChannel2Gain * Math.pow(10, -8 / 20)).toFixed(3)
@@ -1937,7 +2030,7 @@
             now + 0.05
           );
           this.playBufferOnChannel_(
-            trackName,
+            trackId,
             this.channel3Gain,
             false,
             audioBuffer
@@ -1970,14 +2063,112 @@
       };
 
       const activeMixer = TabletopMixer;
+      let pendingMusicCue_ = null;
+
+      function playMusicCue_(intentPayload) {
+        const scoreAsset = findScoreAssetForMood_(intentPayload.mood);
+        if (scoreAsset) {
+          activeMixer.crossfadeScore(
+            scoreAsset.id,
+            null,
+            4.0,
+            intentPayload.mood
+          );
+        }
+      }
+
+      function flushPendingMusicCue_() {
+        const ctx = activeMixer.ctx;
+        if (!pendingMusicCue_ || !ctx || ctx.state === "suspended") {
+          return;
+        }
+        const cue = pendingMusicCue_;
+        pendingMusicCue_ = null;
+        playMusicCue_(cue);
+      }
+
+      function activateMixerFromUserGesture_() {
+        if (isCompanionMode_()) return null;
+        if (!activeMixer.ctx) activeMixer.init();
+        const ctx = activeMixer.ctx;
+        if (!ctx) return null;
+
+        if (ctx.state === "suspended" && typeof ctx.resume === "function") {
+          try {
+            const resumed = ctx.resume();
+            if (resumed && typeof resumed.then === "function") {
+              return resumed.then(
+                () => flushPendingMusicCue_(),
+                () => null
+              );
+            }
+          } catch (_e) {
+            return null;
+          }
+        }
+        flushPendingMusicCue_();
+        return null;
+      }
+
+      function installAudioUnlockHandler_() {
+        if (isCompanionMode_()) return;
+        document.addEventListener(
+          "pointerdown",
+          activateMixerFromUserGesture_,
+          { passive: true }
+        );
+      }
+
+      function findScoreAssetForMood_(mood) {
+        const normalize = (value) =>
+          String(value || "")
+            .replace(/\.[^/.]+$/, "")
+            .replace(/^\s*\[score\]\s*/i, "")
+            .replace(/^\s*score[\s_-]+/i, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+        const moodKey = normalize(mood);
+        if (!moodKey) return null;
+
+        const scoreAssets = allFiles.filter(
+          (fileMeta) =>
+            fileMeta &&
+            fileMeta.id &&
+            ((fileMeta.mimeType && fileMeta.mimeType.startsWith("audio/")) ||
+              (fileMeta.name && /\.(mp3|wav|m4a|ogg)$/i.test(fileMeta.name))) &&
+            classifyAudioAssetChannel(fileMeta) === 2
+        );
+        const matchingAssets = scoreAssets.filter((fileMeta) => {
+          const name = normalize(fileMeta.simpleName || fileMeta.name);
+          return name === moodKey || ` ${name} `.includes(` ${moodKey} `);
+        });
+        const exactMatches = matchingAssets.filter(
+          (fileMeta) =>
+            normalize(fileMeta.simpleName || fileMeta.name) === moodKey
+        );
+        if (exactMatches.length === 1) return exactMatches[0];
+        return matchingAssets.length === 1 ? matchingAssets[0] : null;
+      }
 
       function triggerManualMoodCue(mood) {
         if (!mood) return;
-        if (!activeMixer.ctx) {
-          activeMixer.init();
-        }
         const normMood = String(mood).trim().toLowerCase();
-        activeMixer.crossfadeScore("score_" + normMood, null, 4.0);
+        const scoreAsset = findScoreAssetForMood_(normMood);
+        if (!scoreAsset) return;
+        const playManualCue = () =>
+          activeMixer.crossfadeScore(
+            scoreAsset.id,
+            null,
+            4.0,
+            "score_" + normMood
+          );
+        const resumeResult = activateMixerFromUserGesture_();
+        if (resumeResult && typeof resumeResult.then === "function") {
+          resumeResult.then(playManualCue);
+        } else {
+          playManualCue();
+        }
       }
 
       function flushAudioTimeline(sessionDate = currentSessionDate) {
@@ -1996,25 +2187,17 @@
           google.script.run
         ) {
           const runner = google.script.run.withSuccessHandler(() => {});
-          if (runner && typeof runner.saveAudioTimeline === "function") {
-            runner.saveAudioTimeline(
-              targetSession,
-              jsonStr,
-              ...(gmKey ? [gmKey] : [])
-            );
-          } else if (
-            typeof google.script.run.saveAudioTimeline === "function"
-          ) {
-            google.script.run.saveAudioTimeline(
-              targetSession,
-              jsonStr,
-              ...(gmKey ? [gmKey] : [])
-            );
-          }
+          runner.saveAudioTimeline(
+            targetSession,
+            jsonStr,
+            ...(gmKey ? [gmKey] : [])
+          );
         }
       }
 
       // Tickets 07, 08, 22 & 23: Mobile Player Companion HUD, MiniSearch Glossary & PTT Rules Sniffer
+      // Intentional mirror of getCoreStarterGlossary_ in Code.gs: the Player Companion
+      // needs the same normalized entries offline when the server glossary RPC is unavailable.
       const DEFAULT_GLOSSARY = {
         disadvantage: {
           id: "srd_disadvantage",
@@ -2523,7 +2706,11 @@
         }
         if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
           if (!isCompanionMode_()) {
-            TabletopMixer.crossfadeScore(intentPayload.mood);
+            if (!activeMixer.ctx || activeMixer.ctx.state === "suspended") {
+              pendingMusicCue_ = intentPayload;
+            } else {
+              playMusicCue_(intentPayload);
+            }
           }
         } else if (
           intentPayload.intent === "RULE_QUERY" &&
@@ -2547,22 +2734,72 @@
         }
       }
 
+      const AUDIO_CUE_POLL_INTERVAL_MS = 5000;
+      let audioCuePollTimer_ = null;
+      let audioCuePollInFlight_ = false;
+
+      function scheduleNextAudioCuePoll_() {
+        if (audioCuePollTimer_ !== null) clearTimeout(audioCuePollTimer_);
+        audioCuePollTimer_ = setTimeout(() => {
+          audioCuePollTimer_ = null;
+          pollLatestAudioCue();
+        }, AUDIO_CUE_POLL_INTERVAL_MS);
+      }
+
       function pollLatestAudioCue() {
-        const gmKey = getClientGmKey_();
+        if (audioCuePollInFlight_) return;
         if (
-          typeof google !== "undefined" &&
-          google.script &&
-          google.script.run
+          typeof google === "undefined" ||
+          !google.script ||
+          !google.script.run
         ) {
-          const runner =
-            google.script.run.withSuccessHandler(handleAudioIntent);
-          if (runner && typeof runner.getLatestAudioCue === "function") {
-            runner.getLatestAudioCue(...(gmKey ? [gmKey] : []));
-          } else if (
-            typeof google.script.run.getLatestAudioCue === "function"
-          ) {
-            google.script.run.getLatestAudioCue(...(gmKey ? [gmKey] : []));
+          scheduleNextAudioCuePoll_();
+          return;
+        }
+
+        const companionMode = isCompanionMode_();
+        const rpcMethodName = companionMode
+          ? "getLatestRuleQueryCueForCompanion"
+          : "getLatestAudioCue";
+        const gmKey = companionMode ? "" : getClientGmKey_();
+        audioCuePollInFlight_ = true;
+        let completed = false;
+        const finishRequest = (cue, succeeded) => {
+          if (completed) return;
+          completed = true;
+          audioCuePollInFlight_ = false;
+          try {
+            if (
+              succeeded &&
+              (!companionMode || (cue && cue.intent === "RULE_QUERY"))
+            ) {
+              handleAudioIntent(cue);
+            }
+          } finally {
+            scheduleNextAudioCuePoll_();
           }
+        };
+
+        try {
+          const runner = google.script.run.withSuccessHandler((cue) =>
+            finishRequest(cue, true)
+          );
+          const configuredRunner =
+            runner && typeof runner.withFailureHandler === "function"
+              ? runner.withFailureHandler(() => finishRequest(null, false))
+              : runner;
+          if (
+            configuredRunner &&
+            typeof configuredRunner[rpcMethodName] === "function"
+          ) {
+            configuredRunner[rpcMethodName](...(gmKey ? [gmKey] : []));
+          } else if (typeof google.script.run[rpcMethodName] === "function") {
+            google.script.run[rpcMethodName](...(gmKey ? [gmKey] : []));
+          } else {
+            finishRequest(null, false);
+          }
+        } catch (_e) {
+          finishRequest(null, false);
         }
       }
 
@@ -2576,6 +2813,7 @@
           handleAudioIntent(event.data.payload);
         }
       });
+      window.addEventListener("load", pollLatestAudioCue);
     </script>
   </body>
 </html>

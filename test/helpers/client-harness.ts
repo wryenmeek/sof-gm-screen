@@ -4,7 +4,9 @@ import { marked } from "marked";
 import MiniSearch from "minisearch";
 
 const cachedHtml = fs.readFileSync("Index.html", "utf8");
-const bodyMatch = cachedHtml.match(/<body>([\s\S]*?)<script>/i);
+const bodyMatch = cachedHtml.match(
+  /<body\b(?:(?:<\?[\s\S]*?\?>)|[^>])*?>([\s\S]*?)<script>/i
+);
 const cachedBodyHtml = bodyMatch ? bodyMatch[1] : "";
 const scriptMatch = cachedHtml.match(
   /<script>([\s\S]*?)<\/script>\s*<\/body>/i
@@ -22,8 +24,12 @@ export interface ClientHarnessOptions {
   filePayloads?: Record<string, any>;
   rulesGlossary?: Array<any>;
   latestAudioCue?: any;
+  companionRuleQueryCue?: any;
+  deferLatestAudioCue?: boolean;
   extractedPromisesResult?: any;
   audioAuthToken?: string;
+  saveDelayMs?: number;
+  saveError?: string;
 }
 
 export function setupClientHarness(options: ClientHarnessOptions = {}) {
@@ -133,6 +139,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     };
     return {
       connect: vi.fn(),
+      disconnect: vi.fn(),
       gain: gainParam
     };
   });
@@ -144,13 +151,26 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     attack: { value: 0.003 },
     release: { value: 0.25 }
   }));
+  const audioCtxDecodeSpy = vi.fn(
+    (_data: ArrayBuffer, onDecoded: (buffer: any) => void) =>
+      onDecoded({ duration: 1 })
+  );
+  const audioCtxCreateSourceSpy = vi.fn(() => ({
+    buffer: null as any,
+    loop: false,
+    onended: null as (() => void) | null,
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn()
+  }));
   (window as any).AudioContext = class MockAudioContext {
     currentTime = 10.0;
     destination = {};
     createGain = audioCtxCreateGainSpy;
     createDynamicsCompressor = audioCtxCreateCompressorSpy;
-    decodeAudioData = vi.fn();
-    createBufferSource = vi.fn();
+    decodeAudioData = audioCtxDecodeSpy;
+    createBufferSource = audioCtxCreateSourceSpy;
   };
 
   // SpeechRecognition mock
@@ -180,6 +200,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   const getRulesGlossarySpy = vi.fn();
   const extractNarrativePromisesSpy = vi.fn();
   const getLatestAudioCueSpy = vi.fn();
+  const getLatestCompanionRuleQueryCueSpy = vi.fn();
+  const latestAudioCueResponses: Array<(value: any) => void> = [];
   const filePayloads = options.filePayloads || {};
 
   (window as any).marked = marked;
@@ -187,82 +209,110 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   (window as any).google = {
     script: {
       run: {
-        withSuccessHandler: (cb: any) => ({
-          getScratchpadNotes: (...args: any[]) => {
-            getScratchpadNotesSpy(...args);
-            if (cb)
-              cb({
-                id: "notes_1",
-                content: "# Notes",
-                updated: "10:00:00 AM"
-              });
-          },
-          saveScratchpadNotes: (...args: any[]) => {
-            saveScratchpadNotesSpy(...args);
-            if (cb) cb({ id: "notes_1", updated: "10:01:00 AM" });
-          },
-          getSessionList: (...args: any[]) => {
-            getSessionListSpy(...args);
-            if (cb) cb(["2026-10-31"]);
-          },
-          getSessionManifest: (...args: any[]) => {
-            getSessionManifestSpy(...args);
-            if (cb) cb([]);
-          },
-          getFilePayload: (...args: any[]) => {
-            getFilePayloadSpy(...args);
-            const fileId = args[0];
-            if (cb && filePayloads[fileId]) {
-              cb(filePayloads[fileId]);
-            }
-          },
-          saveAudioTimeline: (...args: any[]) => {
-            saveAudioTimelineSpy(...args);
-            if (cb) cb({ status: "saved" });
-          },
-          logRuleFeedback: (payload: any) => {
-            logRuleFeedbackSpy(payload);
-            if (cb) cb({ status: "logged" });
-          },
-          getAudioAuthToken: (...args: any[]) => {
-            getAudioAuthTokenSpy(...args);
-            if (cb) cb(options.audioAuthToken || "mock_oauth_token");
-          },
-          getRulesGlossary: (sessionDate: string) => {
-            getRulesGlossarySpy(sessionDate);
-            if (cb && options.rulesGlossary) {
-              cb(options.rulesGlossary);
-            }
-          },
-          extractNarrativePromises: (...args: any[]) => {
-            extractNarrativePromisesSpy(...args);
-            const sessionDate = args[0];
-            if (cb) {
-              cb(
-                options.extractedPromisesResult || {
-                  sessionDate,
-                  extractedCount: 2,
-                  createdCount: 2,
-                  tasks: [
-                    { id: "t1", title: "Promise 1" },
-                    { id: "t2", title: "Promise 2" }
-                  ]
+        withSuccessHandler: (cb: any) => {
+          let failureCb: any;
+          const runner: any = {
+            withFailureHandler: (handler: any) => {
+              failureCb = handler;
+              return runner;
+            },
+            getScratchpadNotes: (...args: any[]) => {
+              getScratchpadNotesSpy(...args);
+              if (cb)
+                cb({
+                  id: "notes_1",
+                  content: "# Notes",
+                  updated: "10:00:00 AM"
+                });
+            },
+            saveScratchpadNotes: (...args: any[]) => {
+              saveScratchpadNotesSpy(...args);
+              const complete = () => {
+                if (options.saveError) {
+                  failureCb?.({ message: options.saveError });
+                } else {
+                  cb?.({ id: "notes_1", updated: "10:01:00 AM" });
                 }
-              );
+              };
+              if (options.saveDelayMs) {
+                setTimeout(complete, options.saveDelayMs);
+              } else {
+                complete();
+              }
+            },
+            getSessionList: (...args: any[]) => {
+              getSessionListSpy(...args);
+              if (cb) cb(["2026-10-31"]);
+            },
+            getSessionManifest: (...args: any[]) => {
+              getSessionManifestSpy(...args);
+              if (cb) cb([]);
+            },
+            getFilePayload: (...args: any[]) => {
+              getFilePayloadSpy(...args);
+              const fileId = args[0];
+              if (cb && filePayloads[fileId]) {
+                cb(filePayloads[fileId]);
+              }
+            },
+            saveAudioTimeline: (...args: any[]) => {
+              saveAudioTimelineSpy(...args);
+              if (cb) cb({ status: "saved" });
+            },
+            logRuleFeedback: (payload: any) => {
+              logRuleFeedbackSpy(payload);
+              if (cb) cb({ status: "logged" });
+            },
+            getAudioAuthToken: (...args: any[]) => {
+              getAudioAuthTokenSpy(...args);
+              if (cb) cb(options.audioAuthToken || "mock_oauth_token");
+            },
+            getRulesGlossary: (sessionDate: string) => {
+              getRulesGlossarySpy(sessionDate);
+              if (cb && options.rulesGlossary) {
+                cb(options.rulesGlossary);
+              }
+            },
+            extractNarrativePromises: (...args: any[]) => {
+              extractNarrativePromisesSpy(...args);
+              const sessionDate = args[0];
+              if (cb) {
+                cb(
+                  options.extractedPromisesResult || {
+                    sessionDate,
+                    extractedCount: 2,
+                    createdCount: 2,
+                    tasks: [
+                      { id: "t1", title: "Promise 1" },
+                      { id: "t2", title: "Promise 2" }
+                    ]
+                  }
+                );
+              }
+            },
+            getLatestAudioCue: (...args: any[]) => {
+              getLatestAudioCueSpy(...args);
+              if (cb && options.deferLatestAudioCue) {
+                latestAudioCueResponses.push(cb);
+              } else if (cb && options.latestAudioCue !== undefined) {
+                cb(options.latestAudioCue);
+              }
+            },
+            getLatestRuleQueryCueForCompanion: (...args: any[]) => {
+              getLatestCompanionRuleQueryCueSpy(...args);
+              if (cb && options.companionRuleQueryCue !== undefined) {
+                cb(options.companionRuleQueryCue);
+              }
             }
-          },
-          getLatestAudioCue: (...args: any[]) => {
-            getLatestAudioCueSpy(...args);
-            if (cb && options.latestAudioCue !== undefined) {
-              cb(options.latestAudioCue);
-            }
-          }
-        }),
+          };
+          return runner;
+        },
         saveAudioTimeline: saveAudioTimelineSpy,
         logRuleFeedback: logRuleFeedbackSpy,
         getFilePayload: getFilePayloadSpy,
         extractNarrativePromises: extractNarrativePromisesSpy,
-        getLatestAudioCue: getLatestAudioCueSpy
+        getLatestAudioCue: getLatestAudioCueSpy,
+        getLatestRuleQueryCueForCompanion: getLatestCompanionRuleQueryCueSpy
       }
     }
   };
@@ -296,6 +346,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         handleAudioIntent: typeof handleAudioIntent !== "undefined" ? handleAudioIntent : undefined,
         resolveClassifierTier: typeof resolveClassifierTier !== "undefined" ? resolveClassifierTier : undefined,
         pollLatestAudioCue: typeof pollLatestAudioCue !== "undefined" ? pollLatestAudioCue : undefined,
+        installAudioUnlockHandler_: typeof installAudioUnlockHandler_ !== "undefined" ? installAudioUnlockHandler_ : undefined,
         flushAudioTimeline: typeof flushAudioTimeline !== "undefined" ? flushAudioTimeline : undefined,
         saveNotes: typeof saveNotes !== "undefined" ? saveNotes : undefined,
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
@@ -330,6 +381,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     idbOpenSpy,
     audioCtxCreateGainSpy,
     audioCtxCreateCompressorSpy,
+    audioCtxDecodeSpy,
+    audioCtxCreateSourceSpy,
     saveAudioTimelineSpy,
     logRuleFeedbackSpy,
     getFilePayloadSpy,
@@ -341,6 +394,11 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     getRulesGlossarySpy,
     extractNarrativePromisesSpy,
     getLatestAudioCueSpy,
+    getLatestCompanionRuleQueryCueSpy,
+    respondToLatestAudioCue: () => {
+      const respond = latestAudioCueResponses.shift();
+      if (respond) respond(options.latestAudioCue);
+    },
     getLastSpeechRecognitionInstance: () => lastSpeechRecognitionInstance
   };
 }

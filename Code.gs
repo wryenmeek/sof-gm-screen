@@ -6,6 +6,10 @@
 const SESSIONS_ROOT_ID = "1MnppB86ysCIlqS-c023Ss96rx5vHEnjT";
 const GOOGLE_EDGE_CDN_PREFIX = "https://lh3.googleusercontent.com/d/";
 const FEEDBACK_SHEET_PROP = "SOF_FEEDBACK_SHEET_ID";
+const RULE_FEEDBACK_RATE_LIMIT_PREFIX = "rule_feedback_";
+const RULE_FEEDBACK_GLOBAL_LIMIT_PROP = "SOF_RULE_FEEDBACK_GLOBAL_ATTEMPTS";
+const RULE_FEEDBACK_WINDOW_MS = 6 * 60 * 60 * 1000;
+const RULE_FEEDBACK_GLOBAL_LIMIT = 200;
 
 /**
  * Returns Google Edge CDN direct URL for a given file ID.
@@ -16,13 +20,13 @@ function getDriveCdnUrl_(fileId) {
 
 /**
  * Server-side GM access guard for Execute as: Me deployments.
- * When ScriptProperty SOF_GM_KEY is configured, calls with a missing or
- * mismatched key throw an "Unauthorized GM RPC" error; when unset, calls succeed.
+ * When ScriptProperty SOF_GM_KEY is absent, or the supplied key is missing or
+ * mismatched, calls fail closed with an "Unauthorized GM RPC" error.
  */
 function assertGmAccess_(gmKey) {
   const expected =
     PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
-  if (expected && gmKey !== expected) {
+  if (!expected || gmKey !== expected) {
     throw new Error("Unauthorized GM RPC");
   }
   return true;
@@ -35,10 +39,17 @@ function doGet(e) {
       : "2026-10-31";
   const template = HtmlService.createTemplateFromFile("Index");
   template.sessionDate = sessionDate;
+  const gmKey = e && e.parameter && e.parameter.gmKey ? e.parameter.gmKey : "";
+  const expectedGmKey =
+    PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
+  const hasGmAccess = Boolean(expectedGmKey && gmKey === expectedGmKey);
   template.viewMode =
-    e && e.parameter && e.parameter.view === "companion" ? "companion" : "gm";
-  template.gmKey =
-    e && e.parameter && e.parameter.gmKey ? e.parameter.gmKey : "";
+    e && e.parameter && e.parameter.view === "companion"
+      ? "companion"
+      : hasGmAccess
+        ? "gm"
+        : "companion";
+  template.gmKey = template.viewMode === "gm" ? gmKey : "";
   return template
     .evaluate()
     .setTitle("Sea of Fortune GM Dashboard - " + sessionDate)
@@ -279,43 +290,60 @@ function saveScratchpadNotes(sessionDate, content, gmKey) {
  */
 function saveAudioTimeline(sessionDate, jsonString, gmKey) {
   assertGmAccess_(gmKey);
-  const folder = resolveSessionFolder_(sessionDate);
-  const fileName = "session_audio_timeline.json";
-  const files = folder.getFilesByName(fileName);
-  const incomingEvents = JSON.parse(jsonString || "[]");
-  let merged = incomingEvents;
-  let file;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const folder = resolveSessionFolder_(sessionDate);
+    const fileName = "session_audio_timeline.json";
+    const files = folder.getFilesByName(fileName);
+    const incomingEvents = JSON.parse(jsonString || "[]");
+    if (!Array.isArray(incomingEvents)) {
+      throw new Error("Audio timeline payload must be a JSON array.");
+    }
 
-  if (files.hasNext()) {
-    file = files.next();
-    try {
-      const existing = JSON.parse(file.getBlob().getDataAsString() || "[]");
-      if (Array.isArray(existing)) {
-        const makeKey = (e) =>
-          String(e.timestamp) +
-          "|" +
-          String(e.eventType || "") +
-          "|" +
-          String(e.track || "");
-        const seenKeys = new Set(existing.map(makeKey));
-        const newOnly = incomingEvents.filter((e) => !seenKeys.has(makeKey(e)));
-        merged = existing.concat(newOnly);
+    let file = null;
+    let merged = [];
+    if (files.hasNext()) {
+      file = files.next();
+      const rawExisting = file.getBlob().getDataAsString() || "[]";
+      const existing = JSON.parse(rawExisting);
+      if (!Array.isArray(existing)) {
+        throw new Error("Audio timeline sidecar must contain a JSON array.");
       }
-    } catch (_e) {}
-    file.setContent(JSON.stringify(merged, null, 2));
-  } else {
-    file = folder.createFile(
-      fileName,
-      JSON.stringify(merged, null, 2),
-      "application/json"
-    );
-  }
+      merged = existing.slice();
+    }
 
-  return {
-    id: file.getId(),
-    count: merged.length,
-    updated: new Date().toLocaleTimeString()
-  };
+    const makeKey = (event) =>
+      String(event && event.timestamp) +
+      "|" +
+      String((event && event.eventType) || "") +
+      "|" +
+      String((event && event.track) || "");
+    const seenKeys = new Set(merged.map(makeKey));
+    for (let i = 0; i < incomingEvents.length; i++) {
+      const event = incomingEvents[i];
+      const key = makeKey(event);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        merged.push(event);
+      }
+    }
+
+    const content = JSON.stringify(merged, null, 2);
+    if (file) {
+      file.setContent(content);
+    } else {
+      file = folder.createFile(fileName, content, "application/json");
+    }
+
+    return {
+      id: file.getId(),
+      count: merged.length,
+      updated: new Date().toLocaleTimeString()
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -555,65 +583,329 @@ function getRulesGlossary(sessionDate) {
   return merged;
 }
 
+function neutralizeSpreadsheetFormula_(value) {
+  const text = String(value == null ? "" : value);
+  let firstContent = 0;
+  while (firstContent < text.length) {
+    const code = text.charCodeAt(firstContent);
+    if (
+      code === 8203 ||
+      code === 65279 ||
+      /\s/.test(text.charAt(firstContent))
+    ) {
+      firstContent++;
+    } else {
+      break;
+    }
+  }
+  return firstContent < text.length &&
+    "=+@-".indexOf(text.charAt(firstContent)) >= 0
+    ? "'" + text
+    : text;
+}
+
+function pruneRuleFeedbackRateLimitProperties_(properties, now) {
+  const windowStart = now - RULE_FEEDBACK_WINDOW_MS;
+  const allProperties = properties.getProperties();
+  const activeUserTimestamps = [];
+  let removed = 0;
+
+  Object.keys(allProperties).forEach((key) => {
+    if (!key.startsWith(RULE_FEEDBACK_RATE_LIMIT_PREFIX)) return;
+    let attempts;
+    try {
+      attempts = JSON.parse(allProperties[key]);
+    } catch (_e) {
+      return;
+    }
+    if (
+      !Array.isArray(attempts) ||
+      attempts.some(
+        (attempt) =>
+          !attempt ||
+          !Number.isFinite(attempt.timestamp) ||
+          typeof attempt.sessionDate !== "string"
+      )
+    ) {
+      return;
+    }
+    const activeAttempts = attempts.filter(
+      (attempt) => attempt.timestamp > windowStart
+    );
+    activeAttempts.forEach((attempt) =>
+      activeUserTimestamps.push(attempt.timestamp)
+    );
+    if (activeAttempts.length === 0) {
+      properties.deleteProperty(key);
+      removed++;
+    } else if (activeAttempts.length !== attempts.length) {
+      properties.setProperty(key, JSON.stringify(activeAttempts));
+    }
+  });
+
+  let globalAttempts = [];
+  const rawGlobalAttempts = properties.getProperty(
+    RULE_FEEDBACK_GLOBAL_LIMIT_PROP
+  );
+  if (rawGlobalAttempts) {
+    try {
+      globalAttempts = JSON.parse(rawGlobalAttempts);
+    } catch (_e) {
+      return null;
+    }
+    if (
+      !Array.isArray(globalAttempts) ||
+      globalAttempts.some((timestamp) => !Number.isFinite(timestamp))
+    ) {
+      return null;
+    }
+    globalAttempts = globalAttempts.filter(
+      (timestamp) => timestamp > windowStart
+    );
+  } else {
+    globalAttempts = activeUserTimestamps;
+  }
+  globalAttempts = globalAttempts
+    .sort((first, second) => first - second)
+    .slice(-RULE_FEEDBACK_GLOBAL_LIMIT);
+
+  if (globalAttempts.length) {
+    properties.setProperty(
+      RULE_FEEDBACK_GLOBAL_LIMIT_PROP,
+      JSON.stringify(globalAttempts)
+    );
+  } else if (rawGlobalAttempts) {
+    properties.deleteProperty(RULE_FEEDBACK_GLOBAL_LIMIT_PROP);
+  }
+
+  return { globalAttempts, removed };
+}
+
+function pruneRuleFeedbackRateLimits_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    const result = pruneRuleFeedbackRateLimitProperties_(
+      properties,
+      Date.now()
+    );
+    if (!result) return { removed: 0, status: "invalid_state" };
+    return { removed: result.removed, status: "pruned" };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function pruneRuleFeedbackRateLimitsTrigger_() {
+  return pruneRuleFeedbackRateLimits_();
+}
+
+function ruleFeedbackRateLimitKey_(email, sessionDate) {
+  const value =
+    String(email || "unknown-user").toLowerCase() + "\u0000" + sessionDate;
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  }
+  return "rule_feedback_" + (hash >>> 0).toString(16);
+}
+
 /**
  * Ticket 08 & 23: Logs crowdsourced player rule card feedback to Rules_Helper_Feedback in Google Sheets.
  */
 function logRuleFeedback(data) {
-  const props = PropertiesService.getScriptProperties();
-  const sheetId = props.getProperty(FEEDBACK_SHEET_PROP);
-  const payload = {
-    timestamp: new Date().toISOString(),
-    sessionDate: (data && data.sessionDate) || "2026-10-31",
-    player: (data && data.player) || "Guest",
-    phrase: (data && (data.phrase || data.heardPhrase)) || "",
-    cardTitle: (data && data.cardTitle) || "",
-    source: (data && data.source) || "D&D 5e Glossary",
-    vote: (data && data.vote) || "+1"
-  };
-
-  if (sheetId && typeof SpreadsheetApp !== "undefined") {
-    const ss = SpreadsheetApp.openById(sheetId);
-    let sheet = ss.getSheetByName("Rules_Helper_Feedback");
-    if (!sheet) {
-      sheet = ss.insertSheet("Rules_Helper_Feedback");
-      sheet.appendRow([
-        "Timestamp ISO",
-        "Session Date",
-        "Player Identity",
-        "Raw Query Phrase",
-        "Matched Rule Title",
-        "Vote"
-      ]);
-    }
-    sheet.appendRow([
-      payload.timestamp,
-      payload.sessionDate,
-      payload.player,
-      payload.phrase,
-      payload.cardTitle,
-      payload.vote
-    ]);
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { status: "invalid" };
   }
 
-  return { status: "logged", entry: payload };
+  const values = {
+    sessionDate: data.sessionDate || "2026-10-31",
+    player: data.player || "Guest",
+    phrase: data.phrase || data.heardPhrase || "",
+    cardTitle: data.cardTitle || "",
+    source: data.source || "D&D 5e Glossary",
+    vote: data.vote || "+1"
+  };
+  const limits = {
+    sessionDate: 10,
+    player: 80,
+    phrase: 500,
+    cardTitle: 200,
+    source: 120
+  };
+  for (const field in limits) {
+    if (
+      typeof values[field] !== "string" ||
+      values[field].length > limits[field]
+    ) {
+      return { status: "invalid" };
+    }
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(values.sessionDate)) {
+    return { status: "invalid" };
+  }
+  if (values.vote !== "+1" && values.vote !== "-1") {
+    return { status: "invalid" };
+  }
+
+  const sessionService = typeof Session !== "undefined" ? Session : null;
+  const userEmail =
+    sessionService && sessionService.getActiveUser
+      ? sessionService.getActiveUser().getEmail()
+      : "";
+  const userKey =
+    userEmail ||
+    (sessionService && sessionService.getTemporaryActiveUserKey
+      ? sessionService.getTemporaryActiveUserKey()
+      : "unknown-user");
+  const rateLimitKey = ruleFeedbackRateLimitKey_(userKey, "durable_window");
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const rateLimitProps = PropertiesService.getScriptProperties();
+    const now = Date.now();
+    const pruned = pruneRuleFeedbackRateLimitProperties_(rateLimitProps, now);
+    if (!pruned) return { status: "rate_limited" };
+
+    const rawAttempts = rateLimitProps.getProperty(rateLimitKey);
+    let attempts = [];
+    if (rawAttempts) {
+      try {
+        attempts = JSON.parse(rawAttempts);
+      } catch (_e) {
+        return { status: "rate_limited" };
+      }
+      if (
+        !Array.isArray(attempts) ||
+        attempts.some(
+          (attempt) =>
+            !attempt ||
+            !Number.isFinite(attempt.timestamp) ||
+            typeof attempt.sessionDate !== "string"
+        )
+      ) {
+        return { status: "rate_limited" };
+      }
+    }
+
+    const windowStart = now - RULE_FEEDBACK_WINDOW_MS;
+    attempts = attempts.filter((attempt) => attempt.timestamp > windowStart);
+    const sessionCount = attempts.filter(
+      (attempt) => attempt.sessionDate === values.sessionDate
+    ).length;
+    if (
+      sessionCount >= 20 ||
+      attempts.length >= 40 ||
+      pruned.globalAttempts.length >= RULE_FEEDBACK_GLOBAL_LIMIT
+    ) {
+      return { status: "rate_limited" };
+    }
+    attempts.push({ timestamp: now, sessionDate: values.sessionDate });
+    pruned.globalAttempts.push(now);
+    rateLimitProps.setProperty(
+      RULE_FEEDBACK_GLOBAL_LIMIT_PROP,
+      JSON.stringify(pruned.globalAttempts)
+    );
+    rateLimitProps.setProperty(rateLimitKey, JSON.stringify(attempts));
+
+    const payload = {
+      timestamp: new Date().toISOString(),
+      sessionDate: values.sessionDate,
+      player: values.player,
+      phrase: values.phrase,
+      cardTitle: values.cardTitle,
+      source: values.source,
+      vote: values.vote
+    };
+    const props = PropertiesService.getScriptProperties();
+    const sheetId = props.getProperty(FEEDBACK_SHEET_PROP);
+    if (sheetId && typeof SpreadsheetApp !== "undefined") {
+      const ss = SpreadsheetApp.openById(sheetId);
+      let sheet = ss.getSheetByName("Rules_Helper_Feedback");
+      if (!sheet) {
+        sheet = ss.insertSheet("Rules_Helper_Feedback");
+        sheet.appendRow([
+          "Timestamp ISO",
+          "Session Date",
+          "Player Identity",
+          "Raw Query Phrase",
+          "Matched Rule Title",
+          "Vote"
+        ]);
+      }
+      sheet.appendRow([
+        payload.timestamp,
+        neutralizeSpreadsheetFormula_(payload.sessionDate),
+        neutralizeSpreadsheetFormula_(payload.player),
+        neutralizeSpreadsheetFormula_(payload.phrase),
+        neutralizeSpreadsheetFormula_(payload.cardTitle),
+        neutralizeSpreadsheetFormula_(payload.vote)
+      ]);
+    }
+
+    return { status: "logged", entry: payload };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
  * Ticket 24: Idempotently installs the Wednesday 12:00 PM time-driven trigger for auditCalendarQuorum.
  */
-function installGovernanceTriggers() {
-  const existing = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < existing.length; i++) {
-    if (existing[i].getHandlerFunction() === "auditCalendarQuorum") {
-      return { installed: false };
+function installGovernanceTriggers(gmKey) {
+  assertGmAccess_(gmKey);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const existing = ScriptApp.getProjectTriggers();
+    let hasAuditTrigger = false;
+    let hasFeedbackPruneTrigger = false;
+    for (let i = 0; i < existing.length; i++) {
+      const handler = existing[i].getHandlerFunction();
+      if (handler === "auditCalendarQuorumTrigger_") {
+        hasAuditTrigger = true;
+      } else if (handler === "pruneRuleFeedbackRateLimitsTrigger_") {
+        hasFeedbackPruneTrigger = true;
+      } else if (handler === "auditCalendarQuorum") {
+        ScriptApp.deleteTrigger(existing[i]);
+      }
     }
+
+    let installed = false;
+    if (!hasAuditTrigger) {
+      ScriptApp.newTrigger("auditCalendarQuorumTrigger_")
+        .timeBased()
+        .onWeekDay(ScriptApp.WeekDay.WEDNESDAY)
+        .atHour(12)
+        .create();
+      installed = true;
+    }
+    if (!hasFeedbackPruneTrigger) {
+      ScriptApp.newTrigger("pruneRuleFeedbackRateLimitsTrigger_")
+        .timeBased()
+        .everyDays(1)
+        .atHour(3)
+        .create();
+      installed = true;
+    }
+    return { installed: installed };
+  } finally {
+    lock.releaseLock();
   }
-  ScriptApp.newTrigger("auditCalendarQuorum")
-    .timeBased()
-    .onWeekDay(ScriptApp.WeekDay.WEDNESDAY)
-    .atHour(12)
-    .create();
-  return { installed: true };
+}
+
+/**
+ * Editor-only setup entrypoint. Run setupGovernanceTriggers_ from the Apps Script editor.
+ * It reads SOF_GM_KEY from Script Properties without exposing a client-callable setup path.
+ */
+function setupGovernanceTriggers_() {
+  const gmKey =
+    PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
+  if (!gmKey) {
+    throw new Error("Set SOF_GM_KEY in Script Properties before setup.");
+  }
+  return installGovernanceTriggers(gmKey);
 }
 
 /**
@@ -658,43 +950,232 @@ function rollSeaWeatherHexflower_(fixedRoll) {
  * Safeguards against 0-guest events, reschedules +14 days when confirmed < 3 or a locked player
  * declines, or rolls 2d8 on the Traveling at Sea Weather Hexflower when Attendance Quorum is met.
  */
-function auditCalendarQuorum(targetDateStr, inGameContext) {
+function auditCalendarQuorum(targetDateStr, inGameContext, gmKey) {
+  assertGmAccess_(gmKey);
+  if (targetDateStr != null && typeof targetDateStr !== "string") {
+    throw new Error("Manual quorum audit expects a date string or event ID.");
+  }
+  return runCalendarQuorumAudit_(targetDateStr, inGameContext);
+}
+
+/**
+ * Private time-trigger handler. The Apps Script trigger event is never treated as an event ID.
+ */
+function auditCalendarQuorumTrigger_(_triggerEvent, auditTime) {
+  return runCalendarQuorumAudit_(
+    auditTime === undefined ? new Date() : auditTime,
+    null,
+    true
+  );
+}
+
+function mergeQuorumDescription_(event, automationText) {
+  const startMarker = "<!-- SOF_QUORUM_AUTOMATION:START -->";
+  const endMarker = "<!-- SOF_QUORUM_AUTOMATION:END -->";
+  const section = startMarker + "\n" + automationText + "\n" + endMarker;
+  const original =
+    typeof event.getDescription === "function"
+      ? String(event.getDescription() || "")
+      : "";
+  const sectionRegex = new RegExp(startMarker + "[\\s\\S]*?" + endMarker);
+  return sectionRegex.test(original)
+    ? original.replace(sectionRegex, section)
+    : [original.replace(/\\s+$/, ""), section].filter(Boolean).join("\n\n");
+}
+
+function updateQuorumDescription_(event, automationText) {
+  const description = mergeQuorumDescription_(event, automationText);
+  event.setDescription(description);
+  return description;
+}
+
+function rescheduleCalendarEventWithNotifications_(
+  calendar,
+  event,
+  nextStart,
+  nextEnd,
+  description,
+  calendarTimeZone
+) {
+  if (
+    typeof Calendar === "undefined" ||
+    !Calendar.Events ||
+    typeof Calendar.Events.list !== "function" ||
+    typeof Calendar.Events.patch !== "function"
+  ) {
+    throw new Error("Advanced Calendar service is unavailable.");
+  }
+  if (typeof event.getId !== "function") {
+    throw new Error("Calendar event iCalUID is unavailable.");
+  }
+
+  const calendarId =
+    typeof calendar.getId === "function" ? calendar.getId() : "primary";
+  const currentStart = event.getStartTime();
+  const matchingEvents = Calendar.Events.list(calendarId, {
+    iCalUID: event.getId(),
+    timeMin: new Date(currentStart.getTime() - 1000).toISOString(),
+    timeMax: new Date(currentStart.getTime() + 1000).toISOString(),
+    singleEvents: true
+  });
+  const items = (matchingEvents && matchingEvents.items) || [];
+  const apiEvent = items.find(
+    (candidate) =>
+      candidate &&
+      candidate.id &&
+      candidate.iCalUID === event.getId() &&
+      candidate.start &&
+      candidate.start.dateTime &&
+      Math.abs(Date.parse(candidate.start.dateTime) - currentStart.getTime()) <
+        1000
+  );
+  if (!apiEvent) {
+    throw new Error(
+      "Calendar API event matching the selected session was not found."
+    );
+  }
+
+  Calendar.Events.patch(
+    {
+      start: { dateTime: nextStart.toISOString(), timeZone: calendarTimeZone },
+      end: { dateTime: nextEnd.toISOString(), timeZone: calendarTimeZone },
+      description: description
+    },
+    calendarId,
+    apiEvent.id,
+    { sendUpdates: "all" }
+  );
+}
+
+function isCalendarSaturday_(date, calendarTimeZone) {
+  return Utilities.formatDate(date, calendarTimeZone, "u") === "6";
+}
+
+function addCalendarDaysToDateString_(dateString, dayCount) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
+  if (!match) {
+    throw new Error("Invalid Calendar date: " + dateString);
+  }
+  const utcDate = new Date(
+    Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]) + dayCount
+    )
+  );
+  return Utilities.formatDate(utcDate, "UTC", "yyyy-MM-dd");
+}
+
+function shiftCalendarDateByDays_(date, dayCount, calendarTimeZone) {
+  const localDateTime = Utilities.formatDate(
+    date,
+    calendarTimeZone,
+    "yyyy-MM-dd'T'HH:mm:ss"
+  );
+  const shiftedDate = addCalendarDaysToDateString_(
+    localDateTime.substring(0, 10),
+    dayCount
+  );
+  const shifted = Utilities.parseDate(
+    shiftedDate + localDateTime.substring(10),
+    calendarTimeZone,
+    "yyyy-MM-dd'T'HH:mm:ss"
+  );
+  shifted.setMilliseconds(date.getMilliseconds());
+  return shifted;
+}
+
+function runCalendarQuorumAudit_(targetDate, inGameContext, isScheduled) {
   if (typeof CalendarApp === "undefined") {
     throw new Error("CalendarApp service is unavailable.");
   }
   const props = PropertiesService.getScriptProperties();
   const cal = CalendarApp.getDefaultCalendar();
+  const customQuery = props.getProperty("SOF_CALENDAR_QUERY");
+  const titleRegex = customQuery
+    ? new RegExp(customQuery, "i")
+    : /dnd|sea of fortune/i;
+  const calendarTimeZone = cal.getTimeZone();
   let event = null;
+  const isDirectEventId =
+    typeof targetDate === "string" &&
+    targetDate &&
+    !/^\d{4}-\d{2}-\d{2}$/.test(targetDate);
 
-  if (targetDateStr && typeof cal.getEventById === "function") {
-    event = cal.getEventById(targetDateStr);
+  if (isDirectEventId && typeof cal.getEventById === "function") {
+    const candidate = cal.getEventById(targetDate);
+    if (
+      candidate &&
+      typeof candidate.getStartTime === "function" &&
+      typeof candidate.getTitle === "function"
+    ) {
+      const candidateStart = candidate.getStartTime();
+      titleRegex.lastIndex = 0;
+      if (
+        isCalendarSaturday_(candidateStart, calendarTimeZone) &&
+        titleRegex.test(candidate.getTitle())
+      ) {
+        event = candidate;
+      }
+    }
   }
 
-  if (!event && typeof cal.getEvents === "function") {
-    const startWindow = targetDateStr ? new Date(targetDateStr) : new Date();
-    const endWindow = new Date(startWindow.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const customQuery = props.getProperty("SOF_CALENDAR_QUERY");
-    const titleRegex = customQuery
-      ? new RegExp(customQuery, "i")
-      : /dnd|sea of fortune/i;
+  if (!event && !isDirectEventId && typeof cal.getEvents === "function") {
+    const startWindow =
+      targetDate instanceof Date
+        ? new Date(targetDate.getTime())
+        : typeof targetDate === "string" && targetDate
+          ? Utilities.parseDate(targetDate, calendarTimeZone, "yyyy-MM-dd")
+          : new Date();
+    const startLocalDate = Utilities.formatDate(
+      startWindow,
+      calendarTimeZone,
+      "yyyy-MM-dd"
+    );
+    if (
+      isNaN(startWindow.getTime()) ||
+      (typeof targetDate === "string" &&
+        targetDate &&
+        startLocalDate !== targetDate)
+    ) {
+      throw new Error("Invalid quorum audit date: " + targetDate);
+    }
+    const endLocalDate = addCalendarDaysToDateString_(startLocalDate, 7);
+    const endWindow = Utilities.parseDate(
+      endLocalDate,
+      calendarTimeZone,
+      "yyyy-MM-dd"
+    );
     const events = cal.getEvents(startWindow, endWindow) || [];
+    let selectedStart = null;
     for (let i = 0; i < events.length; i++) {
       const candidate = events[i];
-      const title =
-        candidate && typeof candidate.getTitle === "function"
-          ? candidate.getTitle()
-          : "";
-      if (titleRegex.test(title)) {
+      if (
+        !candidate ||
+        typeof candidate.getStartTime !== "function" ||
+        typeof candidate.getTitle !== "function"
+      ) {
+        continue;
+      }
+      const candidateStart = candidate.getStartTime();
+      const title = candidate.getTitle();
+      titleRegex.lastIndex = 0;
+      if (
+        isCalendarSaturday_(candidateStart, calendarTimeZone) &&
+        candidateStart.getTime() >= startWindow.getTime() &&
+        candidateStart.getTime() < endWindow.getTime() &&
+        titleRegex.test(title) &&
+        (!selectedStart || candidateStart.getTime() < selectedStart.getTime())
+      ) {
         event = candidate;
-        break;
+        selectedStart = candidateStart;
       }
     }
   }
 
   if (!event) {
-    throw new Error(
-      "Calendar event not found: " + (targetDateStr || "upcoming")
-    );
+    if (isScheduled) return { status: "NO_UPCOMING_SESSION" };
+    throw new Error("Upcoming Saturday Calendar event not found.");
   }
 
   const guests = event.getGuestList() || [];
@@ -702,62 +1183,52 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
     if (typeof Logger !== "undefined" && Logger.log) {
       Logger.log("Skipping quorum cancellation: 0 guests invited on event");
     }
-    return {
-      status: "SKIPPED_NO_GUESTS",
-      confirmedCount: 0,
-      quorumMet: false
-    };
+    return { status: "SKIPPED_NO_GUESTS", confirmed: 0 };
   }
 
   const confirmed = guests.filter(
-    (g) => g.getGuestStatus() === CalendarApp.GuestStatus.YES
+    (guest) => guest.getGuestStatus() === CalendarApp.GuestStatus.YES
   );
-
-  const lockedRaw = props.getProperty("SOF_LOCKED_PLAYERS") || "";
-  const lockedTokens = lockedRaw
+  const lockedTokens = (props.getProperty("SOF_LOCKED_PLAYERS") || "")
     .split(",")
-    .map((s) => s.trim().toLowerCase())
+    .map((token) => token.trim().toLowerCase())
     .filter(Boolean);
-
   let lockedDeclined = false;
-  if (lockedTokens.length > 0) {
-    for (let i = 0; i < guests.length; i++) {
-      const g = guests[i];
-      if (g.getGuestStatus() === CalendarApp.GuestStatus.NO) {
-        const email =
-          typeof g.getEmail === "function"
-            ? String(g.getEmail() || "").toLowerCase()
-            : "";
-        const name =
-          typeof g.getName === "function"
-            ? String(g.getName() || "").toLowerCase()
-            : "";
-        for (let k = 0; k < lockedTokens.length; k++) {
-          const tok = lockedTokens[k];
-          if (
-            (email && (email === tok || email.includes(tok))) ||
-            (name && (name === tok || name.includes(tok)))
-          ) {
-            lockedDeclined = true;
-            break;
-          }
-        }
-      }
-    }
+  for (let i = 0; i < guests.length && !lockedDeclined; i++) {
+    const guest = guests[i];
+    if (guest.getGuestStatus() !== CalendarApp.GuestStatus.NO) continue;
+    const email =
+      typeof guest.getEmail === "function"
+        ? String(guest.getEmail() || "").toLowerCase()
+        : "";
+    const name =
+      typeof guest.getName === "function"
+        ? String(guest.getName() || "").toLowerCase()
+        : "";
+    lockedDeclined = lockedTokens.some(
+      (token) =>
+        (email && (email === token || email.includes(token))) ||
+        (name && (name === token || name.includes(token)))
+    );
   }
 
-  const quorumMet = confirmed.length >= 3 && !lockedDeclined;
-
-  if (!quorumMet) {
+  if (confirmed.length < 3 || lockedDeclined) {
     const start = event.getStartTime();
     const end = event.getEndTime();
-    const nextStart = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
-    const nextEnd = new Date(end.getTime() + 14 * 24 * 60 * 60 * 1000);
-    event.setTime(nextStart, nextEnd);
-    event.setDescription(
+    const nextStart = shiftCalendarDateByDays_(start, 14, calendarTimeZone);
+    const nextEnd = shiftCalendarDateByDays_(end, 14, calendarTimeZone);
+    const note =
       "[RESCHEDULED: Quorum < 3 confirmed players or locked player unavailable (" +
-        confirmed.length +
-        "/3)] Shifted to next alternate Saturday."
+      confirmed.length +
+      "/3)] Shifted to next alternate Saturday.";
+    const description = mergeQuorumDescription_(event, note);
+    rescheduleCalendarEventWithNotifications_(
+      cal,
+      event,
+      nextStart,
+      nextEnd,
+      description,
+      calendarTimeZone
     );
     return {
       status: "RESCHEDULED",
@@ -778,7 +1249,6 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
     inGameContext && inGameContext.weather
       ? inGameContext.weather + " [" + hexWeather.summary + "]"
       : hexWeather.summary;
-
   const briefing =
     "=== Sea of Fortune Tactical Brief ===\n" +
     "In-Game Date: " +
@@ -789,7 +1259,7 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
     "\n" +
     "Traveling at Sea Weather: " +
     weatherDisplay;
-  event.setDescription(briefing);
+  updateQuorumDescription_(event, briefing);
 
   return {
     status: "QUORUM_MET",
@@ -799,6 +1269,82 @@ function auditCalendarQuorum(targetDateStr, inGameContext) {
     inGameDate: inGameDate,
     description: briefing
   };
+}
+
+/**
+ * Returns whether an ISO calendar date is a real date.
+ */
+function isValidTaskCalendarDate_(dateString) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+/**
+ * Converts supported Narrative Promise due values to Google Tasks RFC 3339.
+ *
+ * Relative day values are calculated from the session date; unknown values are
+ * omitted so one model-produced phrase cannot make the Tasks batch fail.
+ */
+function normalizeTaskDue_(due, sessionDate) {
+  if (typeof due !== "string") return undefined;
+  const value = due.trim();
+  if (!value) return undefined;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return isValidTaskCalendarDate_(value)
+      ? value + "T00:00:00.000Z"
+      : undefined;
+  }
+
+  const timestampMatch =
+    /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/i.exec(
+      value
+    );
+  if (
+    timestampMatch &&
+    isValidTaskCalendarDate_(timestampMatch[1]) &&
+    !isNaN(Date.parse(value))
+  ) {
+    return value;
+  }
+
+  const relativeMatch = /^(?:in\s+)?(\d+)\s+days?$/i.exec(value);
+  const relativeDays =
+    relativeMatch && Number(relativeMatch[1]) <= 36500
+      ? Number(relativeMatch[1])
+      : /^today$/i.test(value)
+        ? 0
+        : /^tomorrow$/i.test(value)
+          ? 1
+          : null;
+  if (
+    relativeDays === null ||
+    typeof sessionDate !== "string" ||
+    !isValidTaskCalendarDate_(sessionDate)
+  ) {
+    return undefined;
+  }
+
+  const sessionParts = sessionDate.split("-").map(Number);
+  const dueDate = new Date(0);
+  dueDate.setUTCFullYear(
+    sessionParts[0],
+    sessionParts[1] - 1,
+    sessionParts[2] + relativeDays
+  );
+  dueDate.setUTCHours(0, 0, 0, 0);
+  return dueDate.toISOString();
 }
 
 /**
@@ -812,7 +1358,8 @@ function extractNarrativePromises(sessionDate, gmKey) {
   const notesText = tableNotes.content || "";
 
   const props = PropertiesService.getScriptProperties();
-  const apiKey = props.getProperty("GEMINI_API_KEY") || "mock_key";
+  const apiKey = props.getProperty("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
   const url =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
     apiKey;
@@ -860,43 +1407,76 @@ function extractNarrativePromises(sessionDate, gmKey) {
     muteHttpExceptions: true
   });
 
-  const rawJson = JSON.parse(response.getContentText());
-  let extracted = [];
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+  if (responseCode < 200 || responseCode >= 300) {
+    let detail = responseText;
+    try {
+      const errorBody = JSON.parse(responseText);
+      detail =
+        errorBody && errorBody.error && errorBody.error.message
+          ? errorBody.error.message
+          : responseText;
+    } catch (_e) {}
+    throw new Error(
+      "Gemini API request failed (" + responseCode + "): " + detail
+    );
+  }
+  const rawJson = JSON.parse(responseText);
+  let extracted = null;
   if (
     rawJson &&
     rawJson.candidates &&
     rawJson.candidates[0] &&
     rawJson.candidates[0].content &&
     rawJson.candidates[0].content.parts &&
-    rawJson.candidates[0].content.parts[0]
+    rawJson.candidates[0].content.parts[0] &&
+    rawJson.candidates[0].content.parts[0].text
   ) {
     const parsed = JSON.parse(rawJson.candidates[0].content.parts[0].text);
-    extracted = parsed.tasks || [];
+    extracted = parsed.tasks;
   } else if (rawJson && Array.isArray(rawJson.tasks)) {
     extracted = rawJson.tasks;
   }
+  if (!Array.isArray(extracted)) {
+    throw new Error("Gemini API response did not contain a tasks array.");
+  }
 
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
   const createdTasks = [];
-  if (typeof Tasks !== "undefined" && Tasks.Tasks) {
-    const existingResp = Tasks.Tasks.list(listId);
-    const existingItems = (existingResp && existingResp.items) || [];
-    const existingTitles = new Set(
-      existingItems.map((t) =>
-        String(t.title || "")
-          .trim()
-          .toLowerCase()
-      )
-    );
+  try {
+    if (typeof Tasks === "undefined" || !Tasks.Tasks) {
+      throw new Error("Google Tasks service is unavailable.");
+    }
+    const existingTitles = new Set();
+    /** @type {string | null} */
+    let pageToken = null;
+    do {
+      /** @type {{ showCompleted: boolean, pageToken?: string }} */
+      const options = { showCompleted: false };
+      if (pageToken) options.pageToken = pageToken;
+      const existingResp = Tasks.Tasks.list(listId, options);
+      const existingItems = (existingResp && existingResp.items) || [];
+      for (let i = 0; i < existingItems.length; i++) {
+        const task = existingItems[i];
+        if (
+          task &&
+          task.status !== "completed" &&
+          task.status !== "deleted" &&
+          task.title
+        ) {
+          existingTitles.add(String(task.title).trim().toLowerCase());
+        }
+      }
+      pageToken = (existingResp && existingResp.nextPageToken) || null;
+    } while (pageToken);
 
     for (let i = 0; i < extracted.length; i++) {
       const item = extracted[i];
-      if (!item || !item.title) {
-        continue;
-      }
+      if (!item || !item.title) continue;
       const normTitle = String(item.title).trim().toLowerCase();
-      if (existingTitles.has(normTitle)) {
-        continue;
-      }
+      if (!normTitle || existingTitles.has(normTitle)) continue;
       const taskObj = {
         title: item.title,
         notes:
@@ -906,7 +1486,7 @@ function extractNarrativePromises(sessionDate, gmKey) {
           (item.category || "Promise") +
           "] " +
           (item.notes || ""),
-        due: item.due || undefined
+        due: normalizeTaskDue_(item.due, sessionDate)
       };
       const created = Tasks.Tasks.insert(taskObj, listId);
       existingTitles.add(normTitle);
@@ -920,6 +1500,8 @@ function extractNarrativePromises(sessionDate, gmKey) {
       }
       createdTasks.push(created);
     }
+  } finally {
+    lock.releaseLock();
   }
 
   return {
@@ -934,13 +1516,19 @@ function extractNarrativePromises(sessionDate, gmKey) {
  * Ticket 26: Receives outbound HTTPS POST audio cues from the Raspberry Pi classifier
  * and stores non-BANTER intents in CacheService for 60 seconds.
  */
+function jsonResponse_(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}
+
 function doPost(e) {
   const rawContents = (e && e.postData && e.postData.contents) || "{}";
   const body = JSON.parse(rawContents);
   assertGmAccess_(body.gmKey);
 
   if (!body.intent || body.intent === "BANTER") {
-    return { status: "OK", cached: false };
+    return jsonResponse_({ status: "OK", cached: false });
   }
 
   const cue = {
@@ -951,15 +1539,29 @@ function doPost(e) {
     timestamp: body.timestamp || Date.now()
   };
 
-  if (typeof CacheService !== "undefined" && CacheService.getScriptCache) {
-    CacheService.getScriptCache().put(
-      "sof_latest_audio_cue",
-      JSON.stringify(cue),
-      60
-    );
+  const canCache =
+    typeof CacheService !== "undefined" && CacheService.getScriptCache;
+  if (canCache) {
+    const cache = CacheService.getScriptCache();
+    cache.put("sof_latest_audio_cue", JSON.stringify(cue), 60);
+    if (
+      cue.intent === "RULE_QUERY" &&
+      typeof cue.rule === "string" &&
+      cue.rule.trim()
+    ) {
+      cache.put(
+        "sof_latest_companion_rule_query",
+        JSON.stringify({
+          intent: "RULE_QUERY",
+          rule: cue.rule.trim().slice(0, 200),
+          timestamp: cue.timestamp
+        }),
+        60
+      );
+    }
   }
 
-  return { status: "OK", cached: true };
+  return jsonResponse_({ status: "OK", cached: Boolean(canCache) });
 }
 
 /**
@@ -976,6 +1578,38 @@ function getLatestAudioCue(gmKey) {
   }
   try {
     return JSON.parse(raw);
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Returns only a player-safe Rule Query cue, never GM-only audio manifest data.
+ */
+function getLatestRuleQueryCueForCompanion() {
+  if (typeof CacheService === "undefined" || !CacheService.getScriptCache) {
+    return null;
+  }
+  const raw = CacheService.getScriptCache().get(
+    "sof_latest_companion_rule_query"
+  );
+  if (!raw) return null;
+
+  try {
+    const cue = JSON.parse(raw);
+    if (
+      !cue ||
+      cue.intent !== "RULE_QUERY" ||
+      typeof cue.rule !== "string" ||
+      !cue.rule.trim()
+    ) {
+      return null;
+    }
+    return {
+      intent: "RULE_QUERY",
+      rule: cue.rule.trim().slice(0, 200),
+      timestamp: Number.isFinite(cue.timestamp) ? cue.timestamp : null
+    };
   } catch (_e) {
     return null;
   }

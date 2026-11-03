@@ -19,8 +19,12 @@ export default [
         Logger: "readonly",
         SpreadsheetApp: "readonly",
         CalendarApp: "readonly",
+        Calendar: "readonly",
         Tasks: "readonly",
-        CacheService: "readonly"
+        CacheService: "readonly",
+        LockService: "readonly",
+        Session: "readonly",
+        ContentService: "readonly"
       }
     },
     rules: {

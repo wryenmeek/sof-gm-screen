@@ -181,14 +181,18 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     it("executes a 4-second linear crossfade on Channel 2 score transitions from 0 to 0.5 and auto-routes manifest audio files on selectFile", () => {
       expect(TabletopMixer).toBeDefined();
       TabletopMixer.init();
+      AudioCache.memoryStore.set("combat_theme_01", new ArrayBuffer(8));
       TabletopMixer.crossfadeScore("combat_theme_01");
+      const scoreGain = TabletopMixer.activeScorePlayback.gainNode;
 
+      expect(scoreGain.gain.setValueAtTime).toHaveBeenCalledWith(0, 10.0);
+      expect(scoreGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1,
+        14.0
+      );
       expect(
-        TabletopMixer.channel2Gain.gain.setValueAtTime
-      ).toHaveBeenCalledWith(0, 10.0);
-      expect(
-        TabletopMixer.channel2Gain.gain.linearRampToValueAtTime
-      ).toHaveBeenCalledWith(0.5, 14.0);
+        TabletopMixer.channel2Gain.gain.value * scoreGain.gain.value
+      ).toBeCloseTo(0.5, 3);
 
       const lastEvent =
         TabletopMixer.timeline[TabletopMixer.timeline.length - 1];
@@ -226,6 +230,95 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
             e.eventType === "SFX" && e.track === "[SFX] Cannon_Shot.wav"
         )
       ).toBe(true);
+    });
+
+    it("decodes cached manifest audio and routes source nodes to the intended mixer channels", () => {
+      const graphHarness = setupClientHarness();
+      graphHarness.TabletopMixer.init();
+      graphHarness.AudioCache.memoryStore.set("ambient-id", new ArrayBuffer(8));
+      graphHarness.renderManifest([
+        {
+          id: "ambient-id",
+          name: "[Ambience] Harbor_Waves.mp3",
+          simpleName: "Harbor_Waves.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      graphHarness.selectFile(0);
+
+      expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
+      const ambienceSource =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[0].value;
+      expect(ambienceSource.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel1Gain
+      );
+      expect(ambienceSource.loop).toBe(true);
+      expect(ambienceSource.start).toHaveBeenCalledWith(0);
+
+      graphHarness.AudioCache.memoryStore.set("score-id", new ArrayBuffer(8));
+      graphHarness.TabletopMixer.crossfadeScore(
+        "score-id",
+        null,
+        4,
+        "[Score] Rising Tide.mp3"
+      );
+      const scoreSource =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[1].value;
+      const scoreGain = scoreSource.connect.mock.calls[0][0];
+      expect(scoreGain).not.toBe(graphHarness.TabletopMixer.channel2Gain);
+      expect(scoreGain.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel2Gain
+      );
+      expect(scoreSource.loop).toBe(true);
+      expect(scoreSource.start).toHaveBeenCalledWith(0);
+      expect(scoreGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1,
+        14.0
+      );
+      expect(
+        graphHarness.TabletopMixer.timeline.some(
+          (event: any) =>
+            event.eventType === "CROSSFADE" &&
+            event.track === "[Score] Rising Tide.mp3"
+        )
+      ).toBe(true);
+    });
+
+    it("crossfades between independent score sources and cleans up the outgoing loop", () => {
+      const graphHarness = setupClientHarness();
+      graphHarness.TabletopMixer.init();
+      graphHarness.AudioCache.memoryStore.set("score-a", new ArrayBuffer(8));
+      graphHarness.AudioCache.memoryStore.set("score-b", new ArrayBuffer(8));
+
+      graphHarness.TabletopMixer.crossfadeScore("score-a", null, 4);
+      const outgoing =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[0].value;
+      const outgoingGain = outgoing.connect.mock.calls[0][0];
+      graphHarness.TabletopMixer.crossfadeScore("score-b", null, 4);
+      const incoming =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[1].value;
+      const incomingGain = incoming.connect.mock.calls[0][0];
+
+      expect(outgoingGain).not.toBe(incomingGain);
+      expect(outgoingGain.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel2Gain
+      );
+      expect(incomingGain.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel2Gain
+      );
+      expect(outgoingGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        0,
+        14.0
+      );
+      expect(incomingGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1,
+        14.0
+      );
+      expect(outgoing.stop).toHaveBeenCalledWith(14.0);
+
+      outgoing.onended?.();
+      expect(outgoing.disconnect).toHaveBeenCalledOnce();
+      expect(outgoingGain.disconnect).toHaveBeenCalledOnce();
     });
 
     it("classifies audio assets into Channels 1/2/3, routes all 3 channels through a master DynamicsCompressorNode, and triggers Tier 3 manual Mood Cue buttons", () => {
@@ -271,6 +364,16 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       // 3. Tier 3 manual Mood Cue UI buttons & triggerManualMoodCue
       const moodBtns = document.querySelectorAll(".mood-cue-btn");
       expect(moodBtns.length).toBe(4);
+      const explorationScoreId = "exploration-score-drive-id";
+      renderManifest([
+        {
+          id: explorationScoreId,
+          name: "[Score] Exploration Theme.mp3",
+          simpleName: "Exploration Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      AudioCache.memoryStore.set(explorationScoreId, new ArrayBuffer(8));
       triggerManualMoodCue("Exploration");
       const lastCue = TabletopMixer.timeline[TabletopMixer.timeline.length - 1];
       expect(lastCue).toMatchObject({
@@ -278,6 +381,12 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
         track: "score_exploration",
         channel: 2
       });
+      expect(TabletopMixer.activeScorePlayback.trackId).toBe(
+        explorationScoreId
+      );
+      expect(
+        TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
     });
   });
 
@@ -306,6 +415,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
 
       TabletopMixer.init();
       TabletopMixer.playAmbience("amb_harbor_bells.mp3");
+      AudioCache.memoryStore.set("score_tension.mp3", new ArrayBuffer(8));
       TabletopMixer.crossfadeScore("score_tension.mp3");
       TabletopMixer.triggerSfx("sfx_kraken_roar.wav");
       vi.advanceTimersByTime(1500); // Triggers RESTORE event
@@ -323,6 +433,8 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       // Simulate browser reload wiping in-memory timeline, then hydrating from localStorage
       TabletopMixer.timeline = [];
       TabletopMixer.hydrateFromLocalStorage("2026-10-31");
+      expect(TabletopMixer.timeline).toHaveLength(4);
+      TabletopMixer.init();
       expect(TabletopMixer.timeline).toHaveLength(4);
 
       // Saving Table Notes via saveNotes() co-flushes the audio timeline
@@ -353,6 +465,16 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     it("routes MUSIC_CUE and RULE_QUERY intents, deduplicates by timestamp, and keeps companion mode muted", () => {
       expect(handleAudioIntent).toBeDefined();
 
+      const combatScoreId = "combat-score-drive-id";
+      renderManifest([
+        {
+          id: combatScoreId,
+          name: "[Score] Combat Theme.mp3",
+          simpleName: "Combat Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(8));
       TabletopMixer.init();
 
       handleAudioIntent({
@@ -366,6 +488,10 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
         )
       ).toHaveLength(1);
+      expect(TabletopMixer.activeScorePlayback.trackId).toBe(combatScoreId);
+      expect(
+        TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
 
       // Duplicate timestamp is ignored
       handleAudioIntent({
@@ -470,6 +596,16 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           tier: "TIER_2_GEMINI_CLOUD"
         }
       });
+      const tensionScoreId = "tension-score-drive-id";
+      cueHarness.renderManifest([
+        {
+          id: tensionScoreId,
+          name: "[Score] Tension Theme.mp3",
+          simpleName: "Tension Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      cueHarness.AudioCache.memoryStore.set(tensionScoreId, new ArrayBuffer(8));
       cueHarness.TabletopMixer.init();
       cueHarness.pollLatestAudioCue();
       expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
@@ -481,6 +617,115 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           (e: any) => e.eventType === "CROSSFADE" && e.track === "score_tension"
         )
       ).toBe(true);
+      expect(cueHarness.TabletopMixer.activeScorePlayback.trackId).toBe(
+        tensionScoreId
+      );
+      expect(
+        cueHarness.TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
     });
+
+    it("delivers a cached Rule Query through the player-safe Companion polling path", () => {
+      const companionHarness = setupClientHarness({
+        viewMode: "companion",
+        companionRuleQueryCue: {
+          intent: "RULE_QUERY",
+          rule: "grappling",
+          timestamp: 1730500000999
+        }
+      });
+
+      companionHarness.pollLatestAudioCue();
+
+      expect(
+        companionHarness.getLatestCompanionRuleQueryCueSpy
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        companionHarness.getLatestCompanionRuleQueryCueSpy
+      ).toHaveBeenCalledWith();
+      expect(companionHarness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(document.getElementById("rule-card")!.style.display).toBe("block");
+      expect(document.getElementById("card-title")!.textContent).toContain(
+        "Grappling"
+      );
+      expect(companionHarness.TabletopMixer.timeline).toHaveLength(0);
+    });
+
+    it("continues cue polling after each response without overlapping an outstanding RPC", () => {
+      const cueHarness = setupClientHarness({
+        latestAudioCue: null,
+        deferLatestAudioCue: true
+      });
+
+      cueHarness.pollLatestAudioCue();
+      vi.advanceTimersByTime(15000);
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+
+      cueHarness.respondToLatestAudioCue();
+      vi.advanceTimersByTime(5000);
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(15000);
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("queues a cached Music Cue until a user gesture initializes the mixer", () => {
+      const scoreId = "early-cue-score-id";
+      const cueHarness = setupClientHarness({
+        latestAudioCue: {
+          intent: "MUSIC_CUE",
+          mood: "combat",
+          timestamp: 1730500000004
+        }
+      });
+      cueHarness.renderManifest([
+        {
+          id: scoreId,
+          name: "[Score] Combat Theme.mp3",
+          simpleName: "Combat Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      cueHarness.AudioCache.memoryStore.set(scoreId, new ArrayBuffer(8));
+
+      cueHarness.pollLatestAudioCue();
+      expect(cueHarness.TabletopMixer.ctx).toBeNull();
+      expect(cueHarness.TabletopMixer.activeScorePlayback).toBeNull();
+
+      cueHarness.installAudioUnlockHandler_();
+      document.dispatchEvent(new Event("pointerdown"));
+      expect(cueHarness.TabletopMixer.activeScorePlayback.trackId).toBe(
+        scoreId
+      );
+      expect(
+        cueHarness.TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+    });
+  });
+});
+
+describe("Narrative Promise Save Gate", () => {
+  it("awaits successful note persistence before extraction and stops on save failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const successHarness = setupClientHarness({ saveDelayMs: 50 });
+      const extraction = successHarness.triggerPromiseExtraction();
+      expect(successHarness.extractNarrativePromisesSpy).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(50);
+      await extraction;
+      expect(successHarness.extractNarrativePromisesSpy).toHaveBeenCalledTimes(
+        1
+      );
+
+      const failedHarness = setupClientHarness({
+        saveError: "Drive unavailable"
+      });
+      await failedHarness.triggerPromiseExtraction();
+      expect(failedHarness.extractNarrativePromisesSpy).not.toHaveBeenCalled();
+      expect(document.getElementById("save-status")!.textContent).toContain(
+        "Drive unavailable"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

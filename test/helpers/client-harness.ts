@@ -349,6 +349,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         installAudioUnlockHandler_: typeof installAudioUnlockHandler_ !== "undefined" ? installAudioUnlockHandler_ : undefined,
         flushAudioTimeline: typeof flushAudioTimeline !== "undefined" ? flushAudioTimeline : undefined,
         saveNotes: typeof saveNotes !== "undefined" ? saveNotes : undefined,
+        handleManualSave_: typeof handleManualSave_ !== "undefined" ? handleManualSave_ : undefined,
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
         initCompanionState: typeof initCompanionState !== "undefined" ? initCompanionState : undefined,
         selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,

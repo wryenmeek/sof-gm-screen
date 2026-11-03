@@ -595,7 +595,9 @@
           <span id="notes-status"
             ><span id="save-status">Loading...</span></span
           >
-          <button class="primary" onclick="saveNotes()">Save (Ctrl+S)</button>
+          <button class="primary" onclick="handleManualSave_()">
+            Save (Ctrl+S)
+          </button>
         </div>
       </div>
     </div>
@@ -833,7 +835,7 @@
       function handleGlobalKeydown_(e) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
           e.preventDefault();
-          saveNotes();
+          void handleManualSave_();
           return;
         }
         const activeEl = document.activeElement;
@@ -1432,6 +1434,20 @@
               ...(gmKey ? [gmKey] : [])
             );
         });
+      }
+
+      function handleManualSave_() {
+        return Promise.resolve()
+          .then(() => saveNotes())
+          .catch((error) => {
+            const status = document.getElementById("save-status");
+            if (status) {
+              status.textContent =
+                "Save failed: " +
+                (error && error.message ? error.message : error);
+            }
+            return null;
+          });
       }
 
       function triggerPromiseExtraction() {

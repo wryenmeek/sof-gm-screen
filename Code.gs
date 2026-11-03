@@ -1523,45 +1523,70 @@ function jsonResponse_(payload) {
 }
 
 function doPost(e) {
-  const rawContents = (e && e.postData && e.postData.contents) || "{}";
-  const body = JSON.parse(rawContents);
-  assertGmAccess_(body.gmKey);
-
-  if (!body.intent || body.intent === "BANTER") {
-    return jsonResponse_({ status: "OK", cached: false });
+  let body;
+  try {
+    const rawContents = (e && e.postData && e.postData.contents) || "{}";
+    body = JSON.parse(rawContents);
+  } catch (_error) {
+    return jsonResponse_({ status: "ERROR", error: "Invalid JSON payload" });
   }
 
-  const cue = {
-    intent: body.intent,
-    mood: body.mood !== undefined ? body.mood : null,
-    rule: body.rule !== undefined ? body.rule : null,
-    tier: body.tier || "TIER_1_PI_LOCAL",
-    timestamp: body.timestamp || Date.now()
-  };
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return jsonResponse_({ status: "ERROR", error: "Invalid payload" });
+  }
 
-  const canCache =
-    typeof CacheService !== "undefined" && CacheService.getScriptCache;
-  if (canCache) {
-    const cache = CacheService.getScriptCache();
-    cache.put("sof_latest_audio_cue", JSON.stringify(cue), 60);
-    if (
-      cue.intent === "RULE_QUERY" &&
-      typeof cue.rule === "string" &&
-      cue.rule.trim()
-    ) {
-      cache.put(
-        "sof_latest_companion_rule_query",
-        JSON.stringify({
-          intent: "RULE_QUERY",
-          rule: cue.rule.trim().slice(0, 200),
-          timestamp: cue.timestamp
-        }),
-        60
-      );
+  try {
+    assertGmAccess_(body.gmKey);
+  } catch (_error) {
+    return jsonResponse_({ status: "ERROR", error: "Unauthorized" });
+  }
+
+  if (!["MUSIC_CUE", "RULE_QUERY", "BANTER"].includes(body.intent)) {
+    return jsonResponse_({ status: "ERROR", error: "Invalid payload" });
+  }
+
+  try {
+    if (body.intent === "BANTER") {
+      return jsonResponse_({ status: "OK", cached: false });
     }
-  }
 
-  return jsonResponse_({ status: "OK", cached: Boolean(canCache) });
+    const cue = {
+      intent: body.intent,
+      mood: body.mood !== undefined ? body.mood : null,
+      rule: body.rule !== undefined ? body.rule : null,
+      tier: body.tier || "TIER_1_PI_LOCAL",
+      timestamp: body.timestamp || Date.now()
+    };
+
+    const canCache =
+      typeof CacheService !== "undefined" && CacheService.getScriptCache;
+    if (canCache) {
+      const cache = CacheService.getScriptCache();
+      cache.put("sof_latest_audio_cue", JSON.stringify(cue), 60);
+      if (
+        cue.intent === "RULE_QUERY" &&
+        typeof cue.rule === "string" &&
+        cue.rule.trim()
+      ) {
+        cache.put(
+          "sof_latest_companion_rule_query",
+          JSON.stringify({
+            intent: "RULE_QUERY",
+            rule: cue.rule.trim().slice(0, 200),
+            timestamp: cue.timestamp
+          }),
+          60
+        );
+      }
+    }
+
+    return jsonResponse_({ status: "OK", cached: Boolean(canCache) });
+  } catch (_error) {
+    return jsonResponse_({
+      status: "ERROR",
+      error: "Unable to process webhook"
+    });
+  }
 }
 
 /**

@@ -299,6 +299,46 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
     }
   });
 
+  it("pads short dynamic Silero frames and rejects unknown model inputs", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sof-vad-dynamic-"));
+    try {
+      const pySnippet = [
+        "import json",
+        "from scripts.rpi_vad_chunker import Stage1VadChunker",
+        "class Node:",
+        "  def __init__(self, name, shape): self.name, self.shape = name, shape",
+        "class FakeSession:",
+        "  def __init__(self, inputs): self.inputs, self.feed = inputs, None",
+        "  def get_inputs(self): return self.inputs",
+        "  def run(self, _names, feed): self.feed = feed; return [[[0.9]]]",
+        `chunker = Stage1VadChunker(${JSON.stringify(tmpDir)}, sample_rate=16000)`,
+        "session = FakeSession([Node('audio', [1, -1]), Node('sr', [])])",
+        "chunker.onnx_session = session",
+        "active = chunker.is_speech(b'\\x01\\x00' * 100)",
+        "audio = session.feed['audio']",
+        "unknown = FakeSession([Node('audio', [1, 512]), Node('mystery', [1])])",
+        "chunker.onnx_session = unknown",
+        "try: chunker.is_speech(b'\\x01\\x00' * 512)",
+        "except RuntimeError as exc: unknown_error = str(exc)",
+        "else: raise AssertionError('unknown model input was accepted')",
+        "print(json.dumps({'active': active, 'shape': list(audio.shape), 'tail': float(audio[0, -1]), 'unknown_error': unknown_error}))"
+      ].join("\n");
+      const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        timeout: 15000
+      }).trim();
+      const result = JSON.parse(out);
+
+      expect(result.active).toBe(true);
+      expect(result.shape).toEqual([1, 512]);
+      expect(result.tail).toBe(0);
+      expect(result.unknown_error).toContain("unsupported input: mystery");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("requires explicit real audio input for non-test CLI runs", () => {
     expect(() =>
       execFileSync("python3", ["-B", SCRIPT_PATH], {
@@ -333,8 +373,8 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
       "def failed_webhook(_payload): raise RuntimeError('offline')",
       "failed = classify_and_dispatch_chunk('unused.wav', tier1_fn=lambda _p: {'intent':'MUSIC_CUE','mood':'Combat'}, webhook_fn=failed_webhook)",
       "good = classify_and_dispatch_chunk('unused.wav', tier1_fn=lambda _p: {'intent':'MUSIC_CUE','mood':'Combat'}, webhook_fn=lambda _p: {'status':'OK'})",
-      ,
-      "print(json.dumps({'timed': timed, 'elapsed': elapsed, 'quick': quick, 'failed': failed, 'good': good}))"
+      "simulated = classify_and_dispatch_chunk('unused.wav', tier1_fn=lambda _p: {'intent':'MUSIC_CUE','mood':'Combat'}, webhook_fn=lambda _p: {'status':'OK','simulated':True})",
+      "print(json.dumps({'timed': timed, 'elapsed': elapsed, 'quick': quick, 'failed': failed, 'good': good, 'simulated': simulated}))"
     ].join("\n");
     const out = execFileSync("python3", ["-B", "-c", pySnippet], {
       cwd: process.cwd(),
@@ -348,6 +388,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
     expect(results.failed.webhook_dispatched).toBe(false);
     expect(results.failed.webhook_error).toContain("offline");
     expect(results.good.webhook_dispatched).toBe(true);
+    expect(results.simulated.webhook_dispatched).toBe(false);
   });
 
   it("treats an explicit cached-false webhook response as failed delivery", () => {
@@ -368,6 +409,30 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
     expect(result.webhook_error).toContain(
       "did not confirm successful delivery"
     );
+  });
+
+  it("rejects an empty Apps Script response instead of confirming delivery", () => {
+    const pySnippet = [
+      "import scripts.rpi_vad_chunker as chunker",
+      "class EmptyResponse:",
+      "  def __enter__(self): return self",
+      "  def __exit__(self, *_args): pass",
+      "  def read(self): return b''",
+      "chunker.urllib.request.urlopen = lambda _req, timeout=5.0: EmptyResponse()",
+      "try:",
+      "  chunker.post_cue_webhook('https://example.test', {})",
+      "except RuntimeError as exc:",
+      "  print(str(exc))",
+      "else:",
+      "  raise AssertionError('empty webhook response was accepted')"
+    ].join("\n");
+    const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 5000
+    }).trim();
+
+    expect(out).toBe("Apps Script webhook returned an empty response.");
   });
 
   it("escalates a SIGTERM-resistant Tier 1 worker to Tier 2 within the fallback budget", () => {
@@ -526,7 +591,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
     expect(res.activeTier).toBe("TIER_1_PI_LOCAL");
     expect(res.reason).toBe("Tier 1 local Pi model");
     expect(res.tier2_invoked).toBe(false);
-    expect(res.webhook_dispatched).toBe(true);
+    expect(res.webhook_dispatched).toBe(false);
     expect(res.webhook_payload).toMatchObject({
       intent: "MUSIC_CUE",
       mood: "Combat",
@@ -571,7 +636,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
       "Tier 1 exceeded 1500ms or failed -> Auto-routed Speech Chunk to Tier 2 Gemini 2.5 Flash"
     );
     expect(res.tier2_invoked).toBe(true);
-    expect(res.webhook_dispatched).toBe(true);
+    expect(res.webhook_dispatched).toBe(false);
     expect(res.webhook_payload).toMatchObject({
       intent: "RULE_QUERY",
       mood: null,
@@ -595,7 +660,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
 
     expect(res.activeTier).toBe("TIER_2_GEMINI_CLOUD");
     expect(res.tier2_invoked).toBe(true);
-    expect(res.webhook_dispatched).toBe(true);
+    expect(res.webhook_dispatched).toBe(false);
     expect(res.webhook_payload.mood).toBe("Tension");
   });
 

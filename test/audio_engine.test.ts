@@ -235,6 +235,17 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     it("decodes cached manifest audio and routes source nodes to the intended mixer channels", () => {
       const graphHarness = setupClientHarness();
       graphHarness.TabletopMixer.init();
+      const ambienceBuffer = { duration: 1, track: "ambience" };
+      const scoreBuffer = { duration: 1, track: "score" };
+      graphHarness.audioCtxDecodeSpy
+        .mockImplementationOnce(
+          (_data: ArrayBuffer, onDecoded: (buffer: any) => void) =>
+            onDecoded(ambienceBuffer)
+        )
+        .mockImplementationOnce(
+          (_data: ArrayBuffer, onDecoded: (buffer: any) => void) =>
+            onDecoded(scoreBuffer)
+        );
       graphHarness.AudioCache.memoryStore.set("ambient-id", new ArrayBuffer(8));
       graphHarness.renderManifest([
         {
@@ -249,6 +260,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
       const ambienceSource =
         graphHarness.audioCtxCreateSourceSpy.mock.results[0].value;
+      expect(ambienceSource.buffer).toBe(ambienceBuffer);
       expect(ambienceSource.connect).toHaveBeenCalledWith(
         graphHarness.TabletopMixer.channel1Gain
       );
@@ -264,6 +276,8 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       );
       const scoreSource =
         graphHarness.audioCtxCreateSourceSpy.mock.results[1].value;
+      expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(2);
+      expect(scoreSource.buffer).toBe(scoreBuffer);
       const scoreGain = scoreSource.connect.mock.calls[0][0];
       expect(scoreGain).not.toBe(graphHarness.TabletopMixer.channel2Gain);
       expect(scoreGain.connect).toHaveBeenCalledWith(
@@ -727,5 +741,16 @@ describe("Narrative Promise Save Gate", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("handles manual save failures without leaking a rejected promise", async () => {
+    const failedHarness = setupClientHarness({
+      saveError: "Drive unavailable"
+    });
+
+    await expect(failedHarness.handleManualSave_()).resolves.toBeNull();
+    expect(document.getElementById("save-status")!.textContent).toContain(
+      "Drive unavailable"
+    );
   });
 });

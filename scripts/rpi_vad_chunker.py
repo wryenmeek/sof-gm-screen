@@ -154,11 +154,16 @@ class Stage1VadChunker:
                 input_nodes[0],
             )
             expected_samples = audio_node.shape[-1] if audio_node.shape else None
-            if isinstance(expected_samples, int) and expected_samples > 0:
-                if len(samples) < expected_samples:
-                    samples = np.pad(samples, (0, expected_samples - len(samples)))
-                elif len(samples) > expected_samples:
-                    samples = samples[:expected_samples]
+            if not isinstance(expected_samples, int) or expected_samples <= 0:
+                expected_samples = {8000: 256, 16000: 512}.get(self.sample_rate)
+            if expected_samples is None:
+                raise RuntimeError(
+                    "Silero model dynamic audio input requires an 8kHz or 16kHz sample rate"
+                )
+            if len(samples) < expected_samples:
+                samples = np.pad(samples, (0, expected_samples - len(samples)))
+            elif len(samples) > expected_samples:
+                samples = samples[:expected_samples]
 
             feeds: dict[str, Any] = {}
             state_nodes = []
@@ -168,7 +173,7 @@ class Stage1VadChunker:
                     feeds[node.name] = samples.reshape(1, -1)
                 elif name in ("sr", "sample_rate"):
                     feeds[node.name] = np.asarray(self.sample_rate, dtype=np.int64)
-                else:
+                elif name == "state":
                     state_nodes.append(node)
                     state = self.onnx_state.get(node.name)
                     if state is None:
@@ -180,6 +185,10 @@ class Stage1VadChunker:
                         ]
                         state = np.zeros(shape, dtype=np.float32)
                     feeds[node.name] = state
+                else:
+                    raise RuntimeError(
+                        "Silero model declares unsupported input: " + node.name
+                    )
 
             outputs = self.onnx_session.run(None, feeds)
             if not outputs:
@@ -654,7 +663,9 @@ def post_cue_webhook(
     )
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
         raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {"status": "OK"}
+        if not raw.strip():
+            raise RuntimeError("Apps Script webhook returned an empty response.")
+        return json.loads(raw)
 
 
 def classify_and_dispatch_chunk(
@@ -751,6 +762,7 @@ def classify_and_dispatch_chunk(
                     isinstance(webhook_response, dict)
                     and webhook_response.get("status") == "OK"
                     and webhook_response.get("cached") is not False
+                    and not webhook_response.get("simulated")
                 )
                 if not webhook_dispatched:
                     webhook_error = "Webhook did not confirm successful delivery"

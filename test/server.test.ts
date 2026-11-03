@@ -1131,17 +1131,40 @@ describe("Apps Script Server Logic (Code.gs)", () => {
         "Unauthorized GM RPC"
       );
 
-      expect(() =>
-        ctx.doPost({
-          postData: {
-            contents: JSON.stringify({
-              gmKey: "bad-key",
-              intent: "MUSIC_CUE",
-              mood: "combat"
-            })
-          }
-        })
-      ).toThrow("Unauthorized GM RPC");
+      const unauthorizedRes = ctx.doPost({
+        postData: {
+          contents: JSON.stringify({
+            gmKey: "bad-key",
+            intent: "MUSIC_CUE",
+            mood: "combat"
+          })
+        }
+      });
+      expect(unauthorizedRes.getMimeType()).toBe("application/json");
+      expect(JSON.parse(unauthorizedRes.getContent())).toEqual({
+        status: "ERROR",
+        error: "Unauthorized"
+      });
+
+      const malformedRes = ctx.doPost({
+        postData: { contents: "{" }
+      });
+      expect(malformedRes.getMimeType()).toBe("application/json");
+      expect(JSON.parse(malformedRes.getContent())).toEqual({
+        status: "ERROR",
+        error: "Invalid JSON payload"
+      });
+
+      const invalidRes = ctx.doPost({
+        postData: {
+          contents: JSON.stringify({ gmKey: "pi-edge-key" })
+        }
+      });
+      expect(invalidRes.getMimeType()).toBe("application/json");
+      expect(JSON.parse(invalidRes.getContent())).toEqual({
+        status: "ERROR",
+        error: "Invalid payload"
+      });
 
       const banterRes = ctx.doPost({
         postData: {
@@ -1155,6 +1178,27 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(banterRes.getMimeType()).toBe("application/json");
       expect(JSON.parse(banterRes.getContent()).cached).toBe(false);
       expect(ctx.getLatestAudioCue("pi-edge-key")).toBeNull();
+
+      const cacheService = ctx.CacheService;
+      ctx.CacheService = {
+        getScriptCache: () => {
+          throw new Error("cache unavailable");
+        }
+      };
+      const processingFailureRes = ctx.doPost({
+        postData: {
+          contents: JSON.stringify({
+            gmKey: "pi-edge-key",
+            intent: "MUSIC_CUE"
+          })
+        }
+      });
+      expect(processingFailureRes.getMimeType()).toBe("application/json");
+      expect(JSON.parse(processingFailureRes.getContent())).toEqual({
+        status: "ERROR",
+        error: "Unable to process webhook"
+      });
+      ctx.CacheService = cacheService;
 
       const cueRes = ctx.doPost({
         postData: {

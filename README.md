@@ -59,7 +59,16 @@ The normal GM Screen deployment uses the manifest's signed-in access setting. Th
 
 1. In Apps Script **Project Settings → Script properties**, set `SOF_GM_KEY` to a long, randomly generated secret. Do not put the value in this repository or commit it.
 2. Keep the normal GM Screen deployment restricted to signed-in Google users. From **Deploy → New deployment → Web app**, create a separate Pi webhook deployment with **Execute as: Me** and **Who has access: Anyone** (anonymous). Keep its `/exec` URL private; the `doPost` handler checks `SOF_GM_KEY` before caching any cue.
-3. On the Raspberry Pi, set `SOF_GM_KEY` to the same secret and `SOF_WEBHOOK_URL` to the separate anonymous deployment URL. The chunker supports these environment variables; do not point it at the signed-in GM Screen deployment.
+3. On Raspberry Pi OS 64-bit, from the repository root, install the classifier dependencies in a virtual environment:
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install -r requirements-rpi.txt
+   ```
+
+   Then set `SOF_GM_KEY` to the same secret and `SOF_WEBHOOK_URL` to the separate anonymous deployment URL. The chunker reads these environment variables; do not point it at the signed-in GM Screen deployment.
+
 4. Add `gmKey=<URL-encoded secret>` to the GM Screen URL alongside the session parameter (for example, `?session=2026-10-31&gmKey=...`). Treat that URL as a credential and share it only with the GM.
 5. In the Apps Script editor, select `setupGovernanceTriggers_` and click **Run** once. This editor-only entrypoint reads `SOF_GM_KEY` from Script Properties and installs the Wednesday governance audit plus daily feedback-rate-limit cleanup. The public `installGovernanceTriggers(gmKey)` RPC remains GM-key guarded.
 6. When updating the project, push the code and update both deployments to the new version; preserve each deployment's distinct access setting.

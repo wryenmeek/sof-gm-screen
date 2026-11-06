@@ -3,6 +3,7 @@
   <head>
     <base target="_top" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -391,6 +392,80 @@
       .dnd-prop strong {
         color: var(--gold-light);
       }
+      #audio-cache-status {
+        font-size: 11px;
+        color: var(--cyan);
+        font-family: "Fira Code", monospace;
+      }
+
+      #player-hud {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        min-height: 100vh;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        gap: 16px;
+      }
+      body.companion-only-mode #player-hud {
+        display: flex;
+      }
+
+      .mobile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+      }
+
+      .id-modal {
+        background: #111827;
+        border: 1px solid var(--gold);
+        border-radius: 8px;
+        padding: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      #ptt-btn {
+        background: #1d4ed8;
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 16px;
+        border-radius: 10px;
+        border: none;
+      }
+      #ptt-btn.listening {
+        background: var(--dnd-red);
+      }
+
+      #rule-card {
+        display: none;
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 1000;
+        max-width: 420px;
+        width: calc(100% - 40px);
+        background: #161b26;
+        border: 2px solid var(--gold);
+        border-radius: 10px;
+        padding: 16px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+      }
+
+      #rule-card.visible {
+        display: block;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
       @media print {
         body {
           background: #ffffff;
@@ -408,7 +483,8 @@
       }
     </style>
   </head>
-  <body>
+  <body class="<?= viewMode === 'companion' ? 'companion-only-mode' : '' ?>">
+    <? if (typeof viewMode === "undefined" || viewMode !== "companion") { ?>
     <!-- Left Sidebar -->
     <div id="sidebar">
       <div class="sidebar-section">
@@ -429,6 +505,73 @@
           placeholder="🔍 Filter maps, statblocks, notes..."
           oninput="filterFiles(this.value)"
         />
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+          "
+        >
+          <div id="audio-cache-status">Audio: 0/0 ready</div>
+          <button
+            id="clear-audio-cache-btn"
+            onclick="AudioCache.clearCache()"
+            title="Clear IndexedDB Audio Cache"
+          >
+            Clear Audio Cache
+          </button>
+          <div
+            id="classifier-tier-status"
+            style="
+              font-size: 10px;
+              color: var(--gold-light);
+              font-family: &quot;Fira Code&quot;, monospace;
+            "
+          >
+            Tier: TIER_3_MANUAL_UI
+          </div>
+        </div>
+        <div
+          id="mixer-mood-bar"
+          style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center"
+        >
+          <button
+            class="mood-cue-btn"
+            data-mood="exploration"
+            onclick="triggerManualMoodCue('exploration')"
+          >
+            Exploration
+          </button>
+          <button
+            class="mood-cue-btn"
+            data-mood="tension"
+            onclick="triggerManualMoodCue('tension')"
+          >
+            Tension
+          </button>
+          <button
+            class="mood-cue-btn"
+            data-mood="combat"
+            onclick="triggerManualMoodCue('combat')"
+          >
+            Combat
+          </button>
+          <button
+            class="mood-cue-btn"
+            data-mood="rest"
+            onclick="triggerManualMoodCue('rest')"
+          >
+            Rest
+          </button>
+          <button
+            id="save-timeline-btn"
+            onclick="flushAudioTimeline(currentSessionDate)"
+            title="Save Audio Timeline Sidecar"
+          >
+            💾 Save Timeline
+          </button>
+        </div>
 
         <div id="file-list">Loading files...</div>
       </div>
@@ -437,14 +580,24 @@
       <div id="scratchpad-container">
         <div class="scratchpad-header">
           <span id="scratchpad-label">table_notes.md (<?= sessionDate ?>)</span>
+          <button
+            id="extract-promises-btn"
+            onclick="triggerPromiseExtraction()"
+          >
+            ✨ Extract Promises to Tasks
+          </button>
         </div>
         <textarea
           id="scratchpad"
           placeholder="Loading session table notes..."
         ></textarea>
         <div class="scratchpad-controls">
-          <span id="save-status">Loading...</span>
-          <button class="primary" onclick="saveNotes()">Save (Ctrl+S)</button>
+          <span id="notes-status"
+            ><span id="save-status">Loading...</span></span
+          >
+          <button class="primary" onclick="handleManualSave_()">
+            Save (Ctrl+S)
+          </button>
         </div>
       </div>
     </div>
@@ -486,12 +639,156 @@
         <div id="right-content" class="pane-content"></div>
       </div>
     </div>
+    <? } ?>
+
+    <!-- Mobile Player Companion HUD (Tickets 07, 08, 22 & 23) -->
+    <div id="player-hud">
+      <header class="mobile-header player-header">
+        <span
+          style="
+            font-family: Cinzel, serif;
+            color: var(--gold-light);
+            font-weight: 900;
+          "
+          >⚔️ Sea of Fortune</span
+        >
+        <span
+          id="player-session-date"
+          style="
+            font-family: &quot;Fira Code&quot;, monospace;
+            font-size: 12px;
+            color: var(--cyan);
+          "
+          ><?= sessionDate ?></span
+        >
+        <span id="player-identity-display"
+          ><span id="player-tag">Player: Guest</span></span
+        >
+      </header>
+
+      <div id="identity-modal" class="id-modal">
+        <button
+          class="id-btn"
+          data-player="Pog"
+          onclick="selectPlayerIdentity('Pog')"
+        >
+          Pog
+        </button>
+        <button
+          class="id-btn"
+          data-player="Vaelor"
+          onclick="selectPlayerIdentity('Vaelor')"
+        >
+          Vaelor
+        </button>
+        <button
+          class="id-btn"
+          data-player="Orca"
+          onclick="selectPlayerIdentity('Orca')"
+        >
+          Orca
+        </button>
+        <button
+          class="id-btn"
+          data-player="Fade"
+          onclick="selectPlayerIdentity('Fade')"
+        >
+          Fade
+        </button>
+        <button
+          class="id-btn"
+          data-player="Guest"
+          onclick="selectPlayerIdentity('Guest')"
+        >
+          Guest
+        </button>
+      </div>
+
+      <input
+        type="search"
+        id="ptt-dictation-input"
+        placeholder="🎙️ Tap & Dictate or Type Rule..."
+        oninput="handleDictationInput(this.value)"
+        onkeydown="handleDictationKeydown(event)"
+        style="
+          width: 100%;
+          background: #0f172a;
+          color: var(--text);
+          border: 1px solid var(--gold);
+          border-radius: 8px;
+          padding: 12px;
+          font-size: 15px;
+        "
+      />
+
+      <button id="ptt-btn" onclick="triggerPtt()">🎙️ Tap to Ask Rule</button>
+    </div>
+
+    <div id="rule-card">
+      <h2 id="card-title">Rule Title</h2>
+      <div id="card-type">Mechanic</div>
+      <p id="card-text">Rule description...</p>
+      <div style="display: flex; gap: 8px; margin-top: 12px">
+        <button id="btn-up" class="primary" onclick="submitRuleFeedback('+1')">
+          👍 Helpful
+        </button>
+        <button id="btn-down" onclick="submitRuleFeedback('-1')">
+          👎 Irrelevant
+        </button>
+        <button id="btn-dismiss" onclick="dismissRuleCard()">✕ Dismiss</button>
+      </div>
+      <div
+        id="feedback-status"
+        class="hidden"
+        role="status"
+        aria-live="polite"
+        style="margin-top: 8px; color: var(--gold-light); font-size: 12px"
+      ></div>
+    </div>
 
     <script>
       let currentSessionDate = "<?= sessionDate ?>";
+      const rawViewModeTemplate =
+        "<?= typeof viewMode !== 'undefined' ? viewMode : 'gm' ?>";
+      if (typeof window !== "undefined" && !window.INITIAL_VIEW_MODE) {
+        window.INITIAL_VIEW_MODE = rawViewModeTemplate.startsWith("<?")
+          ? "gm"
+          : rawViewModeTemplate;
+      }
+      const rawGmKeyTemplate =
+        "<?= typeof gmKey !== 'undefined' ? gmKey : '' ?>";
+      if (
+        typeof window !== "undefined" &&
+        window.INITIAL_GM_KEY === undefined
+      ) {
+        window.INITIAL_GM_KEY = rawGmKeyTemplate.startsWith("<?")
+          ? ""
+          : rawGmKeyTemplate;
+      }
       const cache = {};
       let allFiles = [];
       let currentLeftPayload = null;
+      let miniSearch = null;
+      let currentPlayerIdentity = "Guest";
+      const NOTES_AUTOSAVE_MS = 60000;
+      let notesAutoSaveTimer = null;
+
+      function getClientGmKey_() {
+        if (typeof window !== "undefined" && window.INITIAL_GM_KEY) {
+          return String(window.INITIAL_GM_KEY);
+        }
+        try {
+          if (
+            typeof window !== "undefined" &&
+            window.location &&
+            window.location.search
+          ) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get("gmKey") || "";
+          }
+        } catch (_e) {}
+        return "";
+      }
 
       // Configure marked for tables and line breaks
       marked.setOptions({
@@ -499,19 +796,93 @@
         breaks: true
       });
 
+      function isCompanionMode_() {
+        const search =
+          (typeof window !== "undefined" &&
+            window.location &&
+            window.location.search) ||
+          "";
+        return (
+          (typeof window !== "undefined" &&
+            window.INITIAL_VIEW_MODE === "companion") ||
+          search.includes("view=companion")
+        );
+      }
+
+      function startNotesAutoSave_() {
+        if (notesAutoSaveTimer) clearInterval(notesAutoSaveTimer);
+        if (isCompanionMode_()) return null;
+        notesAutoSaveTimer = setInterval(() => {
+          if (!isCompanionMode_()) {
+            void saveTableNotes_().catch(() => {});
+          }
+        }, NOTES_AUTOSAVE_MS);
+        return notesAutoSaveTimer;
+      }
+
       window.onload = () => {
+        initCompanionState_();
+        if (isCompanionMode_()) {
+          document.body.classList.add("companion-only-mode");
+          loadDriveRulesGlossary_(currentSessionDate);
+          return;
+        }
+        installAudioUnlockHandler_();
+        AudioCache.pruneStaleEntries();
+        TabletopMixer.hydrateFromLocalStorage(currentSessionDate);
         loadSessionDropdown();
         refreshManifest();
-        loadScratchpad();
+        loadTableNotes_();
+        loadDriveRulesGlossary_(currentSessionDate);
+        startNotesAutoSave_();
+        pollLatestAudioCue_();
       };
 
-      // Keyboard shortcut Ctrl+S / Cmd+S for instant saving
-      document.addEventListener("keydown", (e) => {
+      // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
+      function handleGlobalKeydown_(e) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
           e.preventDefault();
-          saveNotes();
+          void handleManualSave_();
+          return;
         }
-      });
+        const activeEl = document.activeElement;
+        const activeTag =
+          activeEl && activeEl.tagName ? activeEl.tagName.toLowerCase() : "";
+        const isTyping =
+          activeTag === "input" ||
+          activeTag === "textarea" ||
+          activeTag === "select" ||
+          Boolean(
+            activeEl &&
+            (activeEl.isContentEditable ||
+              (typeof activeEl.getAttribute === "function" &&
+                activeEl.getAttribute("contenteditable") === "true"))
+          );
+
+        if (e.key === "/" && !isTyping) {
+          e.preventDefault();
+          const filterInput = document.getElementById("filter-input");
+          if (filterInput) {
+            filterInput.focus();
+            if (typeof filterInput.select === "function") filterInput.select();
+          }
+        } else if (e.key === "Escape") {
+          const filterInput = document.getElementById("filter-input");
+          if (
+            filterInput &&
+            (document.activeElement === filterInput || filterInput.value)
+          ) {
+            filterInput.value = "";
+            filterInput.blur();
+            filterFiles("");
+          }
+        }
+      }
+      if (window._sofKeydownHandler) {
+        document.removeEventListener("keydown", window._sofKeydownHandler);
+      }
+      window._sofKeydownHandler = handleGlobalKeydown_;
+      document.addEventListener("keydown", window._sofKeydownHandler);
 
       // Cross-frame link interceptor for relative links inside GM screens
       window.addEventListener("message", (event) => {
@@ -521,12 +892,13 @@
             (f) => f.simpleName === filename || f.name.endsWith(filename)
           );
           if (target) {
-            loadFile(target.id);
+            loadFile_(target.id);
           }
         }
       });
 
       function loadSessionDropdown() {
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((sessions) => {
             const select = document.getElementById("session-select");
@@ -542,11 +914,12 @@
               select.appendChild(opt);
             });
           })
-          .getSessionList();
+          .getSessionList(...(gmKey ? [gmKey] : []));
       }
 
       function switchSession(newSessionDate) {
         currentSessionDate = newSessionDate;
+        TabletopMixer.hydrateFromLocalStorage(currentSessionDate);
         document.getElementById("file-list").innerHTML = "Loading files...";
         document.getElementById("scratchpad-label").textContent =
           "table_notes.md (" + currentSessionDate + ")";
@@ -554,17 +927,181 @@
         document.getElementById("save-status").textContent = "Loading...";
 
         refreshManifest();
-        loadScratchpad();
+        loadTableNotes_();
       }
 
+      const loadSession = switchSession;
+
       function refreshManifest() {
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler(renderManifest)
-          .getSessionManifest(currentSessionDate);
+          .getSessionManifest(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
+
+      function tokenizeStatblockAndDossier_(fileMeta, rawContent = "") {
+        const name = (fileMeta && fileMeta.name) || "";
+        const simpleName = (fileMeta && fileMeta.simpleName) || name;
+        const mimeType = (fileMeta && fileMeta.mimeType) || "";
+
+        const tagMatches = name.match(/\[([^\]]+)\]/g) || [];
+        const tags = tagMatches
+          .map((t) => t.replace(/[[\]]/g, ""))
+          .concat(mimeType)
+          .join(" ");
+
+        let title = simpleName.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ");
+        const propLines = [];
+        let cleanContent = (rawContent || "").trim();
+
+        if (cleanContent) {
+          // Strip outer markdown code fences (```markdown ... ``` or ``` ... ```)
+          if (
+            /^```(?:markdown)?[\s\r\n]/i.test(cleanContent) &&
+            /[\s\r\n]```$/.test(cleanContent)
+          ) {
+            cleanContent = cleanContent
+              .replace(/^```(?:markdown)?\s*/i, "")
+              .replace(/\s*```$/, "")
+              .trim();
+          }
+
+          // Strip Homebrewery structural markers ({{monster,frame}}, {{descriptive}}, {monster,frame})
+          cleanContent = cleanContent
+            .replace(
+              /\{\{?(?:monster,frame(?:,wide)?|descriptive)\}?\}?/gi,
+              " "
+            )
+            .replace(/^\s*\}\}+|\{\{+\s*$/gm, " ")
+            .replace(/(?:^|\n)\s*\}\s*(?=\n|$)/g, "\n")
+            .trim();
+
+          const hMatch = cleanContent.match(/^#{1,3}\s+(.+)$/m);
+          if (hMatch) {
+            title += " " + hMatch[1].trim();
+          }
+
+          const propRegex =
+            /\*\*((?:Armor Class|Hit Points|Speed|Saving Throws|Skills|Damage Vulnerabilities|Damage Resistances|Damage Immunities|Condition Immunities|Senses|Languages|Challenge))\*\*\s*(?:::|:)?\s*([^\n\r]+)|\*\*([^*]+)\*\*\s*(?:::|:)\s*([^\n\r]+)/gi;
+          let pMatch;
+          while ((pMatch = propRegex.exec(cleanContent)) !== null) {
+            const propKey = (pMatch[1] || pMatch[3]).trim();
+            const propVal = (pMatch[2] || pMatch[4]).trim();
+            const extraSynonyms = /vulnerabilities/i.test(propKey)
+              ? " vulnerability vulnerable"
+              : /immunities/i.test(propKey)
+                ? " immunity immune"
+                : /resistances/i.test(propKey)
+                  ? " resistance resistant"
+                  : "";
+            propLines.push(propKey + " " + propVal + extraSynonyms);
+          }
+
+          // Extract trait and action headers (e.g. **Harmonic Slam.** or **Legendary Resistance (3/Day).**)
+          const traitRegex = /\*{2,3}([^*\n]+?)\.\*{2,3}/g;
+          let tMatch;
+          while ((tMatch = traitRegex.exec(cleanContent)) !== null) {
+            propLines.push(tMatch[1].trim());
+          }
+        }
+
+        return {
+          id: fileMeta.id,
+          name: name,
+          simpleName: simpleName,
+          mimeType: mimeType,
+          title: title.trim(),
+          tags: tags.trim(),
+          properties: propLines.join(" | "),
+          content: cleanContent
+        };
+      }
+
+      function indexFilePayload_(payload) {
+        if (!payload || !payload.id || !miniSearch) return;
+        const existingMeta = allFiles.find((f) => f.id === payload.id) || {
+          id: payload.id,
+          name: payload.name || "",
+          simpleName: payload.name || "",
+          mimeType: payload.type || ""
+        };
+        const rawText =
+          payload.type === "markdown" || payload.type === "html"
+            ? payload.content || ""
+            : "";
+        const doc = tokenizeStatblockAndDossier_(existingMeta, rawText);
+        if (miniSearch.has(payload.id)) {
+          miniSearch.replace(doc);
+        } else {
+          miniSearch.add(doc);
+        }
+      }
+
+      const updateSearchIndexWithContent_ = indexFilePayload_;
 
       function renderManifest(files) {
         allFiles = files;
+        if (typeof MiniSearch !== "undefined") {
+          miniSearch = new MiniSearch({
+            fields: [
+              "title",
+              "tags",
+              "properties",
+              "content",
+              "name",
+              "simpleName",
+              "mimeType"
+            ],
+            storeFields: ["id", "name", "simpleName", "mimeType"],
+            tokenize: (text) =>
+              text
+                .toLowerCase()
+                .split(/[\s_\-[\]./,:;|()]+/)
+                .filter(Boolean),
+            searchOptions: {
+              boost: {
+                title: 3.0,
+                tags: 2.5,
+                properties: 2.0,
+                content: 1.0,
+                name: 1.5,
+                simpleName: 1.5
+              },
+              prefix: true,
+              fuzzy: 0.2,
+              combineWith: "AND"
+            }
+          });
+          const docs = files.map((f) => {
+            const cached = cache[f.id];
+            const rawText =
+              cached && (cached.type === "markdown" || cached.type === "html")
+                ? cached.content
+                : "";
+            return tokenizeStatblockAndDossier_(f, rawText);
+          });
+          miniSearch.addAll(docs);
+        }
+        const gmKey = getClientGmKey_();
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler((token) => {
+            if (token) {
+              AudioCache.oauthToken = token;
+            }
+            AudioCache.preCacheSessionAudio(files);
+          });
+          if (runner && typeof runner.getAudioAuthToken === "function") {
+            runner.getAudioAuthToken(...(gmKey ? [gmKey] : []));
+          } else {
+            AudioCache.preCacheSessionAudio(files);
+          }
+        } else {
+          AudioCache.preCacheSessionAudio(files);
+        }
         filterFiles(document.getElementById("filter-input").value);
       }
 
@@ -573,9 +1110,16 @@
         list.innerHTML = "";
         const q = query.toLowerCase().trim();
 
-        const filtered = allFiles.filter((f) =>
-          f.name.toLowerCase().includes(q)
-        );
+        let filtered = allFiles;
+        if (q) {
+          if (miniSearch) {
+            const hits = miniSearch.search(q);
+            const hitMap = new Map(allFiles.map((f) => [f.id, f]));
+            filtered = hits.map((h) => hitMap.get(h.id)).filter(Boolean);
+          } else {
+            filtered = allFiles.filter((f) => f.name.toLowerCase().includes(q));
+          }
+        }
 
         if (filtered.length === 0) {
           list.innerHTML =
@@ -586,7 +1130,7 @@
         filtered.forEach((f) => {
           const div = document.createElement("div");
           div.className = "file-item";
-          div.onclick = () => loadFile(f.id, div);
+          div.onclick = () => selectFile_(f.id, div);
 
           let icon = "📄";
           if (f.name.includes("[1. Floor Maps]")) icon = "🗺️";
@@ -602,7 +1146,42 @@
         });
       }
 
-      function loadFile(fileId, element) {
+      async function routeAudioAssetToMixer_(fileMeta) {
+        if (!fileMeta || !fileMeta.id || isCompanionMode_()) return false;
+        const isAudio =
+          (fileMeta.mimeType && fileMeta.mimeType.startsWith("audio/")) ||
+          (fileMeta.name && /\.(mp3|wav|m4a|ogg)$/i.test(fileMeta.name));
+        if (!isAudio) return false;
+        let audioBuffer = await AudioCache.get(fileMeta.id);
+        if (!audioBuffer || audioBuffer.byteLength === 0) {
+          audioBuffer = await AudioCache.fetchAudioBytes_(fileMeta);
+        }
+        if (!audioBuffer || audioBuffer.byteLength === 0) return false;
+        if (!TabletopMixer.ctx) {
+          TabletopMixer.init();
+        }
+        const channel = classifyAudioAssetChannel_(fileMeta);
+        const trackKey = fileMeta.name || fileMeta.id;
+        if (channel === 1) {
+          TabletopMixer.playAmbience(fileMeta.id, audioBuffer, trackKey);
+        } else if (channel === 3) {
+          TabletopMixer.triggerSfx(fileMeta.id, audioBuffer, trackKey);
+        } else {
+          TabletopMixer.crossfadeScore(fileMeta.id, audioBuffer, 4.0, trackKey);
+        }
+        return true;
+      }
+
+      function selectFile_(indexOrId, element) {
+        if (typeof indexOrId === "number") {
+          const fileMeta = allFiles[indexOrId];
+          if (!fileMeta) return;
+          return loadFile_(fileMeta.id, element);
+        }
+        return loadFile_(indexOrId, element);
+      }
+
+      function loadFile_(fileId, element) {
         document
           .querySelectorAll(".file-item")
           .forEach((el) => el.classList.remove("active"));
@@ -616,21 +1195,33 @@
           if (matchingEl) matchingEl.classList.add("active");
         }
 
+        const matchedMeta = allFiles.find((f) => f.id === fileId);
+        const audioRoutePromise = matchedMeta
+          ? routeAudioAssetToMixer_(matchedMeta)
+          : Promise.resolve(false);
+
         if (cache[fileId] && cache[fileId].name !== "table_notes.md") {
           renderToLeftPane(cache[fileId]);
-          return;
+          return audioRoutePromise;
         }
 
         document.getElementById("left-title").textContent = "Loading...";
         document.getElementById("left-content").innerHTML =
           '<p style="color:var(--text-muted); text-align:center; margin-top:20vh;">Loading asset...</p>';
 
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((payload) => {
             cache[fileId] = payload;
+            indexFilePayload_(payload);
             renderToLeftPane(payload);
           })
-          .getFilePayload(fileId, currentSessionDate);
+          .getFilePayload(
+            fileId,
+            currentSessionDate,
+            ...(gmKey ? [gmKey] : [])
+          );
+        return audioRoutePromise;
       }
 
       function renderToLeftPane(payload) {
@@ -814,32 +1405,1465 @@
         }
       }
 
-      // Scratchpad Live Operations
-      function loadScratchpad() {
+      // Table Notes Live Operations
+      function loadTableNotes_() {
+        const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((res) => {
             document.getElementById("scratchpad").value = res.content;
             document.getElementById("save-status").textContent =
               "Loaded: " + res.updated;
           })
-          .getScratchpadNotes(currentSessionDate);
+          .getTableNotes(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
 
-      function saveNotes() {
-        const content = document.getElementById("scratchpad").value;
+      function saveTableNotes_() {
+        const tableNotesEl = document.getElementById("scratchpad");
+        const content = tableNotesEl ? tableNotesEl.value : "";
         const status = document.getElementById("save-status");
-        status.textContent = "Saving...";
+        if (status) status.textContent = "Saving...";
 
-        google.script.run
-          .withSuccessHandler((res) => {
-            status.textContent = "Saved at " + res.updated;
-            if (res.id && cache[res.id]) {
-              delete cache[res.id];
-            }
-            refreshManifest();
-          })
-          .saveScratchpadNotes(currentSessionDate, content);
+        flushAudioTimeline(currentSessionDate);
+        const gmKey = getClientGmKey_();
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler((res) => {
+              if (status) status.textContent = "Saved at " + res.updated;
+              if (res.id && cache[res.id]) {
+                delete cache[res.id];
+              }
+              refreshManifest();
+              resolve(res);
+            })
+            .withFailureHandler((error) => {
+              if (status) {
+                status.textContent =
+                  "Save failed: " +
+                  (error && error.message ? error.message : error);
+              }
+              reject(error);
+            })
+            .saveTableNotes(
+              currentSessionDate,
+              content,
+              ...(gmKey ? [gmKey] : [])
+            );
+        });
       }
+
+      function handleManualSave_() {
+        return Promise.resolve()
+          .then(() => saveTableNotes_())
+          .catch((error) => {
+            const status = document.getElementById("save-status");
+            if (status) {
+              status.textContent =
+                "Save failed: " +
+                (error && error.message ? error.message : error);
+            }
+            return null;
+          });
+      }
+
+      function triggerPromiseExtraction() {
+        const statusEl =
+          document.getElementById("save-status") ||
+          document.getElementById("notes-status");
+        if (statusEl) statusEl.textContent = "Saving before extraction...";
+        const gmKey = getClientGmKey_();
+        return saveTableNotes_()
+          .then(
+            () =>
+              new Promise((resolve, reject) => {
+                if (
+                  typeof google === "undefined" ||
+                  !google.script ||
+                  !google.script.run
+                ) {
+                  reject(new Error("Apps Script RPC is unavailable"));
+                  return;
+                }
+                const runner = google.script.run
+                  .withSuccessHandler((res) => {
+                    const count =
+                      res && typeof res.created === "number" ? res.created : 0;
+                    if (statusEl) {
+                      statusEl.textContent =
+                        "Extracted " + count + " promise task(s)";
+                    }
+                    resolve(res);
+                  })
+                  .withFailureHandler(reject);
+                if (typeof runner.extractNarrativePromises !== "function") {
+                  reject(new Error("Narrative extraction RPC is unavailable"));
+                  return;
+                }
+                runner.extractNarrativePromises(
+                  currentSessionDate,
+                  ...(gmKey ? [gmKey] : [])
+                );
+              })
+          )
+          .catch((error) => {
+            if (statusEl) {
+              statusEl.textContent =
+                "Extraction stopped: " +
+                (error && error.message ? error.message : error);
+            }
+            return null;
+          });
+      }
+
+      // Ticket 04 & 19: IndexedDB Audio Pre-Caching Engine & Drive v3 Bearer Fetch
+      const AudioCache = {
+        dbName: "sof_audio_cache_v1",
+        storeName: "tracks",
+        memoryStore: new Map(),
+        pendingFetches: new Map(),
+        oauthToken: "session-oauth-token",
+        openDb_() {
+          return new Promise((resolve) => {
+            if (
+              typeof window === "undefined" ||
+              !window.indexedDB ||
+              typeof window.indexedDB.open !== "function"
+            ) {
+              resolve(null);
+              return;
+            }
+            try {
+              const req = window.indexedDB.open(this.dbName, 1);
+              req.onupgradeneeded = () => {
+                const db = req.result;
+                if (
+                  db &&
+                  db.objectStoreNames &&
+                  !db.objectStoreNames.contains(this.storeName)
+                ) {
+                  db.createObjectStore(this.storeName);
+                }
+              };
+              req.onsuccess = () => resolve(req.result || null);
+              req.onerror = () => resolve(null);
+            } catch (_e) {
+              resolve(null);
+            }
+          });
+        },
+        normalizeRecord_(fileId, val, lastAccessed = Date.now()) {
+          if (val && typeof val === "object" && "buffer" in val) {
+            return {
+              fileId: val.fileId || fileId,
+              buffer: val.buffer,
+              lastAccessed:
+                typeof val.lastAccessed === "number"
+                  ? val.lastAccessed
+                  : lastAccessed,
+              byteLength: val.buffer ? val.buffer.byteLength : 0
+            };
+          }
+          return {
+            fileId: fileId,
+            buffer: val,
+            lastAccessed: lastAccessed,
+            byteLength: val && val.byteLength ? val.byteLength : 0
+          };
+        },
+        async has(fileId) {
+          if (this.memoryStore.has(fileId)) return true;
+          const db = await this.openDb_();
+          if (!db) return false;
+          return new Promise((resolve) => {
+            try {
+              const tx = db.transaction(this.storeName, "readonly");
+              const store = tx.objectStore(this.storeName);
+              const req = store.get(fileId);
+              req.onsuccess = () =>
+                resolve(req.result !== undefined && req.result !== null);
+              req.onerror = () => resolve(false);
+            } catch (_e) {
+              resolve(false);
+            }
+          });
+        },
+        async get(fileId) {
+          let record = this.memoryStore.get(fileId);
+          if (!record) {
+            const db = await this.openDb_();
+            if (db) {
+              record = await new Promise((resolve) => {
+                try {
+                  const tx = db.transaction(this.storeName, "readonly");
+                  const store = tx.objectStore(this.storeName);
+                  const req = store.get(fileId);
+                  req.onsuccess = () => resolve(req.result);
+                  req.onerror = () => resolve(undefined);
+                } catch (_e) {
+                  resolve(undefined);
+                }
+              });
+            }
+          }
+          if (record === undefined || record === null) return undefined;
+          const normalized = this.normalizeRecord_(fileId, record, Date.now());
+          normalized.lastAccessed = Date.now();
+          this.memoryStore.set(fileId, normalized);
+          this.putTrack(fileId, normalized.buffer, normalized.lastAccessed);
+          return normalized.buffer;
+        },
+        async putTrack(fileId, buffer, lastAccessed = Date.now()) {
+          const record = this.normalizeRecord_(fileId, buffer, lastAccessed);
+          this.memoryStore.set(fileId, record);
+          const db = await this.openDb_();
+          if (!db) return record;
+          return new Promise((resolve) => {
+            try {
+              const tx = db.transaction(this.storeName, "readwrite");
+              const store = tx.objectStore(this.storeName);
+              const req = store.put(record, fileId);
+              req.onsuccess = () => resolve(record);
+              req.onerror = () => resolve(record);
+            } catch (_e) {
+              resolve(record);
+            }
+          });
+        },
+        async set(fileId, arrayBuffer, lastAccessed = Date.now()) {
+          return this.putTrack(fileId, arrayBuffer, lastAccessed);
+        },
+        async pruneStaleEntries(maxAgeMs = 30 * 86400 * 1000) {
+          const now = Date.now();
+          let pruned = 0;
+          for (const [k, rec] of Array.from(this.memoryStore.entries())) {
+            const norm = this.normalizeRecord_(k, rec);
+            if (now - norm.lastAccessed > maxAgeMs) {
+              this.memoryStore.delete(k);
+              pruned++;
+            }
+          }
+          const db = await this.openDb_();
+          if (!db) return pruned;
+          return new Promise((resolve) => {
+            try {
+              const tx = db.transaction(this.storeName, "readwrite");
+              const store = tx.objectStore(this.storeName);
+              if (typeof store.getAll === "function") {
+                const req = store.getAll();
+                req.onsuccess = () => {
+                  const all = Array.isArray(req.result) ? req.result : [];
+                  let pending = 0;
+                  for (let i = 0; i < all.length; i++) {
+                    const item = all[i];
+                    if (
+                      item &&
+                      item.fileId &&
+                      typeof item.lastAccessed === "number" &&
+                      now - item.lastAccessed > maxAgeMs
+                    ) {
+                      this.memoryStore.delete(item.fileId);
+                      if (typeof store.delete === "function") {
+                        pending++;
+                        const delReq = store.delete(item.fileId);
+                        const done = () => {
+                          pending--;
+                          if (pending === 0) resolve(pruned);
+                        };
+                        delReq.onsuccess = done;
+                        delReq.onerror = done;
+                      }
+                    }
+                  }
+                  if (pending === 0) resolve(pruned);
+                };
+                req.onerror = () => resolve(pruned);
+              } else {
+                resolve(pruned);
+              }
+            } catch (_e) {
+              resolve(pruned);
+            }
+          });
+        },
+        async clearCache() {
+          this.memoryStore.clear();
+          const db = await this.openDb_();
+          if (db) {
+            await new Promise((resolve) => {
+              try {
+                const tx = db.transaction(this.storeName, "readwrite");
+                const store = tx.objectStore(this.storeName);
+                if (typeof store.clear === "function") {
+                  const req = store.clear();
+                  req.onsuccess = () => resolve();
+                  req.onerror = () => resolve();
+                } else {
+                  resolve();
+                }
+              } catch (_e) {
+                resolve();
+              }
+            });
+          }
+          const statusEl = document.getElementById("audio-cache-status");
+          if (statusEl) {
+            statusEl.textContent = "Audio: 0/0 ready";
+          }
+        },
+        async fetchDriveAudioBearer(fileId, oauthToken) {
+          const pendingFetch = this.pendingFetches.get(fileId);
+          if (pendingFetch) return pendingFetch;
+          const fetchPromise = (async () => {
+            const token =
+              oauthToken || this.oauthToken || "session-oauth-token";
+            const url =
+              "https://www.googleapis.com/drive/v3/files/" +
+              encodeURIComponent(fileId) +
+              "?alt=media";
+            let buffer = new ArrayBuffer(0);
+            if (
+              typeof window !== "undefined" &&
+              typeof window.fetch === "function"
+            ) {
+              try {
+                const res = await window.fetch(url, {
+                  headers: { Authorization: "Bearer " + token }
+                });
+                if (res && res.ok && typeof res.arrayBuffer === "function") {
+                  buffer = await res.arrayBuffer();
+                }
+              } catch (_e) {}
+            }
+            await this.putTrack(fileId, buffer, Date.now());
+            return buffer;
+          })();
+          this.pendingFetches.set(fileId, fetchPromise);
+          try {
+            return await fetchPromise;
+          } finally {
+            if (this.pendingFetches.get(fileId) === fetchPromise) {
+              this.pendingFetches.delete(fileId);
+            }
+          }
+        },
+        async fetchAudioBytes_(fileMeta) {
+          return this.fetchDriveAudioBearer(
+            fileMeta.id,
+            (fileMeta && fileMeta.oauthToken) || this.oauthToken
+          );
+        },
+        async preCacheSessionAudio(files, fetchFn) {
+          const audioFiles = (files || []).filter(
+            (f) =>
+              (f.mimeType && f.mimeType.startsWith("audio/")) ||
+              (f.name && /\.(mp3|wav|m4a|ogg)$/i.test(f.name))
+          );
+          const statusEl = document.getElementById("audio-cache-status");
+          if (statusEl) {
+            statusEl.textContent = "Audio: 0/" + audioFiles.length + " ready";
+          }
+          let ready = 0;
+          for (let i = 0; i < audioFiles.length; i++) {
+            const af = audioFiles[i];
+            if (await this.has(af.id)) {
+              await this.get(af.id);
+            } else if (typeof fetchFn === "function") {
+              const bytes = await fetchFn(af);
+              await this.putTrack(af.id, bytes, Date.now());
+            } else {
+              await this.fetchDriveAudioBearer(
+                af.id,
+                (af && af.oauthToken) || this.oauthToken
+              );
+            }
+            ready++;
+            if (statusEl) {
+              statusEl.textContent =
+                "Audio: " + ready + "/" + audioFiles.length + " ready";
+            }
+          }
+          return ready;
+        },
+        async preCacheManifest(files, fetchFn) {
+          return this.preCacheSessionAudio(files, fetchFn);
+        }
+      };
+
+      // Ticket 05, 06, 20 & 21: 3-Channel Web Audio API Mixer, Auto-Routing, Master Compressor, Gain Ducking & Sidecar Logger
+      function classifyAudioAssetChannel_(asset) {
+        const raw =
+          typeof asset === "string"
+            ? asset
+            : (asset && (asset.name || asset.simpleName || asset.id)) || "";
+        const lower = String(raw).toLowerCase();
+        if (lower.includes("[ambience]") || /(?:^|[\s/\]])amb_/.test(lower)) {
+          return 1;
+        }
+        if (
+          lower.includes("[sfx]") ||
+          /(?:^|[\s/\]])sfx_/.test(lower) ||
+          lower.startsWith("sfx_")
+        ) {
+          return 3;
+        }
+        if (
+          lower.includes("[score]") ||
+          lower.includes("[music]") ||
+          /(?:^|[\s/\]])score_/.test(lower) ||
+          lower.startsWith("score_")
+        ) {
+          return 2;
+        }
+        return 2;
+      }
+
+      function createGainNode_(ctx, initialGain = 1.0, destinationNode = null) {
+        if (ctx && typeof ctx.createGain === "function") {
+          const nativeNode = ctx.createGain();
+          const target = destinationNode || ctx.destination;
+          if (target && typeof nativeNode.connect === "function") {
+            nativeNode.connect(target);
+          }
+          nativeNode.gain.value = initialGain;
+          return nativeNode;
+        }
+        return {
+          connect() {},
+          gain: {
+            value: initialGain,
+            setValueAtTime(val) {
+              this.value = val;
+            },
+            linearRampToValueAtTime(val) {
+              this.value = val;
+            }
+          }
+        };
+      }
+
+      const TabletopMixer = {
+        ctx: null,
+        compressor: null,
+        baseChannel2Gain: 0.5,
+        activeScorePlayback: null,
+        scorePlaybackRequestId: 0,
+        channel1Gain: createGainNode_(null, 0.18),
+        channel2Gain: createGainNode_(null, 0.5),
+        channel3Gain: createGainNode_(null, 0.85),
+        timeline: [],
+        duckTimer: null,
+        init() {
+          const AudioCtxCtor =
+            typeof window !== "undefined"
+              ? window.AudioContext || window.webkitAudioContext
+              : null;
+          this.ctx =
+            typeof AudioCtxCtor === "function" ? new AudioCtxCtor() : null;
+          this.compressor =
+            this.ctx && typeof this.ctx.createDynamicsCompressor === "function"
+              ? this.ctx.createDynamicsCompressor()
+              : null;
+          if (
+            this.compressor &&
+            this.ctx &&
+            this.ctx.destination &&
+            typeof this.compressor.connect === "function"
+          ) {
+            this.compressor.connect(this.ctx.destination);
+          }
+          const masterOut =
+            this.compressor || (this.ctx && this.ctx.destination) || null;
+          this.baseChannel2Gain = 0.5;
+          this.channel1Gain = createGainNode_(this.ctx, 0.18, masterOut);
+          this.channel2Gain = createGainNode_(this.ctx, 0.5, masterOut);
+          this.channel3Gain = createGainNode_(this.ctx, 0.85, masterOut);
+        },
+        now_() {
+          return this.ctx && typeof this.ctx.currentTime === "number"
+            ? this.ctx.currentTime
+            : 0;
+        },
+        logEvent_(entry) {
+          this.timeline.push(entry);
+          try {
+            if (typeof localStorage !== "undefined" && localStorage) {
+              localStorage.setItem(
+                "sof_audio_timeline_" + (currentSessionDate || "default"),
+                JSON.stringify(this.timeline)
+              );
+            }
+          } catch (_e) {}
+        },
+        hydrateFromLocalStorage(sessionDate = currentSessionDate) {
+          const targetSession = sessionDate || currentSessionDate || "default";
+          this.timeline = [];
+          try {
+            if (typeof localStorage !== "undefined" && localStorage) {
+              const raw = localStorage.getItem(
+                "sof_audio_timeline_" + targetSession
+              );
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                  this.timeline = parsed;
+                }
+              }
+            }
+          } catch (_e) {}
+          return this.timeline;
+        },
+        playBufferOnChannel_(
+          trackId,
+          gainNode,
+          loop = false,
+          explicitBuffer = null,
+          onSource = null
+        ) {
+          if (
+            !this.ctx ||
+            typeof this.ctx.decodeAudioData !== "function" ||
+            typeof this.ctx.createBufferSource !== "function"
+          ) {
+            return false;
+          }
+          const rec = AudioCache.memoryStore.get(trackId);
+          const rawBuf =
+            explicitBuffer || (rec && rec.buffer ? rec.buffer : rec);
+          if (!rawBuf || rawBuf.byteLength === 0) return false;
+          try {
+            const copy = rawBuf.slice(0);
+            this.ctx.decodeAudioData(copy, (decoded) => {
+              if (!decoded) return;
+              const src = this.ctx.createBufferSource();
+              src.buffer = decoded;
+              src.loop = loop;
+              if (typeof src.connect === "function") src.connect(gainNode);
+              const shouldStart =
+                typeof onSource !== "function" || onSource(src) !== false;
+              if (shouldStart && typeof src.start === "function") {
+                src.start(0);
+              } else {
+                if (typeof src.disconnect === "function") src.disconnect();
+                if (typeof gainNode.disconnect === "function") {
+                  gainNode.disconnect();
+                }
+              }
+            });
+            return true;
+          } catch (_e) {
+            return false;
+          }
+        },
+        playAmbience(trackId, audioBuffer = null, trackName = trackId) {
+          this.channel1Gain.gain.setValueAtTime(0.18, this.now_());
+          this.playBufferOnChannel_(
+            trackId,
+            this.channel1Gain,
+            true,
+            audioBuffer
+          );
+          this.logEvent_({
+            timestamp: Date.now(),
+            track: trackName,
+            channel: 1,
+            eventType: "LOOP",
+            gain: 0.18
+          });
+        },
+        crossfadeScore(
+          trackId,
+          audioBuffer = null,
+          durationSec = 4.0,
+          trackName = trackId
+        ) {
+          const duration = Math.max(Number(durationSec) || 0, 0);
+          this.scorePlaybackRequestId += 1;
+          const requestId = this.scorePlaybackRequestId;
+          const incomingGain = createGainNode_(this.ctx, 0, this.channel2Gain);
+          const incomingTargetGain = 1.0;
+          const scheduled = this.playBufferOnChannel_(
+            trackId,
+            incomingGain,
+            true,
+            audioBuffer,
+            (source) => {
+              if (requestId !== this.scorePlaybackRequestId) return false;
+              const transitionStart = this.now_();
+              incomingGain.gain.setValueAtTime(0, transitionStart);
+              incomingGain.gain.linearRampToValueAtTime(
+                incomingTargetGain,
+                transitionStart + duration
+              );
+
+              const outgoing = this.activeScorePlayback;
+              if (outgoing) {
+                const outgoingGain = outgoing.gainNode.gain;
+                if (typeof outgoingGain.cancelScheduledValues === "function") {
+                  outgoingGain.cancelScheduledValues(transitionStart);
+                }
+                outgoingGain.setValueAtTime(
+                  outgoingGain.value,
+                  transitionStart
+                );
+                outgoingGain.linearRampToValueAtTime(
+                  0,
+                  transitionStart + duration
+                );
+                outgoing.source.onended = () => {
+                  if (typeof outgoing.source.disconnect === "function") {
+                    outgoing.source.disconnect();
+                  }
+                  if (typeof outgoing.gainNode.disconnect === "function") {
+                    outgoing.gainNode.disconnect();
+                  }
+                  if (this.activeScorePlayback === outgoing) {
+                    this.activeScorePlayback = null;
+                  }
+                };
+                if (typeof outgoing.source.stop === "function") {
+                  outgoing.source.stop(transitionStart + duration);
+                }
+              }
+
+              const playback = {
+                source,
+                gainNode: incomingGain,
+                trackId
+              };
+              this.activeScorePlayback = playback;
+              source.onended = () => {
+                if (typeof source.disconnect === "function") {
+                  source.disconnect();
+                }
+                if (typeof incomingGain.disconnect === "function") {
+                  incomingGain.disconnect();
+                }
+                if (this.activeScorePlayback === playback) {
+                  this.activeScorePlayback = null;
+                }
+              };
+              return true;
+            }
+          );
+          if (!scheduled && typeof incomingGain.disconnect === "function") {
+            incomingGain.disconnect();
+          }
+          if (scheduled) {
+            this.logEvent_({
+              timestamp: Date.now(),
+              track: trackName,
+              channel: 2,
+              eventType: "CROSSFADE",
+              gain: this.baseChannel2Gain
+            });
+          }
+        },
+        triggerSfx(trackId, audioBuffer = null, trackName = trackId) {
+          const now = this.now_();
+          const duckedGain = Number(
+            (this.baseChannel2Gain * Math.pow(10, -8 / 20)).toFixed(3)
+          );
+          const normalGain = this.baseChannel2Gain;
+          this.channel3Gain.gain.setValueAtTime(0.85, now);
+          this.channel2Gain.gain.linearRampToValueAtTime(
+            duckedGain,
+            now + 0.05
+          );
+          this.playBufferOnChannel_(
+            trackId,
+            this.channel3Gain,
+            false,
+            audioBuffer
+          );
+          this.logEvent_({
+            timestamp: Date.now(),
+            track: trackName,
+            channel: 3,
+            eventType: "SFX",
+            gain: duckedGain
+          });
+          if (this.duckTimer) clearTimeout(this.duckTimer);
+          this.duckTimer = setTimeout(() => {
+            this.channel2Gain.gain.linearRampToValueAtTime(
+              normalGain,
+              this.now_() + 0.4
+            );
+            this.logEvent_({
+              timestamp: Date.now(),
+              track: trackName,
+              channel: 2,
+              eventType: "RESTORE",
+              gain: normalGain
+            });
+          }, 1500);
+        },
+        playSfx(sfxId, audioBuffer = null) {
+          return this.triggerSfx(sfxId, audioBuffer);
+        }
+      };
+
+      const activeMixer = TabletopMixer;
+      let pendingMusicCue_ = null;
+
+      function playMusicCue_(intentPayload) {
+        const scoreAsset = findScoreAssetForMood_(intentPayload.mood);
+        if (scoreAsset) {
+          activeMixer.crossfadeScore(
+            scoreAsset.id,
+            null,
+            4.0,
+            intentPayload.mood
+          );
+        }
+      }
+
+      function flushPendingMusicCue_() {
+        const ctx = activeMixer.ctx;
+        if (!pendingMusicCue_ || !ctx || ctx.state === "suspended") {
+          return;
+        }
+        const cue = pendingMusicCue_;
+        pendingMusicCue_ = null;
+        playMusicCue_(cue);
+      }
+
+      function activateMixerFromUserGesture_() {
+        if (isCompanionMode_()) return null;
+        if (!activeMixer.ctx) activeMixer.init();
+        const ctx = activeMixer.ctx;
+        if (!ctx) return null;
+
+        if (ctx.state === "suspended" && typeof ctx.resume === "function") {
+          try {
+            const resumed = ctx.resume();
+            if (resumed && typeof resumed.then === "function") {
+              return resumed.then(
+                () => flushPendingMusicCue_(),
+                () => null
+              );
+            }
+          } catch (_e) {
+            return null;
+          }
+        }
+        flushPendingMusicCue_();
+        return null;
+      }
+
+      function installAudioUnlockHandler_() {
+        if (isCompanionMode_()) return;
+        document.addEventListener(
+          "pointerdown",
+          activateMixerFromUserGesture_,
+          { passive: true }
+        );
+      }
+
+      function findScoreAssetForMood_(mood) {
+        const normalize = (value) =>
+          String(value || "")
+            .replace(/\.[^/.]+$/, "")
+            .replace(/^\s*\[score\]\s*/i, "")
+            .replace(/^\s*score[\s_-]+/i, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+        const moodKey = normalize(mood);
+        if (!moodKey) return null;
+
+        const scoreAssets = allFiles.filter(
+          (fileMeta) =>
+            fileMeta &&
+            fileMeta.id &&
+            ((fileMeta.mimeType && fileMeta.mimeType.startsWith("audio/")) ||
+              (fileMeta.name && /\.(mp3|wav|m4a|ogg)$/i.test(fileMeta.name))) &&
+            classifyAudioAssetChannel_(fileMeta) === 2
+        );
+        const matchingAssets = scoreAssets.filter((fileMeta) => {
+          const name = normalize(fileMeta.simpleName || fileMeta.name);
+          return name === moodKey || ` ${name} `.includes(` ${moodKey} `);
+        });
+        const exactMatches = matchingAssets.filter(
+          (fileMeta) =>
+            normalize(fileMeta.simpleName || fileMeta.name) === moodKey
+        );
+        if (exactMatches.length === 1) return exactMatches[0];
+        return matchingAssets.length === 1 ? matchingAssets[0] : null;
+      }
+
+      function triggerManualMoodCue(mood) {
+        if (!mood) return;
+        const normMood = String(mood).trim().toLowerCase();
+        const scoreAsset = findScoreAssetForMood_(normMood);
+        if (!scoreAsset) return;
+        const playManualCue = () =>
+          activeMixer.crossfadeScore(
+            scoreAsset.id,
+            null,
+            4.0,
+            "score_" + normMood
+          );
+        const resumeResult = activateMixerFromUserGesture_();
+        if (resumeResult && typeof resumeResult.then === "function") {
+          resumeResult.then(playManualCue);
+        } else {
+          playManualCue();
+        }
+      }
+
+      function flushAudioTimeline(sessionDate = currentSessionDate) {
+        const targetSession = sessionDate || currentSessionDate;
+        if (!TabletopMixer.timeline || TabletopMixer.timeline.length === 0) {
+          TabletopMixer.hydrateFromLocalStorage(targetSession);
+        }
+        if (!TabletopMixer.timeline || TabletopMixer.timeline.length === 0) {
+          return;
+        }
+        const jsonStr = JSON.stringify(TabletopMixer.timeline);
+        const gmKey = getClientGmKey_();
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler(() => {});
+          runner.saveAudioTimeline(
+            targetSession,
+            jsonStr,
+            ...(gmKey ? [gmKey] : [])
+          );
+        }
+      }
+
+      // Tickets 07, 08, 22 & 23: Mobile Player Companion HUD, MiniSearch Glossary & PTT Rules Sniffer
+      // Intentional mirror of getCoreStarterGlossary_ in Code.gs: the Player Companion
+      // needs the same normalized entries offline when the server glossary RPC is unavailable.
+      const DEFAULT_GLOSSARY = {
+        disadvantage: {
+          id: "srd_disadvantage",
+          title: "Disadvantage",
+          source: "5e SRD Starter Glossary",
+          summary: "Roll two d20s and take the lower result.",
+          tags: "disadvantage core mechanic d20 roll"
+        },
+        advantage: {
+          id: "srd_advantage",
+          title: "Advantage",
+          source: "5e SRD Starter Glossary",
+          summary: "Roll two d20s and take the higher result.",
+          tags: "advantage core mechanic d20 roll"
+        },
+        concentration: {
+          id: "srd_concentration",
+          title: "Concentration",
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Taking damage while concentrating on a spell requires a Constitution saving throw (DC 10 or half the damage taken, whichever is higher). Incapacitated or casting another concentration spell ends it.",
+          tags: "spellcasting constitution save dc damage"
+        },
+        exhaustion: {
+          id: "srd_exhaustion",
+          title: "Exhaustion",
+          source: "5e SRD Starter Glossary",
+          summary: "Cumulative -1 penalty per level to d20 tests and speed.",
+          tags: "exhaustion condition penalty speed"
+        },
+        teleport: {
+          id: "srd_teleport",
+          title: "Teleport",
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Instantly transport up to 8 willing creatures to a known destination.",
+          tags: "spell teleport conjuration 7th-level"
+        },
+        misty_step: {
+          id: "srd_misty_step",
+          title: "Misty Step",
+          source: "5e SRD Starter Glossary",
+          summary:
+            "2nd-level conjuration (bonus action, Self): Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space that you can see.",
+          tags: "spell bonus action teleport conjuration 2nd-level"
+        },
+        grappling: {
+          id: "srd_grappling",
+          title: "Grappling",
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Use the Attack action to make a special melee attack: Strength (Athletics) contested by target's Strength (Athletics) or Dexterity (Acrobatics). Target's speed becomes 0.",
+          tags: "combat condition athletics acrobatics grapple speed"
+        },
+        sneak_attack: {
+          id: "srd_sneak_attack",
+          title: "Sneak Attack",
+          source: "5e SRD Starter Glossary",
+          summary:
+            "Once per turn, deal extra 1d6+ damage to one creature you hit with a finesse or ranged weapon if you have advantage on the attack roll or an ally is within 5 feet of the target.",
+          tags: "rogue class feature finesse advantage damage"
+        },
+        shield: {
+          id: "srd_shield",
+          title: "Shield",
+          source: "5e SRD Starter Glossary",
+          summary:
+            "1st-level abjuration (reaction when hit by an attack or targeted by magic missile): Until the start of your next turn, you have a +5 bonus to AC and take no damage from magic missile.",
+          tags: "spell reaction abjuration ac defense"
+        }
+      };
+
+      let rulesMiniSearch = null;
+      let pttTimer = null;
+      let dictationDebounceTimer = null;
+      let ruleCardTimer = null;
+      let activeRuleCard = null;
+      let ruleFeedbackPending = false;
+      let activeSpeechRecognition = null;
+
+      function getDefaultGlossaryDocs_() {
+        return Object.keys(DEFAULT_GLOSSARY).map((key) => {
+          const item = DEFAULT_GLOSSARY[key];
+          return {
+            id: item.id || "srd_" + key,
+            title: item.title,
+            source: item.source || "5e SRD Starter Glossary",
+            summary: item.summary || "",
+            tags: item.tags || key.replace(/_/g, " ")
+          };
+        });
+      }
+
+      function indexRulesGlossary_(entries = []) {
+        if (typeof MiniSearch === "undefined") return;
+        rulesMiniSearch = new MiniSearch({
+          fields: ["title", "tags", "summary"],
+          storeFields: ["id", "title", "source", "summary", "tags"],
+          searchOptions: {
+            prefix: true,
+            fuzzy: 0.2,
+            boost: { title: 3.0, tags: 2.0, summary: 1.0 }
+          }
+        });
+        const merged = [];
+        const seenTitles = new Set();
+        const incoming = Array.isArray(entries) ? entries : [];
+        for (let i = 0; i < incoming.length; i++) {
+          const e = incoming[i];
+          if (!e || !e.title) continue;
+          const normTitle = String(e.title).trim().toLowerCase();
+          if (seenTitles.has(normTitle)) continue;
+          seenTitles.add(normTitle);
+          merged.push({
+            id: e.id || "rule_" + i + "_" + normTitle.replace(/\W+/g, "_"),
+            title: String(e.title).trim(),
+            source: e.source || e.type || "Campaign Glossary",
+            summary: String(e.summary || e.text || "").trim(),
+            tags: String(e.tags || normTitle)
+          });
+        }
+        const defaults = getDefaultGlossaryDocs_();
+        for (let j = 0; j < defaults.length; j++) {
+          const d = defaults[j];
+          const normTitle = d.title.toLowerCase();
+          if (!seenTitles.has(normTitle)) {
+            seenTitles.add(normTitle);
+            merged.push(d);
+          }
+        }
+        rulesMiniSearch.addAll(merged);
+      }
+
+      indexRulesGlossary_([]);
+
+      function updatePlayerIdentityDom_(playerName) {
+        currentPlayerIdentity = playerName;
+        const tag = document.getElementById("player-tag");
+        const display = document.getElementById("player-identity-display");
+        if (tag) {
+          tag.textContent = "Player: " + playerName;
+        } else if (display) {
+          display.textContent = "Player: " + playerName;
+        }
+        const modal = document.getElementById("identity-modal");
+        if (modal) {
+          modal.classList.add("hidden");
+          modal.style.display = "none";
+        }
+      }
+
+      function initCompanionState_() {
+        const sessionDateEl = document.getElementById("player-session-date");
+        if (sessionDateEl) {
+          sessionDateEl.textContent = currentSessionDate;
+        }
+        if (isCompanionMode_()) {
+          document.body.classList.add("companion-only-mode");
+          const sidebarEl = document.getElementById("sidebar");
+          if (sidebarEl && typeof sidebarEl.remove === "function") {
+            sidebarEl.remove();
+          }
+          const workspaceEl = document.getElementById("workspace");
+          if (workspaceEl && typeof workspaceEl.remove === "function") {
+            workspaceEl.remove();
+          }
+        }
+        let savedIdentity = null;
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            savedIdentity = localStorage.getItem("sof_player_identity");
+          }
+        } catch (_e) {}
+        if (savedIdentity) {
+          updatePlayerIdentityDom_(savedIdentity);
+        }
+      }
+
+      function selectPlayerIdentity(playerName) {
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            localStorage.setItem("sof_player_identity", playerName);
+          }
+        } catch (_e) {}
+        updatePlayerIdentityDom_(playerName);
+      }
+
+      function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          const runner = google.script.run.withSuccessHandler((entries) => {
+            if (entries) {
+              indexRulesGlossary_(entries);
+            }
+          });
+          if (runner && typeof runner.getRulesGlossary === "function") {
+            runner.getRulesGlossary(sessionDate || currentSessionDate);
+          }
+        }
+      }
+
+      function matchSpokenRuleQuery_(transcript) {
+        if (!transcript || !String(transcript).trim()) return null;
+        const query = String(transcript).trim();
+        if (!rulesMiniSearch && typeof MiniSearch !== "undefined") {
+          indexRulesGlossary_([]);
+        }
+        if (rulesMiniSearch) {
+          const hits = rulesMiniSearch.search(query, {
+            prefix: true,
+            fuzzy: 0.2,
+            boost: { title: 3.0, tags: 2.0, summary: 1.0 }
+          });
+          if (hits && hits.length > 0) {
+            const top = hits[0];
+            return {
+              key: top.id || top.title.toLowerCase(),
+              id: top.id,
+              title: top.title,
+              source: top.source || "Core Mechanic",
+              summary: top.summary,
+              text: top.summary,
+              entry: {
+                id: top.id,
+                title: top.title,
+                type: top.source || "Core Mechanic",
+                source: top.source || "Core Mechanic",
+                summary: top.summary,
+                text: top.summary
+              }
+            };
+          }
+        }
+        const lower = query.toLowerCase();
+        const keys = Object.keys(DEFAULT_GLOSSARY);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          if (lower.includes(key.replace(/_/g, " ")) || lower.includes(key)) {
+            return {
+              key: key,
+              entry: DEFAULT_GLOSSARY[key]
+            };
+          }
+        }
+        return null;
+      }
+
+      function executeDictationQuery_(rawQuery) {
+        const cleaned = String(rawQuery || "").trim();
+        if (!cleaned) return;
+        const matched = matchSpokenRuleQuery_(cleaned);
+        if (matched && matched.entry) {
+          showRuleCard_(matched.entry, cleaned);
+        }
+      }
+
+      function handleDictationInput(val) {
+        if (dictationDebounceTimer) clearTimeout(dictationDebounceTimer);
+        dictationDebounceTimer = setTimeout(() => {
+          executeDictationQuery_(val);
+        }, 900);
+      }
+
+      function handleDictationKeydown(e) {
+        if (e && e.key === "Enter") {
+          e.preventDefault();
+          if (dictationDebounceTimer) clearTimeout(dictationDebounceTimer);
+          const inputEl = document.getElementById("ptt-dictation-input");
+          const val =
+            (e.target && e.target.value) || (inputEl && inputEl.value) || "";
+          executeDictationQuery_(val);
+        }
+      }
+
+      const dictationElInit = document.getElementById("ptt-dictation-input");
+      if (dictationElInit) {
+        dictationElInit.addEventListener("keydown", handleDictationKeydown);
+      }
+
+      function focusDictationFallback_() {
+        const dictationInput = document.getElementById("ptt-dictation-input");
+        if (dictationInput && typeof dictationInput.focus === "function") {
+          dictationInput.focus();
+        }
+      }
+
+      function triggerPtt() {
+        const btn = document.getElementById("ptt-btn");
+        if (!btn) return;
+        if (btn.classList.contains("listening")) {
+          stopPtt_();
+          return;
+        }
+
+        const SpeechRecognitionCtor =
+          typeof window !== "undefined"
+            ? window.SpeechRecognition || window.webkitSpeechRecognition
+            : null;
+        if (typeof SpeechRecognitionCtor !== "function") {
+          stopPtt_();
+          focusDictationFallback_();
+          return;
+        }
+
+        btn.classList.add("listening");
+        btn.textContent = "🔴 Listening (4s)...";
+
+        try {
+          activeSpeechRecognition = new SpeechRecognitionCtor();
+          activeSpeechRecognition.continuous = false;
+          activeSpeechRecognition.interimResults = false;
+          activeSpeechRecognition.lang = "en-US";
+          activeSpeechRecognition.onresult = (event) => {
+            const transcript =
+              event &&
+              event.results &&
+              event.results[0] &&
+              event.results[0][0] &&
+              event.results[0][0].transcript
+                ? event.results[0][0].transcript
+                : "";
+            const matched = matchSpokenRuleQuery_(transcript);
+            if (matched) {
+              showRuleCard_(matched.entry, transcript.toLowerCase());
+            }
+            stopPtt_();
+          };
+          activeSpeechRecognition.onerror = () => {
+            stopPtt_();
+            focusDictationFallback_();
+          };
+          if (typeof activeSpeechRecognition.start === "function") {
+            activeSpeechRecognition.start();
+          }
+        } catch (_e) {
+          stopPtt_();
+          focusDictationFallback_();
+          return;
+        }
+
+        if (pttTimer) clearTimeout(pttTimer);
+        pttTimer = setTimeout(() => {
+          stopPtt_();
+        }, 4000);
+      }
+
+      function stopPtt_() {
+        if (pttTimer) clearTimeout(pttTimer);
+        if (
+          activeSpeechRecognition &&
+          typeof activeSpeechRecognition.stop === "function"
+        ) {
+          try {
+            activeSpeechRecognition.stop();
+          } catch (_e) {}
+        }
+        activeSpeechRecognition = null;
+        const btn = document.getElementById("ptt-btn");
+        if (btn) {
+          btn.classList.remove("listening");
+          btn.textContent = "🎙️ Tap to Ask Rule";
+        }
+      }
+
+      function setRuleFeedbackPending_(pending) {
+        ruleFeedbackPending = pending;
+        ["btn-up", "btn-down"].forEach((buttonId) => {
+          const button = document.getElementById(buttonId);
+          if (button) button.disabled = pending;
+        });
+      }
+
+      function showRuleCard_(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
+        const card = document.getElementById("rule-card");
+        const titleEl = document.getElementById("card-title");
+        const typeEl = document.getElementById("card-type");
+        const textEl = document.getElementById("card-text");
+        if (!card || !titleEl) return;
+
+        let ruleTitle = "";
+        let ruleText = "";
+        let ruleSource = "Mechanic";
+        let heardPhrase = "";
+
+        if (ruleOrTitle && typeof ruleOrTitle === "object") {
+          ruleTitle = ruleOrTitle.title || ruleOrTitle.name || "";
+          ruleText = ruleOrTitle.summary || ruleOrTitle.text || "";
+          ruleSource = ruleOrTitle.source || ruleOrTitle.type || "Mechanic";
+          heardPhrase = String(textOrPhrase || ruleTitle.toLowerCase());
+        } else {
+          ruleTitle = String(ruleOrTitle || "");
+          ruleText = String(textOrPhrase || "");
+          heardPhrase = String(maybePhrase || ruleTitle.toLowerCase());
+        }
+
+        activeRuleCard = {
+          cardTitle: ruleTitle,
+          source: ruleSource,
+          text: ruleText,
+          phrase: heardPhrase
+        };
+        titleEl.textContent = ruleTitle;
+        if (typeEl) typeEl.textContent = ruleSource;
+        if (textEl) textEl.textContent = ruleText;
+        const feedbackStatus = document.getElementById("feedback-status");
+        if (feedbackStatus) {
+          feedbackStatus.textContent = "";
+          feedbackStatus.classList.add("hidden");
+        }
+        card.classList.add("visible");
+        card.style.display = "block";
+        setRuleFeedbackPending_(ruleFeedbackPending);
+        if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        ruleCardTimer = setTimeout(() => {
+          dismissRuleCard();
+        }, 30000);
+      }
+
+      function dismissRuleCard() {
+        if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        const card = document.getElementById("rule-card");
+        if (card) {
+          card.classList.remove("visible");
+          card.style.display = "none";
+        }
+      }
+
+      function setRuleFeedbackStatus_(message) {
+        const status = document.getElementById("feedback-status");
+        if (!status) return;
+        status.textContent = message;
+        status.classList.remove("hidden");
+      }
+
+      function submitRuleFeedback(vote) {
+        if (ruleFeedbackPending || !activeRuleCard) return;
+        const submittedCard = activeRuleCard;
+        setRuleFeedbackPending_(true);
+
+        let player = currentPlayerIdentity || "Guest";
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            player = localStorage.getItem("sof_player_identity") || player;
+          }
+        } catch (_e) {}
+        const payload = {
+          sessionDate: currentSessionDate,
+          player: player,
+          phrase: submittedCard.phrase || "",
+          cardTitle: submittedCard.cardTitle || "",
+          source: submittedCard.source || "D&D 5e Glossary",
+          vote: vote
+        };
+        const handleFailure = () => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          setRuleFeedbackStatus_(
+            "Feedback could not be saved. Please try again."
+          );
+        };
+        const handleResult = (result) => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          if (result && result.status === "logged") {
+            dismissRuleCard();
+            return;
+          }
+          if (result && result.status === "rate_limited") {
+            setRuleFeedbackStatus_(
+              "Feedback limit reached. Please try again later."
+            );
+          } else if (result && result.status === "unavailable") {
+            setRuleFeedbackStatus_(
+              "Feedback logging is unavailable. Please try again later."
+            );
+          } else {
+            handleFailure();
+          }
+        };
+
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run
+        ) {
+          try {
+            const runner = google.script.run
+              .withSuccessHandler(handleResult)
+              .withFailureHandler(handleFailure);
+            if (runner && typeof runner.logRuleFeedback === "function") {
+              runner.logRuleFeedback(payload);
+              return;
+            }
+          } catch (_e) {}
+        }
+        handleFailure();
+      }
+
+      let lastHandledCueTimestamp_ = null;
+
+      function handleAudioIntent_(intentPayload) {
+        if (!intentPayload || !intentPayload.intent) return;
+        if (
+          intentPayload.timestamp !== undefined &&
+          intentPayload.timestamp !== null
+        ) {
+          if (intentPayload.timestamp === lastHandledCueTimestamp_) {
+            return;
+          }
+          lastHandledCueTimestamp_ = intentPayload.timestamp;
+        }
+        const tierLabel = intentPayload.tier || intentPayload.activeTier;
+        if (tierLabel) {
+          const tierEl = document.getElementById("classifier-tier-status");
+          if (tierEl) {
+            tierEl.textContent = "Tier: " + tierLabel;
+          }
+        }
+        if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
+          if (!isCompanionMode_()) {
+            if (!activeMixer.ctx || activeMixer.ctx.state === "suspended") {
+              pendingMusicCue_ = intentPayload;
+            } else {
+              playMusicCue_(intentPayload);
+            }
+          }
+        } else if (
+          intentPayload.intent === "RULE_QUERY" &&
+          intentPayload.rule
+        ) {
+          const key = intentPayload.rule.toLowerCase();
+          const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
+          const matched = (matchedFromSearch && matchedFromSearch.entry) ||
+            DEFAULT_GLOSSARY[key] || {
+              id: "rule_" + key,
+              title: intentPayload.rule,
+              source: "Rule",
+              summary: "Matched table query: " + intentPayload.rule,
+              tags: key
+            };
+          showRuleCard_(matched, key);
+        }
+      }
+
+      const AUDIO_CUE_POLL_INTERVAL_MS = 5000;
+      let audioCuePollTimer_ = null;
+      let audioCuePollInFlight_ = false;
+
+      function scheduleNextAudioCuePoll_() {
+        if (audioCuePollTimer_ !== null) clearTimeout(audioCuePollTimer_);
+        audioCuePollTimer_ = setTimeout(() => {
+          audioCuePollTimer_ = null;
+          pollLatestAudioCue_();
+        }, AUDIO_CUE_POLL_INTERVAL_MS);
+      }
+
+      function pollLatestAudioCue_() {
+        if (audioCuePollInFlight_) return;
+        if (
+          typeof google === "undefined" ||
+          !google.script ||
+          !google.script.run
+        ) {
+          scheduleNextAudioCuePoll_();
+          return;
+        }
+
+        const companionMode = isCompanionMode_();
+        const rpcMethodName = companionMode
+          ? "getLatestRuleQueryCueForCompanion"
+          : "getLatestAudioCue";
+        const gmKey = companionMode ? "" : getClientGmKey_();
+        audioCuePollInFlight_ = true;
+        let completed = false;
+        const finishRequest = (cue, succeeded) => {
+          if (completed) return;
+          completed = true;
+          audioCuePollInFlight_ = false;
+          try {
+            if (
+              succeeded &&
+              (!companionMode || (cue && cue.intent === "RULE_QUERY"))
+            ) {
+              handleAudioIntent_(cue);
+            }
+          } finally {
+            scheduleNextAudioCuePoll_();
+          }
+        };
+
+        try {
+          const runner = google.script.run.withSuccessHandler((cue) =>
+            finishRequest(cue, true)
+          );
+          const configuredRunner =
+            runner && typeof runner.withFailureHandler === "function"
+              ? runner.withFailureHandler(() => finishRequest(null, false))
+              : runner;
+          if (
+            configuredRunner &&
+            typeof configuredRunner[rpcMethodName] === "function"
+          ) {
+            configuredRunner[rpcMethodName](...(gmKey ? [gmKey] : []));
+          } else if (typeof google.script.run[rpcMethodName] === "function") {
+            google.script.run[rpcMethodName](...(gmKey ? [gmKey] : []));
+          } else {
+            finishRequest(null, false);
+          }
+        } catch (_e) {
+          finishRequest(null, false);
+        }
+      }
+
+      window.addEventListener("message", (event) => {
+        if (
+          event &&
+          event.data &&
+          event.data.type === "SOF_AUDIO_INTENT" &&
+          event.data.payload
+        ) {
+          handleAudioIntent_(event.data.payload);
+        }
+      });
+      window.addEventListener("load", pollLatestAudioCue_);
     </script>
   </body>
 </html>

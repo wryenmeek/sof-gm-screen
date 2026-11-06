@@ -16,7 +16,15 @@ export default [
         ScriptApp: "readonly",
         PropertiesService: "readonly",
         MimeType: "readonly",
-        Logger: "readonly"
+        Logger: "readonly",
+        SpreadsheetApp: "readonly",
+        CalendarApp: "readonly",
+        Calendar: "readonly",
+        Tasks: "readonly",
+        CacheService: "readonly",
+        LockService: "readonly",
+        Session: "readonly",
+        ContentService: "readonly"
       }
     },
     rules: {
@@ -31,10 +39,45 @@ export default [
       "no-unused-vars": [
         "warn",
         {
+          vars: "local",
           argsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
-          varsIgnorePattern:
-            "^(doGet|getSessionList|getSessionManifest|getFilePayload|getScratchpadNotes|saveScratchpadNotes|_)"
+          varsIgnorePattern: "^_"
+        }
+      ]
+    }
+  },
+  {
+    files: [".vitest/Index.client.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "script",
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        navigator: "readonly",
+        localStorage: "readonly",
+        URLSearchParams: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        console: "readonly",
+        marked: "readonly",
+        MiniSearch: "readonly",
+        google: "readonly"
+      }
+    },
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "no-useless-escape": "off",
+      "no-unused-vars": [
+        "warn",
+        {
+          vars: "local",
+          argsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          varsIgnorePattern: "^_"
         }
       ]
     }

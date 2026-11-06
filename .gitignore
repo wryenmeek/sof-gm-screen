@@ -4,3 +4,7 @@ dist/
 coverage/
 .vitest/
 *.log
+__pycache__/
+*.pyc
+.scratch/
+.worktrees/

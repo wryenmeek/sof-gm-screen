@@ -1,0 +1,753 @@
+// @vitest-environment happy-dom
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { setupClientHarness } from "./helpers/client-harness";
+
+describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", () => {
+  let AudioCache: any;
+  let TabletopMixer: any;
+  let handleAudioIntent: any;
+  let flushAudioTimeline: any;
+  let saveAudioTimelineSpy: ReturnType<typeof vi.fn>;
+  let fetchSpy: ReturnType<typeof vi.fn>;
+  let idbStore: Map<string, any>;
+  let idbOpenSpy: ReturnType<typeof vi.fn>;
+  let audioCtxCreateGainSpy: ReturnType<typeof vi.fn>;
+  let audioCtxCreateCompressorSpy: ReturnType<typeof vi.fn>;
+  let classifyAudioAssetChannel: any;
+  let triggerManualMoodCue: any;
+  let pollLatestAudioCue: any;
+  let saveTableNotes: any;
+  let startNotesAutoSave: any;
+  let renderManifest: any;
+  let selectFile: any;
+  let saveTableNotesSpy: ReturnType<typeof vi.fn>;
+  let mockLocalStorage: any;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    const harness = setupClientHarness();
+    AudioCache = harness.AudioCache;
+    TabletopMixer = harness.TabletopMixer;
+    handleAudioIntent = harness.handleAudioIntent;
+    flushAudioTimeline = harness.flushAudioTimeline;
+    saveAudioTimelineSpy = harness.saveAudioTimelineSpy;
+    fetchSpy = harness.fetchSpy;
+    idbStore = harness.idbStore;
+    idbOpenSpy = harness.idbOpenSpy;
+    audioCtxCreateGainSpy = harness.audioCtxCreateGainSpy;
+    audioCtxCreateCompressorSpy = harness.audioCtxCreateCompressorSpy;
+    classifyAudioAssetChannel = harness.classifyAudioAssetChannel;
+    triggerManualMoodCue = harness.triggerManualMoodCue;
+    pollLatestAudioCue = harness.pollLatestAudioCue;
+    saveTableNotes = harness.saveTableNotes;
+    startNotesAutoSave = harness.startNotesAutoSave;
+    renderManifest = harness.renderManifest;
+    selectFile = harness.selectFile;
+    saveTableNotesSpy = harness.saveTableNotesSpy;
+    mockLocalStorage = harness.mockLocalStorage;
+  });
+
+  describe("Ticket 04 & 19: Google Drive v3 Bearer Fetch & IndexedDB Audio Pre-Caching Engine", () => {
+    it("persists binary audio ArrayBuffers through window.indexedDB and updates progress badge", async () => {
+      expect(AudioCache).toBeDefined();
+      const fileId = "1hK0jBXVU6Mz47pFSr3M23Y6ZFiCHR8BH";
+      const buf = new ArrayBuffer(512);
+
+      const hasPromise = AudioCache.has(fileId);
+      await vi.runAllTimersAsync();
+      expect(await hasPromise).toBe(false);
+
+      const setPromise = AudioCache.set(fileId, buf);
+      await vi.runAllTimersAsync();
+      await setPromise;
+      expect(idbOpenSpy).toHaveBeenCalledWith("sof_audio_cache_v1", 1);
+      expect(idbStore.get(fileId)?.byteLength).toBe(512);
+
+      const loaded = await AudioCache.get(fileId);
+      expect(loaded?.byteLength).toBe(512);
+
+      const preCachePromise = AudioCache.preCacheManifest([
+        { id: "a1", name: "Age_of_Sail.mp3", mimeType: "audio/mpeg" },
+        { id: "a2", name: "Combat_Score.mp3", mimeType: "audio/mpeg" }
+      ]);
+      await vi.runAllTimersAsync();
+      await preCachePromise;
+      const badge = document.getElementById("audio-cache-status")!;
+      expect(badge.textContent).toContain("Audio: 2/2 ready");
+    });
+
+    it("fetches via Drive v3 alt=media with Authorization Bearer header, stores { fileId, buffer, lastAccessed }, updates lastAccessed on hit, prunes >30d stale entries, and supports clearCache()", async () => {
+      expect(AudioCache.putTrack).toBeDefined();
+      expect(AudioCache.fetchDriveAudioBearer).toBeDefined();
+      expect(AudioCache.pruneStaleEntries).toBeDefined();
+      expect(AudioCache.clearCache).toBeDefined();
+      expect(AudioCache.preCacheSessionAudio).toBeDefined();
+
+      // 1. fetchDriveAudioBearer sends Bearer header to Drive v3 alt=media and stores { fileId, buffer, lastAccessed }
+      const fetchPromise = AudioCache.fetchDriveAudioBearer(
+        "track_drive_99",
+        "ya29.test_bearer_token"
+      );
+      await vi.runAllTimersAsync();
+      const fetchedBuf = await fetchPromise;
+      expect(fetchedBuf.byteLength).toBe(256);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://www.googleapis.com/drive/v3/files/track_drive_99?alt=media",
+        {
+          headers: { Authorization: "Bearer ya29.test_bearer_token" }
+        }
+      );
+      const record = idbStore.get("track_drive_99");
+      expect(record).toMatchObject({
+        fileId: "track_drive_99",
+        lastAccessed: expect.any(Number)
+      });
+      expect(record.buffer.byteLength).toBe(256);
+
+      // 2. Subsequent get() hits IndexedDB with zero extra network calls and updates lastAccessed
+      fetchSpy.mockClear();
+      const initialAccessed = record.lastAccessed;
+      vi.advanceTimersByTime(5000);
+      const hitPromise = AudioCache.get("track_drive_99");
+      await vi.runAllTimersAsync();
+      const hitBuf = await hitPromise;
+      expect(hitBuf.byteLength).toBe(256);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(idbStore.get("track_drive_99").lastAccessed).toBeGreaterThan(
+        initialAccessed
+      );
+
+      // 3. pruneStaleEntries evicts entries older than 30 days while keeping fresh entries
+      const thirtyOneDaysAgo = Date.now() - 31 * 86400 * 1000;
+      const putOldPromise = AudioCache.putTrack(
+        "stale_track_01",
+        new ArrayBuffer(128),
+        thirtyOneDaysAgo
+      );
+      await vi.runAllTimersAsync();
+      await putOldPromise;
+      expect(idbStore.has("stale_track_01")).toBe(true);
+
+      const prunePromise = AudioCache.pruneStaleEntries();
+      await vi.runAllTimersAsync();
+      await prunePromise;
+      expect(idbStore.has("stale_track_01")).toBe(false);
+      expect(idbStore.has("track_drive_99")).toBe(true);
+
+      // 4. clearCache() wipes store and resets #audio-cache-status
+      const clearPromise = AudioCache.clearCache();
+      await vi.runAllTimersAsync();
+      await clearPromise;
+      expect(idbStore.size).toBe(0);
+      expect(document.getElementById("audio-cache-status")!.textContent).toBe(
+        "Audio: 0/0 ready"
+      );
+
+      // 5. preCacheSessionAudio uses custom fetchFn when provided and updates progress
+      const customFetch = vi.fn().mockResolvedValue(new ArrayBuffer(64));
+      const prePromise = AudioCache.preCacheSessionAudio(
+        [
+          { id: "s1", name: "amb_waves.mp3", mimeType: "audio/mpeg" },
+          { id: "s2", name: "score_combat.mp3", mimeType: "audio/mpeg" }
+        ],
+        customFetch
+      );
+      await vi.runAllTimersAsync();
+      await prePromise;
+      expect(customFetch).toHaveBeenCalledTimes(2);
+      expect(document.getElementById("audio-cache-status")!.textContent).toBe(
+        "Audio: 2/2 ready"
+      );
+    });
+  });
+
+  describe("Ticket 05 & 20: Web Audio API 3-Channel Mixer, Auto-Routing, Master Compressor & SFX Ducking", () => {
+    it("instantiates native AudioContext GainNodes with 0.5 Channel 2 baseline, ducks Channel 2 score by -8dB (0.199), and restores to 0.5 after 1.5s", () => {
+      expect(TabletopMixer).toBeDefined();
+      TabletopMixer.init();
+      expect(audioCtxCreateGainSpy).toHaveBeenCalledTimes(3);
+      expect(TabletopMixer.baseChannel2Gain).toBe(0.5);
+      expect(TabletopMixer.channel2Gain.gain.value).toBe(0.5);
+
+      TabletopMixer.triggerSfx("cannon_barrage_01");
+      expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(0.199, 3);
+
+      vi.advanceTimersByTime(1500);
+      expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(0.5, 3);
+    });
+
+    it("executes a 4-second linear crossfade on Channel 2 score transitions from 0 to 0.5 and auto-routes manifest audio files on selectFile", async () => {
+      expect(TabletopMixer).toBeDefined();
+      TabletopMixer.init();
+      AudioCache.memoryStore.set("combat_theme_01", new ArrayBuffer(8));
+      TabletopMixer.crossfadeScore("combat_theme_01");
+      const scoreGain = TabletopMixer.activeScorePlayback.gainNode;
+
+      expect(scoreGain.gain.setValueAtTime).toHaveBeenCalledWith(0, 10.0);
+      expect(scoreGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1,
+        14.0
+      );
+      expect(
+        TabletopMixer.channel2Gain.gain.value * scoreGain.gain.value
+      ).toBeCloseTo(0.5, 3);
+
+      const lastEvent =
+        TabletopMixer.timeline[TabletopMixer.timeline.length - 1];
+      expect(lastEvent.eventType).toBe("CROSSFADE");
+      expect(lastEvent.track).toBe("combat_theme_01");
+      expect(lastEvent.channel).toBe(2);
+      expect(lastEvent.gain).toBe(0.5);
+
+      // Auto-routing when an audio asset in the manifest is selected
+      renderManifest([
+        {
+          id: "aud_1",
+          name: "[Ambience] Ocean_Waves.mp3",
+          simpleName: "Ocean_Waves.mp3",
+          mimeType: "audio/mpeg"
+        },
+        {
+          id: "aud_2",
+          name: "[SFX] Cannon_Shot.wav",
+          simpleName: "Cannon_Shot.wav",
+          mimeType: "audio/wav"
+        }
+      ]);
+      const ambiencePlayback = selectFile(0);
+      await vi.runAllTimersAsync();
+      await ambiencePlayback;
+      expect(
+        TabletopMixer.timeline.some(
+          (e: any) =>
+            e.eventType === "LOOP" && e.track === "[Ambience] Ocean_Waves.mp3"
+        )
+      ).toBe(true);
+      const sfxPlayback = selectFile(1);
+      await vi.runAllTimersAsync();
+      await sfxPlayback;
+      expect(
+        TabletopMixer.timeline.some(
+          (e: any) =>
+            e.eventType === "SFX" && e.track === "[SFX] Cannon_Shot.wav"
+        )
+      ).toBe(true);
+    });
+
+    it("decodes cached manifest audio and routes source nodes to the intended mixer channels", async () => {
+      const graphHarness = setupClientHarness();
+      graphHarness.TabletopMixer.init();
+      const ambienceBuffer = { duration: 1, track: "ambience" };
+      const scoreBuffer = { duration: 1, track: "score" };
+      graphHarness.audioCtxDecodeSpy
+        .mockImplementationOnce(
+          (_data: ArrayBuffer, onDecoded: (buffer: any) => void) =>
+            onDecoded(ambienceBuffer)
+        )
+        .mockImplementationOnce(
+          (_data: ArrayBuffer, onDecoded: (buffer: any) => void) =>
+            onDecoded(scoreBuffer)
+        );
+      graphHarness.AudioCache.memoryStore.set("ambient-id", new ArrayBuffer(8));
+      graphHarness.renderManifest([
+        {
+          id: "ambient-id",
+          name: "[Ambience] Harbor_Waves.mp3",
+          simpleName: "Harbor_Waves.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      const ambiencePlayback = graphHarness.selectFile(0);
+      await vi.runAllTimersAsync();
+      await ambiencePlayback;
+
+      expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
+      const ambienceSource =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[0].value;
+      expect(ambienceSource.buffer).toBe(ambienceBuffer);
+      expect(ambienceSource.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel1Gain
+      );
+      expect(ambienceSource.loop).toBe(true);
+      expect(ambienceSource.start).toHaveBeenCalledWith(0);
+
+      graphHarness.AudioCache.memoryStore.set("score-id", new ArrayBuffer(8));
+      graphHarness.TabletopMixer.crossfadeScore(
+        "score-id",
+        null,
+        4,
+        "[Score] Rising Tide.mp3"
+      );
+      const scoreSource =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[1].value;
+      expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(2);
+      expect(scoreSource.buffer).toBe(scoreBuffer);
+      const scoreGain = scoreSource.connect.mock.calls[0][0];
+      expect(scoreGain).not.toBe(graphHarness.TabletopMixer.channel2Gain);
+      expect(scoreGain.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel2Gain
+      );
+      expect(scoreSource.loop).toBe(true);
+      expect(scoreSource.start).toHaveBeenCalledWith(0);
+      expect(scoreGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1,
+        14.0
+      );
+      expect(
+        graphHarness.TabletopMixer.timeline.some(
+          (event: any) =>
+            event.eventType === "CROSSFADE" &&
+            event.track === "[Score] Rising Tide.mp3"
+        )
+      ).toBe(true);
+    });
+
+    it("plays an IndexedDB-cached manifest track selected before cache hydration finishes", async () => {
+      const graphHarness = setupClientHarness();
+      graphHarness.TabletopMixer.init();
+      const fileId = "idb-only-ambient-track";
+      const initialAccessed = Date.now() - 5000;
+      graphHarness.idbStore.set(fileId, {
+        fileId,
+        buffer: new ArrayBuffer(8),
+        lastAccessed: initialAccessed,
+        byteLength: 8
+      });
+      graphHarness.renderManifest([
+        {
+          id: fileId,
+          name: "[Ambience] Harbor_Waves.mp3",
+          simpleName: "Harbor_Waves.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+
+      const playback = graphHarness.selectFile(0);
+      await vi.runAllTimersAsync();
+      await playback;
+
+      expect(graphHarness.fetchSpy).not.toHaveBeenCalled();
+      expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
+      expect(
+        graphHarness.audioCtxCreateSourceSpy.mock.results[0].value.start
+      ).toHaveBeenCalledWith(0);
+      expect(graphHarness.idbStore.get(fileId).lastAccessed).toBeGreaterThan(
+        initialAccessed
+      );
+    });
+
+    it("crossfades between independent score sources and cleans up the outgoing loop", () => {
+      const graphHarness = setupClientHarness();
+      graphHarness.TabletopMixer.init();
+      graphHarness.AudioCache.memoryStore.set("score-a", new ArrayBuffer(8));
+      graphHarness.AudioCache.memoryStore.set("score-b", new ArrayBuffer(8));
+
+      graphHarness.TabletopMixer.crossfadeScore("score-a", null, 4);
+      const outgoing =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[0].value;
+      const outgoingGain = outgoing.connect.mock.calls[0][0];
+      graphHarness.TabletopMixer.crossfadeScore("score-b", null, 4);
+      const incoming =
+        graphHarness.audioCtxCreateSourceSpy.mock.results[1].value;
+      const incomingGain = incoming.connect.mock.calls[0][0];
+
+      expect(outgoingGain).not.toBe(incomingGain);
+      expect(outgoingGain.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel2Gain
+      );
+      expect(incomingGain.connect).toHaveBeenCalledWith(
+        graphHarness.TabletopMixer.channel2Gain
+      );
+      expect(outgoingGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        0,
+        14.0
+      );
+      expect(incomingGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1,
+        14.0
+      );
+      expect(outgoing.stop).toHaveBeenCalledWith(14.0);
+
+      outgoing.onended?.();
+      expect(outgoing.disconnect).toHaveBeenCalledOnce();
+      expect(outgoingGain.disconnect).toHaveBeenCalledOnce();
+    });
+
+    it("classifies audio assets into Channels 1/2/3, routes all 3 channels through a master DynamicsCompressorNode, and triggers Tier 3 manual Mood Cue buttons", () => {
+      expect(classifyAudioAssetChannel).toBeDefined();
+      expect(triggerManualMoodCue).toBeDefined();
+
+      // 1. Auto-routing classification by Shortcut Folder tag or filename prefix
+      expect(
+        classifyAudioAssetChannel({
+          name: "[Ambience] Ship_Creaking_Loop.mp3"
+        })
+      ).toBe(1);
+      expect(classifyAudioAssetChannel("amb_jungle_rain.ogg")).toBe(1);
+      expect(
+        classifyAudioAssetChannel({ name: "[Score] Lapis_Observatory.mp3" })
+      ).toBe(2);
+      expect(
+        classifyAudioAssetChannel({ name: "[Music] Boss_Theme.mp3" })
+      ).toBe(2);
+      expect(classifyAudioAssetChannel("score_tension.mp3")).toBe(2);
+      expect(
+        classifyAudioAssetChannel({ name: "[SFX] Cannon_Volley.wav" })
+      ).toBe(3);
+      expect(classifyAudioAssetChannel("sfx_thunder.wav")).toBe(3);
+
+      // 2. Master DynamicsCompressorNode wiring
+      TabletopMixer.init();
+      expect(audioCtxCreateCompressorSpy).toHaveBeenCalledTimes(1);
+      expect(TabletopMixer.compressor).toBeDefined();
+      expect(TabletopMixer.compressor.connect).toHaveBeenCalledWith(
+        TabletopMixer.ctx.destination
+      );
+      expect(TabletopMixer.channel1Gain.connect).toHaveBeenCalledWith(
+        TabletopMixer.compressor
+      );
+      expect(TabletopMixer.channel2Gain.connect).toHaveBeenCalledWith(
+        TabletopMixer.compressor
+      );
+      expect(TabletopMixer.channel3Gain.connect).toHaveBeenCalledWith(
+        TabletopMixer.compressor
+      );
+
+      // 3. Tier 3 manual Mood Cue UI buttons & triggerManualMoodCue
+      const moodBtns = document.querySelectorAll(".mood-cue-btn");
+      expect(moodBtns.length).toBe(4);
+      const explorationScoreId = "exploration-score-drive-id";
+      renderManifest([
+        {
+          id: explorationScoreId,
+          name: "[Score] Exploration Theme.mp3",
+          simpleName: "Exploration Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      AudioCache.memoryStore.set(explorationScoreId, new ArrayBuffer(8));
+      triggerManualMoodCue("Exploration");
+      const lastCue = TabletopMixer.timeline[TabletopMixer.timeline.length - 1];
+      expect(lastCue).toMatchObject({
+        eventType: "CROSSFADE",
+        track: "score_exploration",
+        channel: 2
+      });
+      expect(TabletopMixer.activeScorePlayback.trackId).toBe(
+        explorationScoreId
+      );
+      expect(
+        TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe("Ticket 06 & 21: Write-Ahead Audio Timeline Sidecar Logger & Table Notes Co-Flush", () => {
+    it("records timestamped events and flushes JSON timeline to Apps Script saveAudioTimeline", () => {
+      expect(TabletopMixer).toBeDefined();
+      expect(flushAudioTimeline).toBeDefined();
+      TabletopMixer.init();
+      TabletopMixer.playAmbience("Open_Ocean.mp3");
+      TabletopMixer.playSfx("thunder_clap.mp3");
+
+      flushAudioTimeline();
+      expect(saveAudioTimelineSpy).toHaveBeenCalledTimes(1);
+      const [sessionDate, jsonStr] = saveAudioTimelineSpy.mock.calls[0];
+      expect(sessionDate).toBe("2026-10-31");
+      const parsed = JSON.parse(jsonStr);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.some((e: any) => e.eventType === "LOOP")).toBe(true);
+      expect(parsed.some((e: any) => e.eventType === "SFX")).toBe(true);
+    });
+
+    it("loads Table Notes through the private client helper", () => {
+      const harness = setupClientHarness();
+      expect(harness.loadTableNotes).toBeDefined();
+      harness.loadTableNotes();
+      expect(harness.getTableNotesSpy).toHaveBeenCalledTimes(1);
+      expect(
+        (document.getElementById("scratchpad") as HTMLTextAreaElement).value
+      ).toBe("# Notes");
+      expect(document.getElementById("save-status")!.textContent).toBe(
+        "Loaded: 10:00:00 AM"
+      );
+    });
+
+    it("immediately writes every cue to localStorage write-ahead log, hydrates on reload, co-flushes inside saveTableNotes(), and auto-saves every 60s", () => {
+      expect(TabletopMixer.hydrateFromLocalStorage).toBeDefined();
+      expect(saveTableNotes).toBeDefined();
+      expect(startNotesAutoSave).toBeDefined();
+
+      TabletopMixer.init();
+      TabletopMixer.playAmbience("amb_harbor_bells.mp3");
+      AudioCache.memoryStore.set("score_tension.mp3", new ArrayBuffer(8));
+      TabletopMixer.crossfadeScore("score_tension.mp3");
+      TabletopMixer.triggerSfx("sfx_kraken_roar.wav");
+      vi.advanceTimersByTime(1500); // Triggers RESTORE event
+
+      const walRaw = mockLocalStorage.getItem("sof_audio_timeline_2026-10-31");
+      expect(walRaw).not.toBeNull();
+      const walEvents = JSON.parse(walRaw!);
+      expect(walEvents.map((e: any) => e.eventType)).toEqual([
+        "LOOP",
+        "CROSSFADE",
+        "SFX",
+        "RESTORE"
+      ]);
+
+      // Simulate browser reload wiping in-memory timeline, then hydrating from localStorage
+      TabletopMixer.timeline = [];
+      TabletopMixer.hydrateFromLocalStorage("2026-10-31");
+      expect(TabletopMixer.timeline).toHaveLength(4);
+      TabletopMixer.init();
+      expect(TabletopMixer.timeline).toHaveLength(4);
+
+      // Saving Table Notes via saveTableNotes() co-flushes the audio timeline
+      const tableNotesEl = document.getElementById(
+        "scratchpad"
+      ) as HTMLTextAreaElement;
+      tableNotesEl.value = "# Live Notes\n- Kraken surfaced";
+      saveTableNotes();
+
+      expect(saveAudioTimelineSpy).toHaveBeenCalledTimes(1);
+      const [flushedSession, flushedJson] = saveAudioTimelineSpy.mock.calls[0];
+      expect(flushedSession).toBe("2026-10-31");
+      expect(JSON.parse(flushedJson)).toHaveLength(4);
+
+      // 60-second auto-save interval triggers saveTableNotes()
+      saveTableNotesSpy.mockClear();
+      const timerId = startNotesAutoSave();
+      vi.advanceTimersByTime(60000);
+      expect(saveTableNotesSpy).toHaveBeenCalledWith(
+        "2026-10-31",
+        "# Live Notes\n- Kraken surfaced"
+      );
+      clearInterval(timerId);
+    });
+  });
+
+  describe("Ticket 12 & 26: 3-Tier Edge Classifier Failover, Cue Polling & Intent Router", () => {
+    it("routes MUSIC_CUE and RULE_QUERY intents, deduplicates by timestamp, and keeps companion mode muted", () => {
+      expect(handleAudioIntent).toBeDefined();
+
+      const combatScoreId = "combat-score-drive-id";
+      renderManifest([
+        {
+          id: combatScoreId,
+          name: "[Score] Combat Theme.mp3",
+          simpleName: "Combat Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(8));
+      TabletopMixer.init();
+
+      handleAudioIntent({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        rule: null,
+        timestamp: 1730500000001
+      });
+      expect(
+        TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
+      expect(TabletopMixer.activeScorePlayback.trackId).toBe(combatScoreId);
+      expect(
+        TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+
+      // Duplicate timestamp is ignored
+      handleAudioIntent({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        rule: null,
+        timestamp: 1730500000001
+      });
+      expect(
+        TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
+
+      handleAudioIntent({
+        intent: "RULE_QUERY",
+        mood: null,
+        rule: "concentration",
+        timestamp: 1730500000002
+      });
+      const ruleCard = document.getElementById("rule-card")!;
+      expect(ruleCard.style.display).toBe("block");
+      expect(document.getElementById("card-title")!.textContent).toContain(
+        "Concentration"
+      );
+
+      // Companion mode stays 100% muted on MUSIC_CUE
+      const companionHarness = setupClientHarness({ viewMode: "companion" });
+      companionHarness.TabletopMixer.init();
+      companionHarness.handleAudioIntent({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        rule: null,
+        timestamp: 1730500000003
+      });
+      expect(companionHarness.TabletopMixer.timeline).toHaveLength(0);
+    });
+
+    it("uses the Pi-selected tier from pollLatestAudioCue() when routing cues", () => {
+      expect(pollLatestAudioCue).toBeDefined();
+
+      const cueHarness = setupClientHarness({
+        latestAudioCue: {
+          intent: "MUSIC_CUE",
+          mood: "score_tension",
+          rule: null,
+          tier: "TIER_2_GEMINI_CLOUD"
+        }
+      });
+      const tensionScoreId = "tension-score-drive-id";
+      cueHarness.AudioCache.memoryStore.set(tensionScoreId, new ArrayBuffer(8));
+      cueHarness.renderManifest([
+        {
+          id: tensionScoreId,
+          name: "[Score] Tension Theme.mp3",
+          simpleName: "Tension Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+      cueHarness.TabletopMixer.init();
+      cueHarness.pollLatestAudioCue();
+
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      expect(
+        document.getElementById("classifier-tier-status")!.textContent
+      ).toContain("TIER_2_GEMINI_CLOUD");
+      expect(
+        cueHarness.TabletopMixer.timeline.some(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "score_tension"
+        )
+      ).toBe(true);
+      expect(cueHarness.TabletopMixer.activeScorePlayback.trackId).toBe(
+        tensionScoreId
+      );
+      expect(
+        cueHarness.TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+    });
+
+    it("delivers a cached Rule Query through the player-safe Companion polling path", () => {
+      const companionHarness = setupClientHarness({
+        viewMode: "companion",
+        companionRuleQueryCue: {
+          intent: "RULE_QUERY",
+          rule: "grappling",
+          timestamp: 1730500000999
+        }
+      });
+
+      companionHarness.pollLatestAudioCue();
+
+      expect(
+        companionHarness.getLatestCompanionRuleQueryCueSpy
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        companionHarness.getLatestCompanionRuleQueryCueSpy
+      ).toHaveBeenCalledWith();
+      expect(companionHarness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(document.getElementById("rule-card")!.style.display).toBe("block");
+      expect(document.getElementById("card-title")!.textContent).toContain(
+        "Grappling"
+      );
+      expect(companionHarness.TabletopMixer.timeline).toHaveLength(0);
+    });
+
+    it("continues cue polling after each response without overlapping an outstanding RPC", () => {
+      const cueHarness = setupClientHarness({
+        latestAudioCue: null,
+        deferLatestAudioCue: true
+      });
+
+      cueHarness.pollLatestAudioCue();
+      vi.advanceTimersByTime(15000);
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+
+      cueHarness.respondToLatestAudioCue();
+      vi.advanceTimersByTime(5000);
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(15000);
+      expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("queues a cached Music Cue until a user gesture initializes the mixer", () => {
+      const scoreId = "early-cue-score-id";
+      const cueHarness = setupClientHarness({
+        latestAudioCue: {
+          intent: "MUSIC_CUE",
+          mood: "combat",
+          timestamp: 1730500000004
+        }
+      });
+      cueHarness.AudioCache.memoryStore.set(scoreId, new ArrayBuffer(8));
+      cueHarness.renderManifest([
+        {
+          id: scoreId,
+          name: "[Score] Combat Theme.mp3",
+          simpleName: "Combat Theme.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+
+      cueHarness.pollLatestAudioCue();
+      expect(cueHarness.TabletopMixer.ctx).toBeNull();
+      expect(cueHarness.TabletopMixer.activeScorePlayback).toBeNull();
+
+      cueHarness.installAudioUnlockHandler_();
+      document.dispatchEvent(new Event("pointerdown"));
+      expect(cueHarness.TabletopMixer.activeScorePlayback.trackId).toBe(
+        scoreId
+      );
+      expect(
+        cueHarness.TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+    });
+  });
+});
+
+describe("Narrative Promise Save Gate", () => {
+  it("awaits successful note persistence before extraction and stops on save failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const successHarness = setupClientHarness({ saveDelayMs: 50 });
+      const extraction = successHarness.triggerPromiseExtraction();
+      expect(successHarness.extractNarrativePromisesSpy).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(50);
+      await extraction;
+      expect(successHarness.extractNarrativePromisesSpy).toHaveBeenCalledTimes(
+        1
+      );
+
+      const failedHarness = setupClientHarness({
+        saveError: "Drive unavailable"
+      });
+      await failedHarness.triggerPromiseExtraction();
+      expect(failedHarness.extractNarrativePromisesSpy).not.toHaveBeenCalled();
+      expect(document.getElementById("save-status")!.textContent).toContain(
+        "Drive unavailable"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("handles manual save failures without leaking a rejected promise", async () => {
+    const failedHarness = setupClientHarness({
+      saveError: "Drive unavailable"
+    });
+
+    await expect(failedHarness.handleManualSave_()).resolves.toBeNull();
+    expect(document.getElementById("save-status")!.textContent).toContain(
+      "Drive unavailable"
+    );
+  });
+});

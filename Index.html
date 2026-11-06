@@ -737,6 +737,13 @@
         </button>
         <button id="btn-dismiss" onclick="dismissRuleCard()">✕ Dismiss</button>
       </div>
+      <div
+        id="feedback-status"
+        class="hidden"
+        role="status"
+        aria-live="polite"
+        style="margin-top: 8px; color: var(--gold-light); font-size: 12px"
+      ></div>
     </div>
 
     <script>
@@ -802,22 +809,22 @@
         );
       }
 
-      function startNotesAutoSave() {
+      function startNotesAutoSave_() {
         if (notesAutoSaveTimer) clearInterval(notesAutoSaveTimer);
         if (isCompanionMode_()) return null;
         notesAutoSaveTimer = setInterval(() => {
           if (!isCompanionMode_()) {
-            void saveNotes().catch(() => {});
+            void saveTableNotes_().catch(() => {});
           }
         }, NOTES_AUTOSAVE_MS);
         return notesAutoSaveTimer;
       }
 
       window.onload = () => {
-        initCompanionState();
+        initCompanionState_();
         if (isCompanionMode_()) {
           document.body.classList.add("companion-only-mode");
-          loadDriveRulesGlossary(currentSessionDate);
+          loadDriveRulesGlossary_(currentSessionDate);
           return;
         }
         installAudioUnlockHandler_();
@@ -825,10 +832,10 @@
         TabletopMixer.hydrateFromLocalStorage(currentSessionDate);
         loadSessionDropdown();
         refreshManifest();
-        loadScratchpad();
-        loadDriveRulesGlossary(currentSessionDate);
-        startNotesAutoSave();
-        pollLatestAudioCue();
+        loadTableNotes_();
+        loadDriveRulesGlossary_(currentSessionDate);
+        startNotesAutoSave_();
+        pollLatestAudioCue_();
       };
 
       // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
@@ -885,7 +892,7 @@
             (f) => f.simpleName === filename || f.name.endsWith(filename)
           );
           if (target) {
-            loadFile(target.id);
+            loadFile_(target.id);
           }
         }
       });
@@ -920,7 +927,7 @@
         document.getElementById("save-status").textContent = "Loading...";
 
         refreshManifest();
-        loadScratchpad();
+        loadTableNotes_();
       }
 
       const loadSession = switchSession;
@@ -932,7 +939,7 @@
           .getSessionManifest(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
 
-      function tokenizeStatblockAndDossier(fileMeta, rawContent = "") {
+      function tokenizeStatblockAndDossier_(fileMeta, rawContent = "") {
         const name = (fileMeta && fileMeta.name) || "";
         const simpleName = (fileMeta && fileMeta.simpleName) || name;
         const mimeType = (fileMeta && fileMeta.mimeType) || "";
@@ -974,11 +981,12 @@
             title += " " + hMatch[1].trim();
           }
 
-          const propRegex = /\*\*([^*]+)\*\*\s*(?:::|:)\s*([^\n\r]+)/g;
+          const propRegex =
+            /\*\*((?:Armor Class|Hit Points|Speed|Saving Throws|Skills|Damage Vulnerabilities|Damage Resistances|Damage Immunities|Condition Immunities|Senses|Languages|Challenge))\*\*\s*(?:::|:)?\s*([^\n\r]+)|\*\*([^*]+)\*\*\s*(?:::|:)\s*([^\n\r]+)/gi;
           let pMatch;
           while ((pMatch = propRegex.exec(cleanContent)) !== null) {
-            const propKey = pMatch[1].trim();
-            const propVal = pMatch[2].trim();
+            const propKey = (pMatch[1] || pMatch[3]).trim();
+            const propVal = (pMatch[2] || pMatch[4]).trim();
             const extraSynonyms = /vulnerabilities/i.test(propKey)
               ? " vulnerability vulnerable"
               : /immunities/i.test(propKey)
@@ -1009,7 +1017,7 @@
         };
       }
 
-      function indexFilePayload(payload) {
+      function indexFilePayload_(payload) {
         if (!payload || !payload.id || !miniSearch) return;
         const existingMeta = allFiles.find((f) => f.id === payload.id) || {
           id: payload.id,
@@ -1021,7 +1029,7 @@
           payload.type === "markdown" || payload.type === "html"
             ? payload.content || ""
             : "";
-        const doc = tokenizeStatblockAndDossier(existingMeta, rawText);
+        const doc = tokenizeStatblockAndDossier_(existingMeta, rawText);
         if (miniSearch.has(payload.id)) {
           miniSearch.replace(doc);
         } else {
@@ -1029,7 +1037,7 @@
         }
       }
 
-      const updateSearchIndexWithContent = indexFilePayload;
+      const updateSearchIndexWithContent_ = indexFilePayload_;
 
       function renderManifest(files) {
         allFiles = files;
@@ -1070,7 +1078,7 @@
               cached && (cached.type === "markdown" || cached.type === "html")
                 ? cached.content
                 : "";
-            return tokenizeStatblockAndDossier(f, rawText);
+            return tokenizeStatblockAndDossier_(f, rawText);
           });
           miniSearch.addAll(docs);
         }
@@ -1122,7 +1130,7 @@
         filtered.forEach((f) => {
           const div = document.createElement("div");
           div.className = "file-item";
-          div.onclick = () => loadFile(f.id, div);
+          div.onclick = () => selectFile_(f.id, div);
 
           let icon = "📄";
           if (f.name.includes("[1. Floor Maps]")) icon = "🗺️";
@@ -1147,7 +1155,7 @@
         if (!TabletopMixer.ctx) {
           TabletopMixer.init();
         }
-        const channel = classifyAudioAssetChannel(fileMeta);
+        const channel = classifyAudioAssetChannel_(fileMeta);
         const trackKey = fileMeta.name || fileMeta.id;
         if (channel === 1) {
           TabletopMixer.playAmbience(fileMeta.id, null, trackKey);
@@ -1158,16 +1166,16 @@
         }
       }
 
-      function selectFile(indexOrId, element) {
+      function selectFile_(indexOrId, element) {
         if (typeof indexOrId === "number") {
           const fileMeta = allFiles[indexOrId];
           if (!fileMeta) return;
-          return loadFile(fileMeta.id, element);
+          return loadFile_(fileMeta.id, element);
         }
-        return loadFile(indexOrId, element);
+        return loadFile_(indexOrId, element);
       }
 
-      function loadFile(fileId, element) {
+      function loadFile_(fileId, element) {
         document
           .querySelectorAll(".file-item")
           .forEach((el) => el.classList.remove("active"));
@@ -1199,7 +1207,7 @@
         google.script.run
           .withSuccessHandler((payload) => {
             cache[fileId] = payload;
-            indexFilePayload(payload);
+            indexFilePayload_(payload);
             renderToLeftPane(payload);
           })
           .getFilePayload(
@@ -1390,8 +1398,8 @@
         }
       }
 
-      // Scratchpad Live Operations
-      function loadScratchpad() {
+      // Table Notes Live Operations
+      function loadTableNotes_() {
         const gmKey = getClientGmKey_();
         google.script.run
           .withSuccessHandler((res) => {
@@ -1399,12 +1407,12 @@
             document.getElementById("save-status").textContent =
               "Loaded: " + res.updated;
           })
-          .getScratchpadNotes(currentSessionDate, ...(gmKey ? [gmKey] : []));
+          .getTableNotes(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
 
-      function saveNotes() {
-        const scratchpadEl = document.getElementById("scratchpad");
-        const content = scratchpadEl ? scratchpadEl.value : "";
+      function saveTableNotes_() {
+        const tableNotesEl = document.getElementById("scratchpad");
+        const content = tableNotesEl ? tableNotesEl.value : "";
         const status = document.getElementById("save-status");
         if (status) status.textContent = "Saving...";
 
@@ -1428,7 +1436,7 @@
               }
               reject(error);
             })
-            .saveScratchpadNotes(
+            .saveTableNotes(
               currentSessionDate,
               content,
               ...(gmKey ? [gmKey] : [])
@@ -1438,7 +1446,7 @@
 
       function handleManualSave_() {
         return Promise.resolve()
-          .then(() => saveNotes())
+          .then(() => saveTableNotes_())
           .catch((error) => {
             const status = document.getElementById("save-status");
             if (status) {
@@ -1456,7 +1464,7 @@
           document.getElementById("notes-status");
         if (statusEl) statusEl.textContent = "Saving before extraction...";
         const gmKey = getClientGmKey_();
-        return saveNotes()
+        return saveTableNotes_()
           .then(
             () =>
               new Promise((resolve, reject) => {
@@ -1471,13 +1479,7 @@
                 const runner = google.script.run
                   .withSuccessHandler((res) => {
                     const count =
-                      res && typeof res.createdCount === "number"
-                        ? res.createdCount
-                        : res && typeof res.created === "number"
-                          ? res.created
-                          : res && Array.isArray(res.tasks)
-                            ? res.tasks.length
-                            : 0;
+                      res && typeof res.created === "number" ? res.created : 0;
                     if (statusEl) {
                       statusEl.textContent =
                         "Extracted " + count + " promise task(s)";
@@ -1766,7 +1768,7 @@
       };
 
       // Ticket 05, 06, 20 & 21: 3-Channel Web Audio API Mixer, Auto-Routing, Master Compressor, Gain Ducking & Sidecar Logger
-      function classifyAudioAssetChannel(asset) {
+      function classifyAudioAssetChannel_(asset) {
         const raw =
           typeof asset === "string"
             ? asset
@@ -2153,7 +2155,7 @@
             fileMeta.id &&
             ((fileMeta.mimeType && fileMeta.mimeType.startsWith("audio/")) ||
               (fileMeta.name && /\.(mp3|wav|m4a|ogg)$/i.test(fileMeta.name))) &&
-            classifyAudioAssetChannel(fileMeta) === 2
+            classifyAudioAssetChannel_(fileMeta) === 2
         );
         const matchingAssets = scoreAssets.filter((fileMeta) => {
           const name = normalize(fileMeta.simpleName || fileMeta.name);
@@ -2291,6 +2293,7 @@
       let dictationDebounceTimer = null;
       let ruleCardTimer = null;
       let activeRuleCard = null;
+      let ruleFeedbackPending = false;
       let activeSpeechRecognition = null;
 
       function getDefaultGlossaryDocs_() {
@@ -2306,7 +2309,7 @@
         });
       }
 
-      function indexRulesGlossary(entries = []) {
+      function indexRulesGlossary_(entries = []) {
         if (typeof MiniSearch === "undefined") return;
         rulesMiniSearch = new MiniSearch({
           fields: ["title", "tags", "summary"],
@@ -2346,7 +2349,7 @@
         rulesMiniSearch.addAll(merged);
       }
 
-      indexRulesGlossary([]);
+      indexRulesGlossary_([]);
 
       function updatePlayerIdentityDom_(playerName) {
         currentPlayerIdentity = playerName;
@@ -2364,7 +2367,7 @@
         }
       }
 
-      function initCompanionState() {
+      function initCompanionState_() {
         const sessionDateEl = document.getElementById("player-session-date");
         if (sessionDateEl) {
           sessionDateEl.textContent = currentSessionDate;
@@ -2400,7 +2403,7 @@
         updatePlayerIdentityDom_(playerName);
       }
 
-      function loadDriveRulesGlossary(sessionDate = currentSessionDate) {
+      function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {
         if (
           typeof google !== "undefined" &&
           google.script &&
@@ -2408,7 +2411,7 @@
         ) {
           const runner = google.script.run.withSuccessHandler((entries) => {
             if (entries) {
-              indexRulesGlossary(entries);
+              indexRulesGlossary_(entries);
             }
           });
           if (runner && typeof runner.getRulesGlossary === "function") {
@@ -2421,7 +2424,7 @@
         if (!transcript || !String(transcript).trim()) return null;
         const query = String(transcript).trim();
         if (!rulesMiniSearch && typeof MiniSearch !== "undefined") {
-          indexRulesGlossary([]);
+          indexRulesGlossary_([]);
         }
         if (rulesMiniSearch) {
           const hits = rulesMiniSearch.search(query, {
@@ -2468,7 +2471,7 @@
         if (!cleaned) return;
         const matched = matchSpokenRuleQuery_(cleaned);
         if (matched && matched.entry) {
-          showRuleCard(matched.entry, cleaned);
+          showRuleCard_(matched.entry, cleaned);
         }
       }
 
@@ -2506,7 +2509,7 @@
         const btn = document.getElementById("ptt-btn");
         if (!btn) return;
         if (btn.classList.contains("listening")) {
-          stopPtt();
+          stopPtt_();
           return;
         }
 
@@ -2515,7 +2518,7 @@
             ? window.SpeechRecognition || window.webkitSpeechRecognition
             : null;
         if (typeof SpeechRecognitionCtor !== "function") {
-          stopPtt();
+          stopPtt_();
           focusDictationFallback_();
           return;
         }
@@ -2539,34 +2542,30 @@
                 : "";
             const matched = matchSpokenRuleQuery_(transcript);
             if (matched) {
-              showRuleCard(
-                matched.entry.title,
-                matched.entry.summary || matched.entry.text || "",
-                transcript.toLowerCase()
-              );
+              showRuleCard_(matched.entry, transcript.toLowerCase());
             }
-            stopPtt();
+            stopPtt_();
           };
           activeSpeechRecognition.onerror = () => {
-            stopPtt();
+            stopPtt_();
             focusDictationFallback_();
           };
           if (typeof activeSpeechRecognition.start === "function") {
             activeSpeechRecognition.start();
           }
         } catch (_e) {
-          stopPtt();
+          stopPtt_();
           focusDictationFallback_();
           return;
         }
 
         if (pttTimer) clearTimeout(pttTimer);
         pttTimer = setTimeout(() => {
-          stopPtt();
+          stopPtt_();
         }, 4000);
       }
 
-      function stopPtt() {
+      function stopPtt_() {
         if (pttTimer) clearTimeout(pttTimer);
         if (
           activeSpeechRecognition &&
@@ -2584,7 +2583,15 @@
         }
       }
 
-      function showRuleCard(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
+      function setRuleFeedbackPending_(pending) {
+        ruleFeedbackPending = pending;
+        ["btn-up", "btn-down"].forEach((buttonId) => {
+          const button = document.getElementById(buttonId);
+          if (button) button.disabled = pending;
+        });
+      }
+
+      function showRuleCard_(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
         const card = document.getElementById("rule-card");
         const titleEl = document.getElementById("card-title");
         const typeEl = document.getElementById("card-type");
@@ -2616,8 +2623,14 @@
         titleEl.textContent = ruleTitle;
         if (typeEl) typeEl.textContent = ruleSource;
         if (textEl) textEl.textContent = ruleText;
+        const feedbackStatus = document.getElementById("feedback-status");
+        if (feedbackStatus) {
+          feedbackStatus.textContent = "";
+          feedbackStatus.classList.add("hidden");
+        }
         card.classList.add("visible");
         card.style.display = "block";
+        setRuleFeedbackPending_(ruleFeedbackPending);
         if (ruleCardTimer) clearTimeout(ruleCardTimer);
         ruleCardTimer = setTimeout(() => {
           dismissRuleCard();
@@ -2633,7 +2646,18 @@
         }
       }
 
+      function setRuleFeedbackStatus_(message) {
+        const status = document.getElementById("feedback-status");
+        if (!status) return;
+        status.textContent = message;
+        status.classList.remove("hidden");
+      }
+
       function submitRuleFeedback(vote) {
+        if (ruleFeedbackPending || !activeRuleCard) return;
+        const submittedCard = activeRuleCard;
+        setRuleFeedbackPending_(true);
+
         let player = currentPlayerIdentity || "Guest";
         try {
           if (typeof localStorage !== "undefined" && localStorage) {
@@ -2643,66 +2667,59 @@
         const payload = {
           sessionDate: currentSessionDate,
           player: player,
-          phrase: (activeRuleCard && activeRuleCard.phrase) || "",
-          cardTitle: (activeRuleCard && activeRuleCard.cardTitle) || "",
-          source:
-            (activeRuleCard && activeRuleCard.source) || "D&D 5e Glossary",
+          phrase: submittedCard.phrase || "",
+          cardTitle: submittedCard.cardTitle || "",
+          source: submittedCard.source || "D&D 5e Glossary",
           vote: vote
         };
+        const handleFailure = () => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          setRuleFeedbackStatus_(
+            "Feedback could not be saved. Please try again."
+          );
+        };
+        const handleResult = (result) => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          if (result && result.status === "logged") {
+            dismissRuleCard();
+            return;
+          }
+          if (result && result.status === "rate_limited") {
+            setRuleFeedbackStatus_(
+              "Feedback limit reached. Please try again later."
+            );
+          } else if (result && result.status === "unavailable") {
+            setRuleFeedbackStatus_(
+              "Feedback logging is unavailable. Please try again later."
+            );
+          } else {
+            handleFailure();
+          }
+        };
+
         if (
           typeof google !== "undefined" &&
           google.script &&
           google.script.run
         ) {
-          const runner = google.script.run.withSuccessHandler(() => {});
-          if (runner && typeof runner.logRuleFeedback === "function") {
-            runner.logRuleFeedback(payload);
-          } else if (typeof google.script.run.logRuleFeedback === "function") {
-            google.script.run.logRuleFeedback(payload);
-          }
+          try {
+            const runner = google.script.run
+              .withSuccessHandler(handleResult)
+              .withFailureHandler(handleFailure);
+            if (runner && typeof runner.logRuleFeedback === "function") {
+              runner.logRuleFeedback(payload);
+              return;
+            }
+          } catch (_e) {}
         }
-        dismissRuleCard();
-      }
-
-      // Ticket 12 & 26: 3-Tier Edge Classifier Failover & Audio Intent Router
-      const TIER_1_LATENCY_BUDGET_MS = 1500;
-
-      function resolveClassifierTier(state, chunkResult) {
-        if (state && state.piConnection === "OFFLINE") {
-          return {
-            activeTier: "TIER_3_MANUAL_UI",
-            reason: "Pi offline -> Manual UI controls active"
-          };
-        }
-        if (
-          chunkResult &&
-          chunkResult.tier1Status === "OK" &&
-          chunkResult.tier1LatencyMs <= TIER_1_LATENCY_BUDGET_MS
-        ) {
-          return {
-            activeTier: "TIER_1_PI_LOCAL",
-            cue: chunkResult.cue,
-            reason: "Tier 1 local Pi model"
-          };
-        }
-        if (chunkResult && chunkResult.tier2Status === "OK") {
-          return {
-            activeTier: "TIER_2_GEMINI_CLOUD",
-            cue: chunkResult.cue,
-            reason:
-              "Tier 1 exceeded 1500ms or failed -> Auto-routed Speech Chunk to Tier 2 Gemini 2.5 Flash"
-          };
-        }
-        return {
-          activeTier: "TIER_3_MANUAL_UI",
-          reason:
-            "Tier 1 & Tier 2 unavailable -> Degraded to Tier 3 Manual GM Screen Controls"
-        };
+        handleFailure();
       }
 
       let lastHandledCueTimestamp_ = null;
 
-      function handleAudioIntent(intentPayload) {
+      function handleAudioIntent_(intentPayload) {
         if (!intentPayload || !intentPayload.intent) return;
         if (
           intentPayload.timestamp !== undefined &&
@@ -2742,11 +2759,7 @@
               summary: "Matched table query: " + intentPayload.rule,
               tags: key
             };
-          showRuleCard(
-            matched.title,
-            matched.summary || matched.text || "",
-            key
-          );
+          showRuleCard_(matched, key);
         }
       }
 
@@ -2758,11 +2771,11 @@
         if (audioCuePollTimer_ !== null) clearTimeout(audioCuePollTimer_);
         audioCuePollTimer_ = setTimeout(() => {
           audioCuePollTimer_ = null;
-          pollLatestAudioCue();
+          pollLatestAudioCue_();
         }, AUDIO_CUE_POLL_INTERVAL_MS);
       }
 
-      function pollLatestAudioCue() {
+      function pollLatestAudioCue_() {
         if (audioCuePollInFlight_) return;
         if (
           typeof google === "undefined" ||
@@ -2789,7 +2802,7 @@
               succeeded &&
               (!companionMode || (cue && cue.intent === "RULE_QUERY"))
             ) {
-              handleAudioIntent(cue);
+              handleAudioIntent_(cue);
             }
           } finally {
             scheduleNextAudioCuePoll_();
@@ -2826,10 +2839,10 @@
           event.data.type === "SOF_AUDIO_INTENT" &&
           event.data.payload
         ) {
-          handleAudioIntent(event.data.payload);
+          handleAudioIntent_(event.data.payload);
         }
       });
-      window.addEventListener("load", pollLatestAudioCue);
+      window.addEventListener("load", pollLatestAudioCue_);
     </script>
   </body>
 </html>

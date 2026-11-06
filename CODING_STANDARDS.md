@@ -22,7 +22,13 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
    Gate GM-only markup (`#sidebar`, `#workspace`) behind Apps Script server-side template scriptlets (`<? if (typeof viewMode === "undefined" || viewMode !== "companion") { ?>`) and guard GM-only `Code.gs` entrypoints with `assertGmAccess_(gmKey)`. Use client-side DOM removal (`el.remove()`) as a defense-in-depth layer, never CSS `display: none` alone.
 
 2. **Apps Script Public Entrypoints vs Private Helpers (`Code.gs`, `Index.html`):**
-   Name public `google.script.run` / trigger entrypoints in `camelCase` without a trailing underscore (`getSessionManifest`, `auditCalendarQuorum`). Name internal helpers with a trailing underscore (`resolveSessionFolder_`, `assertGmAccess_`, `getClientGmKey_`).
+   Name public `google.script.run` and user-invokable trigger entrypoints in `camelCase` without a
+   trailing underscore (`getSessionManifest`, `auditCalendarQuorum`).
+   Name internal helpers and time-driven trigger callbacks that must remain unavailable to browser
+   RPCs with a trailing underscore, including `resolveSessionFolder_`, `assertGmAccess_`,
+   `getClientGmKey_`, `auditCalendarQuorumTrigger_`, and `pruneRuleFeedbackRateLimitsTrigger_`.
+   Keep privileged scheduled callbacks private; expose a separate guarded RPC entrypoint if browser
+   access is also needed.
 
 3. **Shared Fallback Schema Parity (`Code.gs` ↔ `Index.html`):**
    Keep server-side fallback payloads and client-side offline fallbacks on a single object shape (for example, Rule Card glossary entries use `{ id, title, source, summary, tags }` in both `getCoreStarterGlossary_()` and `DEFAULT_GLOSSARY`).

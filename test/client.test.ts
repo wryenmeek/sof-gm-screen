@@ -156,6 +156,25 @@ A resonant construct of bronze and coral.
       expect(doc.content).toContain("Legendary Resistance");
     });
 
+    it("extracts standard Homebrewery Armor Class and Speed labels without separators", () => {
+      const doc = tokenizeStatblockAndDossier(
+        sampleManifest[0],
+        "## Coral Drake\n**Armor Class** 17\n**Speed** 30 ft."
+      );
+
+      expect(doc.properties).toContain("Armor Class 17");
+      expect(doc.properties).toContain("Speed 30 ft.");
+    });
+
+    it("keeps custom bold key/value properties in the MiniSearch document", () => {
+      const doc = tokenizeStatblockAndDossier(
+        sampleManifest[0],
+        "## Marsh Drake\n**Environment**: swamp"
+      );
+
+      expect(doc.properties).toContain("Environment swamp");
+    });
+
     it("updates the MiniSearch index in place when a file payload is loaded so mechanics queries match the statblock", () => {
       renderManifest(sampleManifest);
       expect(indexFilePayload).toBeDefined();
@@ -249,18 +268,18 @@ A resonant construct of bronze and coral.
       ];
       renderManifest(files);
       const input = document.getElementById("filter-input") as HTMLInputElement;
-      const scratchpad = document.getElementById(
+      const tableNotesEl = document.getElementById(
         "scratchpad"
       ) as HTMLTextAreaElement;
 
       // Pressing '/' while focused in textarea must NOT steal focus
-      scratchpad.focus();
-      expect(document.activeElement).toBe(scratchpad);
+      tableNotesEl.focus();
+      expect(document.activeElement).toBe(tableNotesEl);
       document.dispatchEvent(
         new window.KeyboardEvent("keydown", { key: "/", bubbles: true })
       );
-      expect(document.activeElement).toBe(scratchpad);
-      scratchpad.blur();
+      expect(document.activeElement).toBe(tableNotesEl);
+      tableNotesEl.blur();
 
       // Dispatch '/' keydown outside inputs -> focuses #filter-input
       document.dispatchEvent(
@@ -378,9 +397,7 @@ A resonant construct of bronze and coral.
       const harness = setupClientHarness({
         gmKey: "gm-secret-42",
         extractedPromisesResult: {
-          sessionDate: "2026-10-31",
-          extractedCount: 3,
-          createdCount: 3,
+          created: 3,
           tasks: [
             { id: "t1", title: "Promise A" },
             { id: "t2", title: "Promise B" },
@@ -399,13 +416,13 @@ A resonant construct of bronze and coral.
       expect(btn!.textContent).toContain("✨ Extract Promises to Tasks");
       expect(harness.triggerPromiseExtraction).toBeDefined();
 
-      const scratchpadEl = document.getElementById(
+      const tableNotesEl = document.getElementById(
         "scratchpad"
       ) as HTMLTextAreaElement;
-      scratchpadEl.value = "# Session Notes\n- Promise: Pog cloak";
+      tableNotesEl.value = "# Session Notes\n- Promise: Pog cloak";
 
       await harness.triggerPromiseExtraction();
-      expect(harness.saveScratchpadNotesSpy).toHaveBeenCalledWith(
+      expect(harness.saveTableNotesSpy).toHaveBeenCalledWith(
         "2026-10-31",
         "# Session Notes\n- Promise: Pog cloak",
         "gm-secret-42"

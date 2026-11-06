@@ -118,21 +118,21 @@ describe("Apps Script Server Logic (Code.gs)", () => {
     );
   });
 
-  it("reads and writes table notes scratchpad", () => {
-    const getScratchpadNotes = ctx.getScratchpadNotes;
-    const saveScratchpadNotes = ctx.saveScratchpadNotes;
+  it("reads and writes Table Notes through canonical RPC names", () => {
+    const getTableNotes = ctx.getTableNotes;
+    const saveTableNotes = ctx.saveTableNotes;
 
-    const initial = getScratchpadNotes("2026-10-31", "test-gm-key");
+    const initial = getTableNotes("2026-10-31", "test-gm-key");
     expect(initial.content).toContain("Initiative: Bard 18");
 
-    const saveRes = saveScratchpadNotes(
+    const saveRes = saveTableNotes(
       "2026-10-31",
       "# Updated Notes\n\n- Loot: 500 gp",
       "test-gm-key"
     );
     expect(saveRes.id).toBe("notes_md");
 
-    const updated = getScratchpadNotes("2026-10-31", "test-gm-key");
+    const updated = getTableNotes("2026-10-31", "test-gm-key");
     expect(updated.content).toContain("Loot: 500 gp");
   });
 
@@ -284,6 +284,132 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(safeRow[5]).toBe("'-1");
     });
 
+    it("reports unavailable without consuming rate-limit budget when feedback storage fails", () => {
+      mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
+      const storageFailures = [
+        () =>
+          mocks.SpreadsheetApp.openById.mockImplementationOnce(() => {
+            throw new Error("Spreadsheet unavailable");
+          }),
+        () =>
+          mocks.SpreadsheetApp.openById.mockImplementationOnce(() => ({
+            getSheetByName: () => {
+              throw new Error("Sheet lookup failed");
+            }
+          })),
+        () =>
+          mocks.SpreadsheetApp.openById.mockImplementationOnce(() => ({
+            getSheetByName: () => null,
+            insertSheet: () => {
+              throw new Error("Sheet creation failed");
+            }
+          })),
+        () =>
+          mocks.SpreadsheetApp.openById.mockImplementationOnce(() => ({
+            getSheetByName: () => null,
+            insertSheet: () => ({
+              appendRow: () => {
+                throw new Error("Header write failed");
+              }
+            })
+          })),
+        () =>
+          mocks.SpreadsheetApp.openById.mockImplementationOnce(() => ({
+            getSheetByName: () => ({
+              appendRow: () => {
+                throw new Error("Feedback write failed");
+              }
+            })
+          }))
+      ];
+
+      for (const failStorage of storageFailures) {
+        failStorage();
+        const result = ctx.logRuleFeedback({
+          sessionDate: "2026-10-31",
+          vote: "+1"
+        });
+
+        expect(result.status).toBe("unavailable");
+        expect(
+          [...mocks.propsStore.keys()].some(
+            (key) =>
+              key.startsWith("rule_feedback_") ||
+              key.startsWith("SOF_RULE_FEEDBACK_SESSION_COUNT_") ||
+              key === "SOF_RULE_FEEDBACK_GLOBAL_ATTEMPTS"
+          )
+        ).toBe(false);
+      }
+    });
+
+    it("rejects feedback for unknown session dates without allocating counters", () => {
+      mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
+      mocks.DriveApp.getFolderById.mockImplementationOnce(() => ({
+        getId: () => "sessions_root",
+        getName: () => "Sessions",
+        getFiles: () => ({
+          hasNext: () => false,
+          next: () => {
+            throw new Error("No files");
+          }
+        }),
+        getFolders: () => ({
+          hasNext: () => false,
+          next: () => {
+            throw new Error("No folders");
+          }
+        }),
+        getFoldersByName: () => ({
+          hasNext: () => false,
+          next: () => {
+            throw new Error("No matching session folder");
+          }
+        }),
+        getFilesByName: () => ({
+          hasNext: () => false,
+          next: () => {
+            throw new Error("No files by name");
+          }
+        }),
+        createFile: () => {
+          throw new Error("Unused folder operation");
+        }
+      }));
+
+      const result = ctx.logRuleFeedback({
+        sessionDate: "2099-01-01",
+        vote: "+1"
+      });
+
+      expect(result.status).toBe("invalid");
+      expect(mocks.lockState.waits).toBe(0);
+      expect(
+        [...mocks.propsStore.keys()].some((key) =>
+          key.startsWith("SOF_RULE_FEEDBACK_SESSION_COUNT_")
+        )
+      ).toBe(false);
+    });
+
+    it("reports unavailable without consuming rate-limit budget when the feedback sheet is unconfigured", () => {
+      mocks.propsStore.delete("SOF_FEEDBACK_SHEET_ID");
+
+      const result = ctx.logRuleFeedback({
+        sessionDate: "2026-10-31",
+        vote: "+1"
+      });
+
+      expect(result.status).toBe("unavailable");
+      expect(mocks.lockState.waits).toBe(0);
+      expect(
+        [...mocks.propsStore.keys()].some(
+          (key) =>
+            key.startsWith("rule_feedback_") ||
+            key.startsWith("SOF_RULE_FEEDBACK_SESSION_COUNT_") ||
+            key === "SOF_RULE_FEEDBACK_GLOBAL_ATTEMPTS"
+        )
+      ).toBe(false);
+    });
+
     it("bounds player feedback fields and limits each signed-in user to 20 votes per session", () => {
       mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
       mocks.setActiveUserEmail("player-one@example.test");
@@ -345,6 +471,30 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(mocks.sheetRows).toHaveLength(40);
     });
 
+    it("keeps the per-session-date feedback cap after the rolling window expires", () => {
+      mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
+      mocks.setActiveUserEmail("player-one@example.test");
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
+      try {
+        const submissions = Array.from({ length: 20 }, () =>
+          ctx.logRuleFeedback({ sessionDate: "2026-10-31", vote: "+1" })
+        );
+        expect(
+          submissions.every((entry: any) => entry.status === "logged")
+        ).toBe(true);
+
+        clock.mockReturnValue(now + 7 * 60 * 60 * 1000);
+        expect(
+          ctx.logRuleFeedback({ sessionDate: "2026-10-31", vote: "+1" }).status
+        ).toBe("rate_limited");
+        expect(mocks.sheetRows).toHaveLength(20);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
     it("keeps feedback caps enforced after ScriptCache counters are evicted", () => {
       mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
       mocks.setActiveUserEmail("player-one@example.test");
@@ -366,6 +516,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
     });
 
     it("bounds feedback across many identities and prunes expired per-user records", () => {
+      mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
       const now = Date.now();
       mocks.propsStore.set(
         "rule_feedback_expired",
@@ -393,6 +544,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
     });
 
     it("backfills the aggregate limiter from existing active user records", () => {
+      mocks.propsStore.set("SOF_FEEDBACK_SHEET_ID", "sheet_123");
       const now = Date.now();
       for (let index = 0; index < 200; index++) {
         mocks.propsStore.set(
@@ -919,8 +1071,18 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       });
 
       const res1 = ctx.extractNarrativePromises("2026-10-31", "test-gm-key");
-      expect(res1.extractedCount).toBe(2);
-      expect(res1.createdCount).toBe(2);
+      expect(res1).toEqual({
+        created: 2,
+        tasks: expect.arrayContaining([
+          expect.objectContaining({
+            title: "Complete Pog Cloak of the Manta Ray"
+          }),
+          expect.objectContaining({
+            title: "Stat out Cowled Wizard Recon Squad"
+          })
+        ])
+      });
+      expect(res1.tasks).toHaveLength(2);
       expect(mocks.taskStore.length).toBe(2);
 
       // Re-running with same tasks must skip duplicates
@@ -938,7 +1100,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
           })
       });
       const res2 = ctx.extractNarrativePromises("2026-10-31", "test-gm-key");
-      expect(res2.createdCount).toBe(0);
+      expect(res2).toEqual({ created: 0, tasks: [] });
       expect(mocks.taskStore.length).toBe(2);
 
       // Verify responseSchema in UrlFetchApp payload and Logger.log output
@@ -974,7 +1136,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
 
       const result = ctx.extractNarrativePromises("2026-10-31", "test-gm-key");
 
-      expect(result.createdCount).toBe(4);
+      expect(result.created).toBe(4);
       expect(mocks.taskStore.map((task) => task.due)).toEqual([
         "2026-11-08T00:00:00.000Z",
         "2026-11-09T10:30:00-05:00",
@@ -1013,7 +1175,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
         });
 
       const result = ctx.extractNarrativePromises("2026-10-31", "test-gm-key");
-      expect(result.createdCount).toBe(1);
+      expect(result.created).toBe(1);
       expect(mocks.taskStore[0].title).toBe("Finished promise");
       expect(mocks.Tasks.Tasks.list).toHaveBeenNthCalledWith(
         2,
@@ -1034,17 +1196,36 @@ describe("Apps Script Server Logic (Code.gs)", () => {
   });
 
   describe("Ticket 15: Server-Side GM Access Guard (assertGmAccess_)", () => {
-    it("fails closed when SOF_GM_KEY is unset and requires an exact matching key", () => {
+    it("allows local single-user mode only when active user matches the effective owner", () => {
       mocks.propsStore.delete("SOF_GM_KEY");
-      expect(ctx.assertGmAccess_).toBeDefined();
-      expect(() => ctx.assertGmAccess_()).toThrow("Unauthorized GM RPC");
-      expect(() => ctx.assertGmAccess_("any_key")).toThrow(
-        "Unauthorized GM RPC"
-      );
+      const ownerEmail = "gm-owner@example.test";
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => ownerEmail }),
+        getEffectiveUser: () => ({ getEmail: () => ownerEmail })
+      };
 
+      expect(ctx.assertGmAccess_()).toBe(true);
+    });
+
+    it("denies unset-key requests from anonymous or non-owner users", () => {
+      mocks.propsStore.delete("SOF_GM_KEY");
+      const ownerEmail = "gm-owner@example.test";
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => "" }),
+        getEffectiveUser: () => ({ getEmail: () => ownerEmail })
+      };
+      expect(() => ctx.assertGmAccess_()).toThrow("Unauthorized GM RPC");
+
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => "player@example.test" }),
+        getEffectiveUser: () => ({ getEmail: () => ownerEmail })
+      };
+      expect(() => ctx.assertGmAccess_()).toThrow("Unauthorized GM RPC");
+    });
+
+    it("requires an exact matching key when SOF_GM_KEY is configured", () => {
       mocks.propsStore.set("SOF_GM_KEY", "secret-gm-token-99");
-      expect(() => ctx.assertGmAccess_()).toThrow("Unauthorized GM RPC");
-
+      expect(ctx.assertGmAccess_).toBeDefined();
       expect(() => ctx.assertGmAccess_()).toThrow("Unauthorized GM RPC");
       expect(() => ctx.assertGmAccess_("wrong-token")).toThrow(
         "Unauthorized GM RPC"
@@ -1113,6 +1294,28 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(compOut.template.gmKey).toBe("");
     });
 
+    it("serves the GM view to the signed-in owner when no key is configured", () => {
+      mocks.propsStore.delete("SOF_GM_KEY");
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => "gm-owner@example.test" }),
+        getEffectiveUser: () => ({ getEmail: () => "gm-owner@example.test" })
+      };
+
+      expect(ctx.doGet({ parameter: {} }).template.viewMode).toBe("gm");
+
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => "player@example.test" }),
+        getEffectiveUser: () => ({ getEmail: () => "gm-owner@example.test" })
+      };
+      expect(ctx.doGet({ parameter: {} }).template.viewMode).toBe("companion");
+
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => "" }),
+        getEffectiveUser: () => ({ getEmail: () => "gm-owner@example.test" })
+      };
+      expect(ctx.doGet({ parameter: {} }).template.viewMode).toBe("companion");
+    });
+
     it("guards getAudioAuthToken with assertGmAccess_ and returns ScriptApp.getOAuthToken()", () => {
       mocks.propsStore.set("SOF_GM_KEY", "gm-secret-77");
       expect(() => ctx.getAudioAuthToken("wrong")).toThrow(
@@ -1123,6 +1326,29 @@ describe("Apps Script Server Logic (Code.gs)", () => {
   });
 
   describe("Ticket 26: doPost(e) & getLatestAudioCue(gmKey) CacheService Cue Bridge", () => {
+    it("requires a configured key for Pi webhook requests even for the owner", () => {
+      mocks.propsStore.delete("SOF_GM_KEY");
+      ctx.Session = {
+        getActiveUser: () => ({ getEmail: () => "gm-owner@example.test" }),
+        getEffectiveUser: () => ({ getEmail: () => "gm-owner@example.test" })
+      };
+
+      const response = ctx.doPost({
+        postData: {
+          contents: JSON.stringify({
+            intent: "MUSIC_CUE",
+            mood: "combat"
+          })
+        }
+      });
+
+      expect(JSON.parse(response.getContent())).toEqual({
+        status: "ERROR",
+        error: "Unauthorized"
+      });
+      expect(ctx.getLatestAudioCue()).toBeNull();
+    });
+
     it("caches non-BANTER cues in CacheService for 60s, ignores BANTER, and guards with assertGmAccess_", () => {
       mocks.propsStore.set("SOF_GM_KEY", "pi-edge-key");
 

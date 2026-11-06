@@ -15,13 +15,12 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
   let audioCtxCreateCompressorSpy: ReturnType<typeof vi.fn>;
   let classifyAudioAssetChannel: any;
   let triggerManualMoodCue: any;
-  let resolveClassifierTier: any;
   let pollLatestAudioCue: any;
-  let saveNotes: any;
+  let saveTableNotes: any;
   let startNotesAutoSave: any;
   let renderManifest: any;
   let selectFile: any;
-  let saveScratchpadNotesSpy: ReturnType<typeof vi.fn>;
+  let saveTableNotesSpy: ReturnType<typeof vi.fn>;
   let mockLocalStorage: any;
 
   beforeEach(() => {
@@ -39,13 +38,12 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     audioCtxCreateCompressorSpy = harness.audioCtxCreateCompressorSpy;
     classifyAudioAssetChannel = harness.classifyAudioAssetChannel;
     triggerManualMoodCue = harness.triggerManualMoodCue;
-    resolveClassifierTier = harness.resolveClassifierTier;
     pollLatestAudioCue = harness.pollLatestAudioCue;
-    saveNotes = harness.saveNotes;
+    saveTableNotes = harness.saveTableNotes;
     startNotesAutoSave = harness.startNotesAutoSave;
     renderManifest = harness.renderManifest;
     selectFile = harness.selectFile;
-    saveScratchpadNotesSpy = harness.saveScratchpadNotesSpy;
+    saveTableNotesSpy = harness.saveTableNotesSpy;
     mockLocalStorage = harness.mockLocalStorage;
   });
 
@@ -422,9 +420,22 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       expect(parsed.some((e: any) => e.eventType === "SFX")).toBe(true);
     });
 
-    it("immediately writes every cue to localStorage write-ahead log, hydrates on reload, co-flushes inside saveNotes(), and auto-saves every 60s", () => {
+    it("loads Table Notes through the private client helper", () => {
+      const harness = setupClientHarness();
+      expect(harness.loadTableNotes).toBeDefined();
+      harness.loadTableNotes();
+      expect(harness.getTableNotesSpy).toHaveBeenCalledTimes(1);
+      expect(
+        (document.getElementById("scratchpad") as HTMLTextAreaElement).value
+      ).toBe("# Notes");
+      expect(document.getElementById("save-status")!.textContent).toBe(
+        "Loaded: 10:00:00 AM"
+      );
+    });
+
+    it("immediately writes every cue to localStorage write-ahead log, hydrates on reload, co-flushes inside saveTableNotes(), and auto-saves every 60s", () => {
       expect(TabletopMixer.hydrateFromLocalStorage).toBeDefined();
-      expect(saveNotes).toBeDefined();
+      expect(saveTableNotes).toBeDefined();
       expect(startNotesAutoSave).toBeDefined();
 
       TabletopMixer.init();
@@ -451,23 +462,23 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       TabletopMixer.init();
       expect(TabletopMixer.timeline).toHaveLength(4);
 
-      // Saving Table Notes via saveNotes() co-flushes the audio timeline
-      const scratchpadEl = document.getElementById(
+      // Saving Table Notes via saveTableNotes() co-flushes the audio timeline
+      const tableNotesEl = document.getElementById(
         "scratchpad"
       ) as HTMLTextAreaElement;
-      scratchpadEl.value = "# Live Notes\n- Kraken surfaced";
-      saveNotes();
+      tableNotesEl.value = "# Live Notes\n- Kraken surfaced";
+      saveTableNotes();
 
       expect(saveAudioTimelineSpy).toHaveBeenCalledTimes(1);
       const [flushedSession, flushedJson] = saveAudioTimelineSpy.mock.calls[0];
       expect(flushedSession).toBe("2026-10-31");
       expect(JSON.parse(flushedJson)).toHaveLength(4);
 
-      // 60-second auto-save interval triggers saveNotes()
-      saveScratchpadNotesSpy.mockClear();
+      // 60-second auto-save interval triggers saveTableNotes()
+      saveTableNotesSpy.mockClear();
       const timerId = startNotesAutoSave();
       vi.advanceTimersByTime(60000);
-      expect(saveScratchpadNotesSpy).toHaveBeenCalledWith(
+      expect(saveTableNotesSpy).toHaveBeenCalledWith(
         "2026-10-31",
         "# Live Notes\n- Kraken surfaced"
       );
@@ -544,64 +555,9 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       expect(companionHarness.TabletopMixer.timeline).toHaveLength(0);
     });
 
-    it("resolves 3-tier classifier state machine and polls getLatestAudioCue() to update #classifier-tier-status and trigger cues", () => {
-      expect(resolveClassifierTier).toBeDefined();
+    it("uses the Pi-selected tier from pollLatestAudioCue() when routing cues", () => {
       expect(pollLatestAudioCue).toBeDefined();
 
-      // 1. Tier 1 local Pi within 1500ms budget
-      const t1 = resolveClassifierTier(
-        { piConnection: "ONLINE" },
-        {
-          tier1Status: "OK",
-          tier1LatencyMs: 620,
-          cue: { intent: "MUSIC_CUE", mood: "combat", rule: null }
-        }
-      );
-      expect(t1).toEqual({
-        activeTier: "TIER_1_PI_LOCAL",
-        cue: { intent: "MUSIC_CUE", mood: "combat", rule: null },
-        reason: "Tier 1 local Pi model"
-      });
-
-      // 2. Tier 1 timeout (>1500ms) -> failover to Tier 2 Gemini 2.5 Flash
-      const t2 = resolveClassifierTier(
-        { piConnection: "ONLINE" },
-        {
-          tier1Status: "OK",
-          tier1LatencyMs: 1890,
-          tier2Status: "OK",
-          cue: { intent: "RULE_QUERY", mood: null, rule: "grappling" }
-        }
-      );
-      expect(t2).toEqual({
-        activeTier: "TIER_2_GEMINI_CLOUD",
-        cue: { intent: "RULE_QUERY", mood: null, rule: "grappling" },
-        reason:
-          "Tier 1 exceeded 1500ms or failed -> Auto-routed Speech Chunk to Tier 2 Gemini 2.5 Flash"
-      });
-
-      // 3. Both Tier 1 & Tier 2 fail -> Tier 3 Manual UI
-      const t3Fail = resolveClassifierTier(
-        { piConnection: "ONLINE" },
-        { tier1Status: "ERROR", tier2Status: "ERROR" }
-      );
-      expect(t3Fail).toEqual({
-        activeTier: "TIER_3_MANUAL_UI",
-        reason:
-          "Tier 1 & Tier 2 unavailable -> Degraded to Tier 3 Manual GM Screen Controls"
-      });
-
-      // 4. Pi offline -> Tier 3 Manual UI
-      const t3Offline = resolveClassifierTier(
-        { piConnection: "OFFLINE" },
-        { tier1Status: "OK", tier1LatencyMs: 200 }
-      );
-      expect(t3Offline).toEqual({
-        activeTier: "TIER_3_MANUAL_UI",
-        reason: "Pi offline -> Manual UI controls active"
-      });
-
-      // 5. pollLatestAudioCue fetches from getLatestAudioCue and routes through handleAudioIntent
       const cueHarness = setupClientHarness({
         latestAudioCue: {
           intent: "MUSIC_CUE",
@@ -622,6 +578,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       cueHarness.AudioCache.memoryStore.set(tensionScoreId, new ArrayBuffer(8));
       cueHarness.TabletopMixer.init();
       cueHarness.pollLatestAudioCue();
+
       expect(cueHarness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
       expect(
         document.getElementById("classifier-tier-status")!.textContent

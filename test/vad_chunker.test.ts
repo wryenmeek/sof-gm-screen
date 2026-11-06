@@ -83,7 +83,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
         `chunker = Stage1VadChunker(${JSON.stringify(tmpDir)}, sample_rate=16000, rms_threshold=400.0)`,
         "silent = struct.pack('<1600h', *([10] * 1600))",
         "speech = struct.pack('<1600h', *([1200] * 1600))",
-        "entries = chunker.process_stream([silent, speech, speech, silent, speech], frame_duration_ms=100)",
+        "entries = chunker.process_stream([silent, speech, speech, silent, speech])",
         "print(json.dumps(entries))"
       ].join("; ");
 
@@ -140,7 +140,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
         "  source.writeframes(struct.pack('<16000h', *([1200] * 16000)))",
         "with wave.open(wav_path, 'rb') as source: pcm = source.readframes(source.getnframes())",
         `chunker = Stage1VadChunker(${JSON.stringify(tmpDir)}, vad_detector=lambda _pcm: True)`,
-        "entries = chunker.process_stream(_pcm_frames(pcm), frame_duration_ms=32)",
+        "entries = chunker.process_stream(_pcm_frames(pcm), frame_duration_ms=250)",
         "chunk_path = os.path.join(chunker.chunks_dir, entries[0]['chunk'])",
         "with wave.open(chunk_path, 'rb') as chunk: sample_count = chunk.getnframes()",
         "print(json.dumps({'entries': entries, 'sample_count': sample_count}))"
@@ -175,7 +175,7 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
         `chunker = Stage1VadChunker(${JSON.stringify(tmpDir)}, vad_detector=lambda pcm: pcm[0] == 1)`,
         "f_speech = b'\\x01\\x00' * 800",
         "f_silent = b'\\x00\\x00' * 800",
-        "entries = chunker.process_stream([f_speech, f_silent], frame_duration_ms=50)",
+        "entries = chunker.process_stream([f_speech, f_silent])",
         "print(json.dumps(entries))"
       ].join("; ");
 
@@ -200,9 +200,9 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
         "import json",
         "from scripts.rpi_vad_chunker import Stage1VadChunker",
         `first = Stage1VadChunker(${JSON.stringify(tmpDir)}, vad_detector=lambda _pcm: True)`,
-        "first.process_stream([b'\\x01\\x00' * 160], frame_duration_ms=10)",
+        "first.process_stream([b'\\x01\\x00' * 160])",
         `second = Stage1VadChunker(${JSON.stringify(tmpDir)}, vad_detector=lambda _pcm: True)`,
-        "second.process_stream([b'\\x02\\x00' * 160], frame_duration_ms=10)",
+        "second.process_stream([b'\\x02\\x00' * 160])",
         "print(json.dumps(second.manifest))"
       ].join("; ");
       const out = execFileSync("python3", ["-B", "-c", pySnippet], {
@@ -233,9 +233,9 @@ describe("Ticket 11 & 26: Raspberry Pi Stage 1 Silero VAD Chunker & Stage 2 3-Ti
         "import json",
         "from scripts.rpi_vad_chunker import Stage1VadChunker",
         `first = Stage1VadChunker(${JSON.stringify(tmpDir)}, vad_detector=lambda pcm: pcm[0] == 1)`,
-        "first.process_stream([b'\\x01\\x00' * 1600, b'\\x00\\x00' * 1600, b'\\x00\\x00' * 1600], frame_duration_ms=100, stream_started_at_ms=1000000)",
+        "first.process_stream([b'\\x01\\x00' * 1600, b'\\x00\\x00' * 1600, b'\\x00\\x00' * 1600], stream_started_at_ms=1000000)",
         `second = Stage1VadChunker(${JSON.stringify(tmpDir)}, vad_detector=lambda pcm: pcm[0] == 1)`,
-        "next_chunk = second.process_stream([b'\\x01\\x00' * 1600, b'\\x00\\x00' * 1600], frame_duration_ms=100, stream_started_at_ms=1005300)",
+        "next_chunk = second.process_stream([b'\\x01\\x00' * 1600, b'\\x00\\x00' * 1600], stream_started_at_ms=1005300)",
         "state = json.load(open(second.state_path, encoding='utf-8'))",
         "print(json.dumps({'chunk': next_chunk[0], 'elapsed_ms': state['elapsed_ms']}))"
       ].join("; ");

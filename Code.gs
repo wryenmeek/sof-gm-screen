@@ -7,6 +7,7 @@ const SESSIONS_ROOT_ID = "1MnppB86ysCIlqS-c023Ss96rx5vHEnjT";
 const GOOGLE_EDGE_CDN_PREFIX = "https://lh3.googleusercontent.com/d/";
 const FEEDBACK_SHEET_PROP = "SOF_FEEDBACK_SHEET_ID";
 const RULE_FEEDBACK_RATE_LIMIT_PREFIX = "rule_feedback_";
+const RULE_FEEDBACK_SESSION_COUNT_PREFIX = "SOF_RULE_FEEDBACK_SESSION_COUNT_";
 const RULE_FEEDBACK_GLOBAL_LIMIT_PROP = "SOF_RULE_FEEDBACK_GLOBAL_ATTEMPTS";
 const RULE_FEEDBACK_WINDOW_MS = 6 * 60 * 60 * 1000;
 const RULE_FEEDBACK_GLOBAL_LIMIT = 200;
@@ -20,13 +21,26 @@ function getDriveCdnUrl_(fileId) {
 
 /**
  * Server-side GM access guard for Execute as: Me deployments.
- * When ScriptProperty SOF_GM_KEY is absent, or the supplied key is missing or
- * mismatched, calls fail closed with an "Unauthorized GM RPC" error.
+ * Configured keys require an exact match. When no key is configured, local
+ * single-user mode is allowed only when active and effective user emails match.
  */
 function assertGmAccess_(gmKey) {
   const expected =
     PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
-  if (!expected || gmKey !== expected) {
+  if (expected) {
+    if (gmKey !== expected) {
+      throw new Error("Unauthorized GM RPC");
+    }
+    return true;
+  }
+
+  const activeUserEmail = Session.getActiveUser().getEmail().trim();
+  const effectiveUserEmail = Session.getEffectiveUser().getEmail().trim();
+  if (
+    !activeUserEmail ||
+    !effectiveUserEmail ||
+    activeUserEmail !== effectiveUserEmail
+  ) {
     throw new Error("Unauthorized GM RPC");
   }
   return true;
@@ -42,7 +56,13 @@ function doGet(e) {
   const gmKey = e && e.parameter && e.parameter.gmKey ? e.parameter.gmKey : "";
   const expectedGmKey =
     PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
-  const hasGmAccess = Boolean(expectedGmKey && gmKey === expectedGmKey);
+  let hasGmAccess = Boolean(expectedGmKey && gmKey === expectedGmKey);
+  if (!expectedGmKey) {
+    try {
+      assertGmAccess_();
+      hasGmAccess = true;
+    } catch (_e) {}
+  }
   template.viewMode =
     e && e.parameter && e.parameter.view === "companion"
       ? "companion"
@@ -243,7 +263,7 @@ function resolveRelativeImages_(text, sessionDate) {
 /**
  * Loads existing content from table_notes.md in the session folder.
  */
-function getScratchpadNotes(sessionDate, gmKey) {
+function getTableNotes(sessionDate, gmKey) {
   assertGmAccess_(gmKey);
   const folder = resolveSessionFolder_(sessionDate);
   const files = folder.getFilesByName("table_notes.md");
@@ -268,7 +288,7 @@ function getScratchpadNotes(sessionDate, gmKey) {
 /**
  * Saves or overwrites table_notes.md in the session folder.
  */
-function saveScratchpadNotes(sessionDate, content, gmKey) {
+function saveTableNotes(sessionDate, content, gmKey) {
   assertGmAccess_(gmKey);
   const folder = resolveSessionFolder_(sessionDate);
   const files = folder.getFilesByName("table_notes.md");
@@ -711,6 +731,12 @@ function ruleFeedbackRateLimitKey_(email, sessionDate) {
   return "rule_feedback_" + (hash >>> 0).toString(16);
 }
 
+function isKnownSessionDate_(sessionDate) {
+  const sessionsFolder = resolveSessionsRoot_();
+  const folders = sessionsFolder.getFoldersByName(sessionDate);
+  return Boolean(folders && folders.hasNext());
+}
+
 /**
  * Ticket 08 & 23: Logs crowdsourced player rule card feedback to Rules_Helper_Feedback in Google Sheets.
  */
@@ -749,6 +775,20 @@ function logRuleFeedback(data) {
     return { status: "invalid" };
   }
 
+  const props = PropertiesService.getScriptProperties();
+  const sheetId = props.getProperty(FEEDBACK_SHEET_PROP);
+  if (!sheetId || typeof SpreadsheetApp === "undefined") {
+    return { status: "unavailable" };
+  }
+
+  let sessionExists;
+  try {
+    sessionExists = isKnownSessionDate_(values.sessionDate);
+  } catch (_e) {
+    return { status: "unavailable" };
+  }
+  if (!sessionExists) return { status: "invalid" };
+
   const sessionService = typeof Session !== "undefined" ? Session : null;
   const userEmail =
     sessionService && sessionService.getActiveUser
@@ -760,6 +800,11 @@ function logRuleFeedback(data) {
       ? sessionService.getTemporaryActiveUserKey()
       : "unknown-user");
   const rateLimitKey = ruleFeedbackRateLimitKey_(userKey, "durable_window");
+  const sessionCountKey =
+    RULE_FEEDBACK_SESSION_COUNT_PREFIX +
+    ruleFeedbackRateLimitKey_(userKey, values.sessionDate).slice(
+      RULE_FEEDBACK_RATE_LIMIT_PREFIX.length
+    );
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -791,9 +836,19 @@ function logRuleFeedback(data) {
 
     const windowStart = now - RULE_FEEDBACK_WINDOW_MS;
     attempts = attempts.filter((attempt) => attempt.timestamp > windowStart);
-    const sessionCount = attempts.filter(
-      (attempt) => attempt.sessionDate === values.sessionDate
-    ).length;
+    const rawSessionCount = rateLimitProps.getProperty(sessionCountKey);
+    const sessionCount =
+      rawSessionCount === null
+        ? attempts.filter(
+            (attempt) => attempt.sessionDate === values.sessionDate
+          ).length
+        : Number(rawSessionCount);
+    if (!Number.isSafeInteger(sessionCount) || sessionCount < 0) {
+      return { status: "rate_limited" };
+    }
+    if (rawSessionCount === null && sessionCount > 0) {
+      rateLimitProps.setProperty(sessionCountKey, String(sessionCount));
+    }
     if (
       sessionCount >= 20 ||
       attempts.length >= 40 ||
@@ -801,14 +856,6 @@ function logRuleFeedback(data) {
     ) {
       return { status: "rate_limited" };
     }
-    attempts.push({ timestamp: now, sessionDate: values.sessionDate });
-    pruned.globalAttempts.push(now);
-    rateLimitProps.setProperty(
-      RULE_FEEDBACK_GLOBAL_LIMIT_PROP,
-      JSON.stringify(pruned.globalAttempts)
-    );
-    rateLimitProps.setProperty(rateLimitKey, JSON.stringify(attempts));
-
     const payload = {
       timestamp: new Date().toISOString(),
       sessionDate: values.sessionDate,
@@ -818,31 +865,42 @@ function logRuleFeedback(data) {
       source: values.source,
       vote: values.vote
     };
-    const props = PropertiesService.getScriptProperties();
-    const sheetId = props.getProperty(FEEDBACK_SHEET_PROP);
-    if (sheetId && typeof SpreadsheetApp !== "undefined") {
-      const ss = SpreadsheetApp.openById(sheetId);
-      let sheet = ss.getSheetByName("Rules_Helper_Feedback");
-      if (!sheet) {
-        sheet = ss.insertSheet("Rules_Helper_Feedback");
+    try {
+      if (sheetId) {
+        const ss = SpreadsheetApp.openById(sheetId);
+        let sheet = ss.getSheetByName("Rules_Helper_Feedback");
+        if (!sheet) {
+          sheet = ss.insertSheet("Rules_Helper_Feedback");
+          sheet.appendRow([
+            "Timestamp ISO",
+            "Session Date",
+            "Player Identity",
+            "Raw Query Phrase",
+            "Matched Rule Title",
+            "Vote"
+          ]);
+        }
         sheet.appendRow([
-          "Timestamp ISO",
-          "Session Date",
-          "Player Identity",
-          "Raw Query Phrase",
-          "Matched Rule Title",
-          "Vote"
+          payload.timestamp,
+          neutralizeSpreadsheetFormula_(payload.sessionDate),
+          neutralizeSpreadsheetFormula_(payload.player),
+          neutralizeSpreadsheetFormula_(payload.phrase),
+          neutralizeSpreadsheetFormula_(payload.cardTitle),
+          neutralizeSpreadsheetFormula_(payload.vote)
         ]);
       }
-      sheet.appendRow([
-        payload.timestamp,
-        neutralizeSpreadsheetFormula_(payload.sessionDate),
-        neutralizeSpreadsheetFormula_(payload.player),
-        neutralizeSpreadsheetFormula_(payload.phrase),
-        neutralizeSpreadsheetFormula_(payload.cardTitle),
-        neutralizeSpreadsheetFormula_(payload.vote)
-      ]);
+    } catch (_e) {
+      return { status: "unavailable" };
     }
+
+    attempts.push({ timestamp: now, sessionDate: values.sessionDate });
+    rateLimitProps.setProperty(sessionCountKey, String(sessionCount + 1));
+    pruned.globalAttempts.push(now);
+    rateLimitProps.setProperty(
+      RULE_FEEDBACK_GLOBAL_LIMIT_PROP,
+      JSON.stringify(pruned.globalAttempts)
+    );
+    rateLimitProps.setProperty(rateLimitKey, JSON.stringify(attempts));
 
     return { status: "logged", entry: payload };
   } finally {
@@ -1354,7 +1412,7 @@ function normalizeTaskDue_(due, sessionDate) {
 function extractNarrativePromises(sessionDate, gmKey) {
   assertGmAccess_(gmKey);
   const listId = "@default";
-  const tableNotes = getScratchpadNotes(sessionDate, gmKey);
+  const tableNotes = getTableNotes(sessionDate, gmKey);
   const notesText = tableNotes.content || "";
 
   const props = PropertiesService.getScriptProperties();
@@ -1505,9 +1563,7 @@ function extractNarrativePromises(sessionDate, gmKey) {
   }
 
   return {
-    sessionDate: sessionDate,
-    extractedCount: extracted.length,
-    createdCount: createdTasks.length,
+    created: createdTasks.length,
     tasks: createdTasks
   };
 }
@@ -1535,9 +1591,9 @@ function doPost(e) {
     return jsonResponse_({ status: "ERROR", error: "Invalid payload" });
   }
 
-  try {
-    assertGmAccess_(body.gmKey);
-  } catch (_error) {
+  const expectedGmKey =
+    PropertiesService.getScriptProperties().getProperty("SOF_GM_KEY");
+  if (!expectedGmKey || body.gmKey !== expectedGmKey) {
     return jsonResponse_({ status: "ERROR", error: "Unauthorized" });
   }
 

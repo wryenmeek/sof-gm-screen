@@ -60,14 +60,14 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(companionHarness.initCompanionState).toBeDefined();
       (window as any).onload();
 
-      // 1. Companion isolation: body has companion-only-mode, removes #sidebar & #workspace DOM nodes, skips getSessionManifest & getScratchpadNotes, calls getRulesGlossary
+      // 1. Companion isolation: body has companion-only-mode, removes #sidebar & #workspace DOM nodes, skips the Table Notes RPC, calls getRulesGlossary
       expect(document.body.classList.contains("companion-only-mode")).toBe(
         true
       );
       expect(document.getElementById("sidebar")).toBeNull();
       expect(document.getElementById("workspace")).toBeNull();
       expect(companionHarness.getSessionManifestSpy).not.toHaveBeenCalled();
-      expect(companionHarness.getScratchpadNotesSpy).not.toHaveBeenCalled();
+      expect(companionHarness.getTableNotesSpy).not.toHaveBeenCalled();
       expect(companionHarness.getRulesGlossarySpy).toHaveBeenCalledWith(
         "2026-10-31"
       );
@@ -104,6 +104,141 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
         "Exhaustion"
       );
       expect(pttBtn.classList.contains("listening")).toBe(false);
+    });
+
+    it("preserves the matched glossary source on audio-triggered Rule Cards", () => {
+      const audioHarness = setupClientHarness({
+        rulesGlossary: [
+          {
+            id: "campaign_grappling",
+            title: "Grappling",
+            source: "Campaign Combat Guide",
+            summary:
+              "A special melee attack that sets the target's speed to 0.",
+            tags: "combat grapple"
+          }
+        ]
+      });
+      audioHarness.loadDriveRulesGlossary("2026-10-31");
+
+      audioHarness.handleAudioIntent({
+        intent: "RULE_QUERY",
+        rule: "grappling",
+        timestamp: 42
+      });
+
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Grappling"
+      );
+      expect(document.getElementById("card-type")!.textContent).toBe(
+        "Campaign Combat Guide"
+      );
+
+      audioHarness.triggerPtt();
+      audioHarness.getLastSpeechRecognitionInstance().onresult({
+        results: [[{ transcript: "grappling" }]]
+      });
+      expect(document.getElementById("card-type")!.textContent).toBe(
+        "Campaign Combat Guide"
+      );
+    });
+
+    it.each([
+      {
+        result: { status: "rate_limited" },
+        expectedMessage: "Feedback limit reached. Please try again later."
+      },
+      {
+        result: { status: "unavailable" },
+        expectedMessage:
+          "Feedback logging is unavailable. Please try again later."
+      },
+      {
+        result: { status: "unexpected" },
+        expectedMessage: "Feedback could not be saved. Please try again."
+      }
+    ])(
+      "keeps the Rule Card available when feedback is rejected",
+      ({ result, expectedMessage }) => {
+        const feedbackHarness = setupClientHarness({
+          ruleFeedbackResult: result
+        });
+        feedbackHarness.showRuleCard(
+          "Disadvantage",
+          "Roll two d20s and take lower.",
+          "disadvantage on concentration"
+        );
+
+        feedbackHarness.submitRuleFeedback("+1");
+
+        const card = document.getElementById("rule-card")!;
+        const status = document.getElementById("feedback-status");
+        expect(card.style.display).toBe("block");
+        expect(status?.textContent).toBe(expectedMessage);
+        expect(status?.getAttribute("role")).toBe("status");
+        expect(status?.getAttribute("aria-live")).toBe("polite");
+
+        feedbackHarness.submitRuleFeedback("+1");
+        expect(feedbackHarness.logRuleFeedbackSpy).toHaveBeenCalledTimes(2);
+        expect(card.style.display).toBe("block");
+      }
+    );
+
+    it("keeps the Rule Card open with a retry message when the feedback RPC fails", () => {
+      const feedbackHarness = setupClientHarness({
+        ruleFeedbackError: "Apps Script unavailable"
+      });
+      feedbackHarness.showRuleCard(
+        "Disadvantage",
+        "Roll two d20s and take lower.",
+        "disadvantage on concentration"
+      );
+
+      feedbackHarness.submitRuleFeedback("+1");
+
+      expect(document.getElementById("rule-card")!.style.display).toBe("block");
+      expect(document.getElementById("feedback-status")?.textContent).toBe(
+        "Feedback could not be saved. Please try again."
+      );
+    });
+
+    it("keeps a pending vote from submitting twice", () => {
+      const feedbackHarness = setupClientHarness({ deferRuleFeedback: true });
+      feedbackHarness.showRuleCard("Disadvantage", "Roll two d20s.");
+
+      feedbackHarness.submitRuleFeedback("+1");
+      feedbackHarness.submitRuleFeedback("-1");
+
+      expect(feedbackHarness.logRuleFeedbackSpy).toHaveBeenCalledTimes(1);
+      expect(
+        (document.getElementById("btn-up") as HTMLButtonElement).disabled
+      ).toBe(true);
+      expect(
+        (document.getElementById("btn-down") as HTMLButtonElement).disabled
+      ).toBe(true);
+
+      feedbackHarness.respondToRuleFeedback({ status: "rate_limited" });
+
+      expect(
+        (document.getElementById("btn-up") as HTMLButtonElement).disabled
+      ).toBe(false);
+      expect(
+        (document.getElementById("btn-down") as HTMLButtonElement).disabled
+      ).toBe(false);
+    });
+
+    it("does not dismiss a newer Rule Card when an older vote completes", () => {
+      const feedbackHarness = setupClientHarness({ deferRuleFeedback: true });
+      feedbackHarness.showRuleCard("First Rule", "First summary.");
+      feedbackHarness.submitRuleFeedback("+1");
+      feedbackHarness.showRuleCard("Second Rule", "Second summary.");
+
+      feedbackHarness.respondToRuleFeedback({ status: "logged" });
+
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Second Rule"
+      );
+      expect(document.getElementById("rule-card")!.style.display).toBe("block");
     });
 
     it("displays rule card with 30-second auto-dismiss decay and logs feedback on vote", () => {

@@ -30,6 +30,9 @@ export interface ClientHarnessOptions {
   audioAuthToken?: string;
   saveDelayMs?: number;
   saveError?: string;
+  ruleFeedbackResult?: any;
+  ruleFeedbackError?: string;
+  deferRuleFeedback?: boolean;
 }
 
 export function setupClientHarness(options: ClientHarnessOptions = {}) {
@@ -192,8 +195,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   const saveAudioTimelineSpy = vi.fn();
   const logRuleFeedbackSpy = vi.fn();
   const getFilePayloadSpy = vi.fn();
-  const getScratchpadNotesSpy = vi.fn();
-  const saveScratchpadNotesSpy = vi.fn();
+  const getTableNotesSpy = vi.fn();
+  const saveTableNotesSpy = vi.fn();
   const getSessionListSpy = vi.fn();
   const getSessionManifestSpy = vi.fn();
   const getAudioAuthTokenSpy = vi.fn();
@@ -202,6 +205,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   const getLatestAudioCueSpy = vi.fn();
   const getLatestCompanionRuleQueryCueSpy = vi.fn();
   const latestAudioCueResponses: Array<(value: any) => void> = [];
+  const ruleFeedbackResponses: Array<(value: any) => void> = [];
   const filePayloads = options.filePayloads || {};
 
   (window as any).marked = marked;
@@ -216,8 +220,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
               failureCb = handler;
               return runner;
             },
-            getScratchpadNotes: (...args: any[]) => {
-              getScratchpadNotesSpy(...args);
+            getTableNotes: (...args: any[]) => {
+              getTableNotesSpy(...args);
               if (cb)
                 cb({
                   id: "notes_1",
@@ -225,8 +229,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
                   updated: "10:00:00 AM"
                 });
             },
-            saveScratchpadNotes: (...args: any[]) => {
-              saveScratchpadNotesSpy(...args);
+            saveTableNotes: (...args: any[]) => {
+              saveTableNotesSpy(...args);
               const complete = () => {
                 if (options.saveError) {
                   failureCb?.({ message: options.saveError });
@@ -261,7 +265,13 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
             },
             logRuleFeedback: (payload: any) => {
               logRuleFeedbackSpy(payload);
-              if (cb) cb({ status: "logged" });
+              if (options.ruleFeedbackError) {
+                failureCb?.({ message: options.ruleFeedbackError });
+              } else if (cb && options.deferRuleFeedback) {
+                ruleFeedbackResponses.push(cb);
+              } else if (cb) {
+                cb(options.ruleFeedbackResult || { status: "logged" });
+              }
             },
             getAudioAuthToken: (...args: any[]) => {
               getAudioAuthTokenSpy(...args);
@@ -275,13 +285,10 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
             },
             extractNarrativePromises: (...args: any[]) => {
               extractNarrativePromisesSpy(...args);
-              const sessionDate = args[0];
               if (cb) {
                 cb(
                   options.extractedPromisesResult || {
-                    sessionDate,
-                    extractedCount: 2,
-                    createdCount: 2,
+                    created: 2,
                     tasks: [
                       { id: "t1", title: "Promise 1" },
                       { id: "t2", title: "Promise 2" }
@@ -332,33 +339,33 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         createDrivePreviewIframe,
         renderManifest,
         filterFiles,
-        loadFile,
-        selectFile: typeof selectFile !== "undefined" ? selectFile : undefined,
+        loadFile: loadFile_,
+        selectFile: typeof selectFile_ !== "undefined" ? selectFile_ : undefined,
         loadSession: typeof loadSession !== "undefined" ? loadSession : undefined,
-        startNotesAutoSave: typeof startNotesAutoSave !== "undefined" ? startNotesAutoSave : undefined,
-        tokenizeStatblockAndDossier: typeof tokenizeStatblockAndDossier !== "undefined" ? tokenizeStatblockAndDossier : undefined,
-        indexFilePayload: typeof indexFilePayload !== "undefined" ? indexFilePayload : undefined,
-        updateSearchIndexWithContent: typeof updateSearchIndexWithContent !== "undefined" ? updateSearchIndexWithContent : undefined,
+        startNotesAutoSave: typeof startNotesAutoSave_ !== "undefined" ? startNotesAutoSave_ : undefined,
+        tokenizeStatblockAndDossier: typeof tokenizeStatblockAndDossier_ !== "undefined" ? tokenizeStatblockAndDossier_ : undefined,
+        indexFilePayload: typeof indexFilePayload_ !== "undefined" ? indexFilePayload_ : undefined,
+        updateSearchIndexWithContent: typeof updateSearchIndexWithContent_ !== "undefined" ? updateSearchIndexWithContent_ : undefined,
         AudioCache: typeof AudioCache !== "undefined" ? AudioCache : undefined,
         TabletopMixer: typeof TabletopMixer !== "undefined" ? TabletopMixer : undefined,
-        classifyAudioAssetChannel: typeof classifyAudioAssetChannel !== "undefined" ? classifyAudioAssetChannel : undefined,
+        classifyAudioAssetChannel: typeof classifyAudioAssetChannel_ !== "undefined" ? classifyAudioAssetChannel_ : undefined,
         triggerManualMoodCue: typeof triggerManualMoodCue !== "undefined" ? triggerManualMoodCue : undefined,
-        handleAudioIntent: typeof handleAudioIntent !== "undefined" ? handleAudioIntent : undefined,
-        resolveClassifierTier: typeof resolveClassifierTier !== "undefined" ? resolveClassifierTier : undefined,
-        pollLatestAudioCue: typeof pollLatestAudioCue !== "undefined" ? pollLatestAudioCue : undefined,
+        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined,
+        pollLatestAudioCue: typeof pollLatestAudioCue_ !== "undefined" ? pollLatestAudioCue_ : undefined,
         installAudioUnlockHandler_: typeof installAudioUnlockHandler_ !== "undefined" ? installAudioUnlockHandler_ : undefined,
         flushAudioTimeline: typeof flushAudioTimeline !== "undefined" ? flushAudioTimeline : undefined,
-        saveNotes: typeof saveNotes !== "undefined" ? saveNotes : undefined,
+        loadTableNotes: typeof loadTableNotes_ !== "undefined" ? loadTableNotes_ : undefined,
+        saveTableNotes: typeof saveTableNotes_ !== "undefined" ? saveTableNotes_ : undefined,
         handleManualSave_: typeof handleManualSave_ !== "undefined" ? handleManualSave_ : undefined,
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
-        initCompanionState: typeof initCompanionState !== "undefined" ? initCompanionState : undefined,
+        initCompanionState: typeof initCompanionState_ !== "undefined" ? initCompanionState_ : undefined,
         selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,
-        loadDriveRulesGlossary: typeof loadDriveRulesGlossary !== "undefined" ? loadDriveRulesGlossary : undefined,
-        indexRulesGlossary: typeof indexRulesGlossary !== "undefined" ? indexRulesGlossary : undefined,
+        loadDriveRulesGlossary: typeof loadDriveRulesGlossary_ !== "undefined" ? loadDriveRulesGlossary_ : undefined,
+        indexRulesGlossary: typeof indexRulesGlossary_ !== "undefined" ? indexRulesGlossary_ : undefined,
         matchSpokenRuleQuery_: typeof matchSpokenRuleQuery_ !== "undefined" ? matchSpokenRuleQuery_ : undefined,
         handleDictationInput: typeof handleDictationInput !== "undefined" ? handleDictationInput : undefined,
         triggerPtt: typeof triggerPtt !== "undefined" ? triggerPtt : undefined,
-        showRuleCard: typeof showRuleCard !== "undefined" ? showRuleCard : undefined,
+        showRuleCard: typeof showRuleCard_ !== "undefined" ? showRuleCard_ : undefined,
         dismissRuleCard: typeof dismissRuleCard !== "undefined" ? dismissRuleCard : undefined,
         submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined
       };
@@ -387,8 +394,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     saveAudioTimelineSpy,
     logRuleFeedbackSpy,
     getFilePayloadSpy,
-    getScratchpadNotesSpy,
-    saveScratchpadNotesSpy,
+    getTableNotesSpy,
+    saveTableNotesSpy,
     getSessionListSpy,
     getSessionManifestSpy,
     getAudioAuthTokenSpy,
@@ -399,6 +406,12 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     respondToLatestAudioCue: () => {
       const respond = latestAudioCueResponses.shift();
       if (respond) respond(options.latestAudioCue);
+    },
+    respondToRuleFeedback: (
+      result: any = options.ruleFeedbackResult || { status: "logged" }
+    ) => {
+      const respond = ruleFeedbackResponses.shift();
+      if (respond) respond(result);
     },
     getLastSpeechRecognitionInstance: () => lastSpeechRecognitionInstance
   };

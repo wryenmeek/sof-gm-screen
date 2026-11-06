@@ -233,14 +233,15 @@ class Stage1VadChunker:
     def process_stream(
         self,
         pcm_frames: Iterable[bytes],
-        frame_duration_ms: int = 100,
+        frame_duration_ms: Optional[int] = None,
         stream_started_at_ms: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         """Streams PCM frames and timestamps chunks from their actual sample counts.
 
         Args:
             pcm_frames: 16-bit mono PCM frames from one audio stream.
-            frame_duration_ms: Nominal frame duration retained for API compatibility.
+            frame_duration_ms: Deprecated duration retained for API compatibility;
+                timestamps are derived from actual sample counts.
             stream_started_at_ms: Optional wall-clock start time for resumed capture.
 
         Returns:
@@ -960,7 +961,6 @@ def _run_cli() -> None:
         )
         chunks = chunker.process_stream(
             _pcm_frames(pcm_bytes),
-            frame_duration_ms=32,
             stream_started_at_ms=audio_started_at_ms,
         )
         if not chunks:
@@ -995,4 +995,3 @@ def _run_cli() -> None:
 
 if __name__ == "__main__":
     _run_cli()
-

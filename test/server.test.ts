@@ -1145,7 +1145,7 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       ]);
     });
 
-    it("rejects Gemini failures and deduplicates only open tasks across pages under a script lock", () => {
+    it("rejects Gemini failures and deduplicates completed and open tasks across pages under a script lock", () => {
       expect(() =>
         ctx.extractNarrativePromises("2026-10-31", "test-gm-key")
       ).toThrow("GEMINI_API_KEY is not configured");
@@ -1175,12 +1175,17 @@ describe("Apps Script Server Logic (Code.gs)", () => {
         });
 
       const result = ctx.extractNarrativePromises("2026-10-31", "test-gm-key");
-      expect(result.created).toBe(1);
-      expect(mocks.taskStore[0].title).toBe("Finished promise");
+      expect(result.created).toBe(0);
+      expect(mocks.Tasks.Tasks.insert).not.toHaveBeenCalled();
+      expect(mocks.Tasks.Tasks.list).toHaveBeenNthCalledWith(
+        1,
+        "@default",
+        expect.objectContaining({ showCompleted: true })
+      );
       expect(mocks.Tasks.Tasks.list).toHaveBeenNthCalledWith(
         2,
         "@default",
-        expect.objectContaining({ pageToken: "next-page" })
+        expect.objectContaining({ showCompleted: true, pageToken: "next-page" })
       );
       expect(mocks.lockState.waits).toBe(1);
       expect(mocks.lockState.releases).toBe(1);

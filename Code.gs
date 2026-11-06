@@ -1512,18 +1512,13 @@ function extractNarrativePromises(sessionDate, gmKey) {
     let pageToken = null;
     do {
       /** @type {{ showCompleted: boolean, pageToken?: string }} */
-      const options = { showCompleted: false };
+      const options = { showCompleted: true };
       if (pageToken) options.pageToken = pageToken;
       const existingResp = Tasks.Tasks.list(listId, options);
       const existingItems = (existingResp && existingResp.items) || [];
       for (let i = 0; i < existingItems.length; i++) {
         const task = existingItems[i];
-        if (
-          task &&
-          task.status !== "completed" &&
-          task.status !== "deleted" &&
-          task.title
-        ) {
+        if (task && task.status !== "deleted" && task.title) {
           existingTitles.add(String(task.title).trim().toLowerCase());
         }
       }

@@ -1146,24 +1146,30 @@
         });
       }
 
-      function routeAudioAssetToMixer_(fileMeta) {
-        if (!fileMeta || isCompanionMode_()) return;
+      async function routeAudioAssetToMixer_(fileMeta) {
+        if (!fileMeta || !fileMeta.id || isCompanionMode_()) return false;
         const isAudio =
           (fileMeta.mimeType && fileMeta.mimeType.startsWith("audio/")) ||
           (fileMeta.name && /\.(mp3|wav|m4a|ogg)$/i.test(fileMeta.name));
-        if (!isAudio) return;
+        if (!isAudio) return false;
+        let audioBuffer = await AudioCache.get(fileMeta.id);
+        if (!audioBuffer || audioBuffer.byteLength === 0) {
+          audioBuffer = await AudioCache.fetchAudioBytes_(fileMeta);
+        }
+        if (!audioBuffer || audioBuffer.byteLength === 0) return false;
         if (!TabletopMixer.ctx) {
           TabletopMixer.init();
         }
         const channel = classifyAudioAssetChannel_(fileMeta);
         const trackKey = fileMeta.name || fileMeta.id;
         if (channel === 1) {
-          TabletopMixer.playAmbience(fileMeta.id, null, trackKey);
+          TabletopMixer.playAmbience(fileMeta.id, audioBuffer, trackKey);
         } else if (channel === 3) {
-          TabletopMixer.triggerSfx(fileMeta.id, null, trackKey);
+          TabletopMixer.triggerSfx(fileMeta.id, audioBuffer, trackKey);
         } else {
-          TabletopMixer.crossfadeScore(fileMeta.id, null, 4.0, trackKey);
+          TabletopMixer.crossfadeScore(fileMeta.id, audioBuffer, 4.0, trackKey);
         }
+        return true;
       }
 
       function selectFile_(indexOrId, element) {
@@ -1190,13 +1196,13 @@
         }
 
         const matchedMeta = allFiles.find((f) => f.id === fileId);
-        if (matchedMeta) {
-          routeAudioAssetToMixer_(matchedMeta);
-        }
+        const audioRoutePromise = matchedMeta
+          ? routeAudioAssetToMixer_(matchedMeta)
+          : Promise.resolve(false);
 
         if (cache[fileId] && cache[fileId].name !== "table_notes.md") {
           renderToLeftPane(cache[fileId]);
-          return;
+          return audioRoutePromise;
         }
 
         document.getElementById("left-title").textContent = "Loading...";
@@ -1215,6 +1221,7 @@
             currentSessionDate,
             ...(gmKey ? [gmKey] : [])
           );
+        return audioRoutePromise;
       }
 
       function renderToLeftPane(payload) {
@@ -1512,6 +1519,7 @@
         dbName: "sof_audio_cache_v1",
         storeName: "tracks",
         memoryStore: new Map(),
+        pendingFetches: new Map(),
         oauthToken: "session-oauth-token",
         openDb_() {
           return new Promise((resolve) => {
@@ -1702,27 +1710,40 @@
           }
         },
         async fetchDriveAudioBearer(fileId, oauthToken) {
-          const token = oauthToken || this.oauthToken || "session-oauth-token";
-          const url =
-            "https://www.googleapis.com/drive/v3/files/" +
-            encodeURIComponent(fileId) +
-            "?alt=media";
-          let buffer = new ArrayBuffer(0);
-          if (
-            typeof window !== "undefined" &&
-            typeof window.fetch === "function"
-          ) {
-            try {
-              const res = await window.fetch(url, {
-                headers: { Authorization: "Bearer " + token }
-              });
-              if (res && res.ok && typeof res.arrayBuffer === "function") {
-                buffer = await res.arrayBuffer();
-              }
-            } catch (_e) {}
+          const pendingFetch = this.pendingFetches.get(fileId);
+          if (pendingFetch) return pendingFetch;
+          const fetchPromise = (async () => {
+            const token =
+              oauthToken || this.oauthToken || "session-oauth-token";
+            const url =
+              "https://www.googleapis.com/drive/v3/files/" +
+              encodeURIComponent(fileId) +
+              "?alt=media";
+            let buffer = new ArrayBuffer(0);
+            if (
+              typeof window !== "undefined" &&
+              typeof window.fetch === "function"
+            ) {
+              try {
+                const res = await window.fetch(url, {
+                  headers: { Authorization: "Bearer " + token }
+                });
+                if (res && res.ok && typeof res.arrayBuffer === "function") {
+                  buffer = await res.arrayBuffer();
+                }
+              } catch (_e) {}
+            }
+            await this.putTrack(fileId, buffer, Date.now());
+            return buffer;
+          })();
+          this.pendingFetches.set(fileId, fetchPromise);
+          try {
+            return await fetchPromise;
+          } finally {
+            if (this.pendingFetches.get(fileId) === fetchPromise) {
+              this.pendingFetches.delete(fileId);
+            }
           }
-          await this.putTrack(fileId, buffer, Date.now());
-          return buffer;
         },
         async fetchAudioBytes_(fileMeta) {
           return this.fetchDriveAudioBearer(

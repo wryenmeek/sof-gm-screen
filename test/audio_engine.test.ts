@@ -176,7 +176,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       expect(TabletopMixer.channel2Gain.gain.value).toBeCloseTo(0.5, 3);
     });
 
-    it("executes a 4-second linear crossfade on Channel 2 score transitions from 0 to 0.5 and auto-routes manifest audio files on selectFile", () => {
+    it("executes a 4-second linear crossfade on Channel 2 score transitions from 0 to 0.5 and auto-routes manifest audio files on selectFile", async () => {
       expect(TabletopMixer).toBeDefined();
       TabletopMixer.init();
       AudioCache.memoryStore.set("combat_theme_01", new ArrayBuffer(8));
@@ -214,14 +214,18 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           mimeType: "audio/wav"
         }
       ]);
-      selectFile(0);
+      const ambiencePlayback = selectFile(0);
+      await vi.runAllTimersAsync();
+      await ambiencePlayback;
       expect(
         TabletopMixer.timeline.some(
           (e: any) =>
             e.eventType === "LOOP" && e.track === "[Ambience] Ocean_Waves.mp3"
         )
       ).toBe(true);
-      selectFile(1);
+      const sfxPlayback = selectFile(1);
+      await vi.runAllTimersAsync();
+      await sfxPlayback;
       expect(
         TabletopMixer.timeline.some(
           (e: any) =>
@@ -230,7 +234,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       ).toBe(true);
     });
 
-    it("decodes cached manifest audio and routes source nodes to the intended mixer channels", () => {
+    it("decodes cached manifest audio and routes source nodes to the intended mixer channels", async () => {
       const graphHarness = setupClientHarness();
       graphHarness.TabletopMixer.init();
       const ambienceBuffer = { duration: 1, track: "ambience" };
@@ -253,7 +257,9 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           mimeType: "audio/mpeg"
         }
       ]);
-      graphHarness.selectFile(0);
+      const ambiencePlayback = graphHarness.selectFile(0);
+      await vi.runAllTimersAsync();
+      await ambiencePlayback;
 
       expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
       const ambienceSource =
@@ -294,6 +300,40 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
             event.track === "[Score] Rising Tide.mp3"
         )
       ).toBe(true);
+    });
+
+    it("plays an IndexedDB-cached manifest track selected before cache hydration finishes", async () => {
+      const graphHarness = setupClientHarness();
+      graphHarness.TabletopMixer.init();
+      const fileId = "idb-only-ambient-track";
+      const initialAccessed = Date.now() - 5000;
+      graphHarness.idbStore.set(fileId, {
+        fileId,
+        buffer: new ArrayBuffer(8),
+        lastAccessed: initialAccessed,
+        byteLength: 8
+      });
+      graphHarness.renderManifest([
+        {
+          id: fileId,
+          name: "[Ambience] Harbor_Waves.mp3",
+          simpleName: "Harbor_Waves.mp3",
+          mimeType: "audio/mpeg"
+        }
+      ]);
+
+      const playback = graphHarness.selectFile(0);
+      await vi.runAllTimersAsync();
+      await playback;
+
+      expect(graphHarness.fetchSpy).not.toHaveBeenCalled();
+      expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
+      expect(
+        graphHarness.audioCtxCreateSourceSpy.mock.results[0].value.start
+      ).toHaveBeenCalledWith(0);
+      expect(graphHarness.idbStore.get(fileId).lastAccessed).toBeGreaterThan(
+        initialAccessed
+      );
     });
 
     it("crossfades between independent score sources and cleans up the outgoing loop", () => {
@@ -567,6 +607,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
         }
       });
       const tensionScoreId = "tension-score-drive-id";
+      cueHarness.AudioCache.memoryStore.set(tensionScoreId, new ArrayBuffer(8));
       cueHarness.renderManifest([
         {
           id: tensionScoreId,
@@ -575,7 +616,6 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           mimeType: "audio/mpeg"
         }
       ]);
-      cueHarness.AudioCache.memoryStore.set(tensionScoreId, new ArrayBuffer(8));
       cueHarness.TabletopMixer.init();
       cueHarness.pollLatestAudioCue();
 
@@ -648,6 +688,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           timestamp: 1730500000004
         }
       });
+      cueHarness.AudioCache.memoryStore.set(scoreId, new ArrayBuffer(8));
       cueHarness.renderManifest([
         {
           id: scoreId,
@@ -656,7 +697,6 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           mimeType: "audio/mpeg"
         }
       ]);
-      cueHarness.AudioCache.memoryStore.set(scoreId, new ArrayBuffer(8));
 
       cueHarness.pollLatestAudioCue();
       expect(cueHarness.TabletopMixer.ctx).toBeNull();

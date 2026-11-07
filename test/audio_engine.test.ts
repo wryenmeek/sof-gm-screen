@@ -2,6 +2,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
 
+async function waitForAudioPlayback(playback: Promise<unknown>) {
+  await vi.runAllTimersAsync();
+  await playback;
+}
+
 describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", () => {
   let AudioCache: any;
   let TabletopMixer: any;
@@ -63,7 +68,9 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       expect(idbOpenSpy).toHaveBeenCalledWith("sof_audio_cache_v1", 1);
       expect(idbStore.get(fileId)?.byteLength).toBe(512);
 
-      const loaded = await AudioCache.get(fileId);
+      const loadedPromise = AudioCache.get(fileId);
+      await vi.runAllTimersAsync();
+      const loaded = await loadedPromise;
       expect(loaded?.byteLength).toBe(512);
 
       const preCachePromise = AudioCache.preCacheManifest([
@@ -159,6 +166,172 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
         "Audio: 2/2 ready"
       );
     });
+
+    it("awaits durable Session Asset access-time persistence until its transaction commits", async () => {
+      const delayedHarness = setupClientHarness({
+        deferIdbTransactionCompletion: true
+      });
+      const fileId = "delayed-access-audio";
+      const initialAccessed = Date.now() - 5000;
+      const buffer = new ArrayBuffer(8);
+      delayedHarness.idbStore.set(fileId, {
+        fileId,
+        buffer,
+        lastAccessed: initialAccessed,
+        byteLength: buffer.byteLength
+      });
+
+      let resolved = false;
+      const getPromise = delayedHarness.AudioCache.get(fileId).then(
+        (value: ArrayBuffer) => {
+          resolved = true;
+          return value;
+        }
+      );
+
+      await vi.runAllTimersAsync();
+      expect(resolved).toBe(false);
+      delayedHarness.completeIdbTransactions();
+      expect(await getPromise).toBe(buffer);
+      expect(delayedHarness.idbStore.get(fileId).lastAccessed).toBeGreaterThan(
+        initialAccessed
+      );
+    });
+
+    it("keeps a cached Session Asset available when its access-time transaction aborts", async () => {
+      const abortedHarness = setupClientHarness({
+        abortIdbTransactions: true
+      });
+      const fileId = "aborted-access-audio";
+      const buffer = new ArrayBuffer(16);
+      abortedHarness.AudioCache.memoryStore.set(fileId, {
+        fileId,
+        buffer,
+        lastAccessed: Date.now() - 1000,
+        byteLength: buffer.byteLength
+      });
+
+      const getPromise = abortedHarness.AudioCache.get(fileId);
+      await vi.runAllTimersAsync();
+      expect(await getPromise).toBe(buffer);
+
+      const preCachePromise = abortedHarness.AudioCache.preCacheSessionAudio([
+        { id: fileId, name: "Cached_Ambience.mp3", mimeType: "audio/mpeg" }
+      ]);
+      await vi.runAllTimersAsync();
+      expect(await preCachePromise).toBe(1);
+      expect(abortedHarness.fetchSpy).not.toHaveBeenCalled();
+
+      const putPromise = abortedHarness.AudioCache.putTrack(
+        "aborted-put-audio",
+        buffer
+      );
+      const putAssertion = expect(putPromise).rejects.toThrow(
+        "IndexedDB audio cache transaction failed"
+      );
+      await vi.runAllTimersAsync();
+      await putAssertion;
+    });
+
+    it("retries zero-byte or failed cached Session Assets instead of counting them ready", async () => {
+      const retryHarness = setupClientHarness();
+      const zeroId = "zero-byte-audio";
+      retryHarness.idbStore.set(zeroId, {
+        fileId: zeroId,
+        buffer: new ArrayBuffer(0),
+        lastAccessed: Date.now(),
+        byteLength: 0
+      });
+
+      const zeroCacheCheck = retryHarness.AudioCache.has(zeroId);
+      await vi.runAllTimersAsync();
+      expect(await zeroCacheCheck).toBe(false);
+
+      retryHarness.fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(128)
+      });
+      const zeroCachePromise = retryHarness.AudioCache.preCacheSessionAudio([
+        { id: zeroId, name: "Harbor_Waves.mp3", mimeType: "audio/mpeg" }
+      ]);
+      await vi.runAllTimersAsync();
+      expect(await zeroCachePromise).toBe(1);
+      expect(retryHarness.fetchSpy).toHaveBeenCalledTimes(1);
+
+      const retryId = "retry-after-fetch-failure";
+      retryHarness.fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          arrayBuffer: async () => new ArrayBuffer(0)
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(64)
+        });
+      const failedFetchPromise = retryHarness.AudioCache.preCacheSessionAudio([
+        { id: retryId, name: "Tension_Theme.mp3", mimeType: "audio/mpeg" }
+      ]);
+      await vi.runAllTimersAsync();
+      expect(await failedFetchPromise).toBe(0);
+
+      const failedCacheCheck = retryHarness.AudioCache.has(retryId);
+      await vi.runAllTimersAsync();
+      expect(await failedCacheCheck).toBe(false);
+
+      const retryPromise = retryHarness.AudioCache.preCacheSessionAudio([
+        { id: retryId, name: "Tension_Theme.mp3", mimeType: "audio/mpeg" }
+      ]);
+      await vi.runAllTimersAsync();
+      expect(await retryPromise).toBe(1);
+      expect(retryHarness.fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps concurrent Drive fetches for one Session Asset isolated across OAuth credentials", async () => {
+      const authHarness = setupClientHarness();
+      const resolveFetches: Array<(response: any) => void> = [];
+      authHarness.fetchSpy.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveFetches.push(resolve);
+          })
+      );
+      const fileId = "same-drive-audio";
+      const placeholderRequest = authHarness.AudioCache.fetchDriveAudioBearer(
+        fileId,
+        "session-oauth-token"
+      );
+      const authenticatedRequest = authHarness.AudioCache.fetchDriveAudioBearer(
+        fileId,
+        "real-token-for-test"
+      );
+
+      expect(authHarness.fetchSpy).toHaveBeenCalledTimes(2);
+      expect(authHarness.fetchSpy).toHaveBeenNthCalledWith(
+        1,
+        "https://www.googleapis.com/drive/v3/files/same-drive-audio?alt=media",
+        { headers: { Authorization: "Bearer session-oauth-token" } }
+      );
+      expect(authHarness.fetchSpy).toHaveBeenNthCalledWith(
+        2,
+        "https://www.googleapis.com/drive/v3/files/same-drive-audio?alt=media",
+        { headers: { Authorization: "Bearer real-token-for-test" } }
+      );
+
+      const placeholderBuffer = new ArrayBuffer(16);
+      const authenticatedBuffer = new ArrayBuffer(32);
+      resolveFetches[0]({
+        ok: true,
+        arrayBuffer: async () => placeholderBuffer
+      });
+      resolveFetches[1]({
+        ok: true,
+        arrayBuffer: async () => authenticatedBuffer
+      });
+      await vi.runAllTimersAsync();
+      await expect(
+        Promise.all([placeholderRequest, authenticatedRequest])
+      ).resolves.toEqual([placeholderBuffer, authenticatedBuffer]);
+    });
   });
 
   describe("Ticket 05 & 20: Web Audio API 3-Channel Mixer, Auto-Routing, Master Compressor & SFX Ducking", () => {
@@ -214,18 +387,14 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           mimeType: "audio/wav"
         }
       ]);
-      const ambiencePlayback = selectFile(0);
-      await vi.runAllTimersAsync();
-      await ambiencePlayback;
+      await waitForAudioPlayback(selectFile(0));
       expect(
         TabletopMixer.timeline.some(
           (e: any) =>
             e.eventType === "LOOP" && e.track === "[Ambience] Ocean_Waves.mp3"
         )
       ).toBe(true);
-      const sfxPlayback = selectFile(1);
-      await vi.runAllTimersAsync();
-      await sfxPlayback;
+      await waitForAudioPlayback(selectFile(1));
       expect(
         TabletopMixer.timeline.some(
           (e: any) =>
@@ -257,9 +426,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
           mimeType: "audio/mpeg"
         }
       ]);
-      const ambiencePlayback = graphHarness.selectFile(0);
-      await vi.runAllTimersAsync();
-      await ambiencePlayback;
+      await waitForAudioPlayback(graphHarness.selectFile(0));
 
       expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);
       const ambienceSource =
@@ -302,7 +469,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
       ).toBe(true);
     });
 
-    it("plays an IndexedDB-cached manifest track selected before cache hydration finishes", async () => {
+    it("plays a cached Session Asset selected from IndexedDB before audio-cache hydration finishes", async () => {
       const graphHarness = setupClientHarness();
       graphHarness.TabletopMixer.init();
       const fileId = "idb-only-ambient-track";
@@ -322,9 +489,7 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
         }
       ]);
 
-      const playback = graphHarness.selectFile(0);
-      await vi.runAllTimersAsync();
-      await playback;
+      await waitForAudioPlayback(graphHarness.selectFile(0));
 
       expect(graphHarness.fetchSpy).not.toHaveBeenCalled();
       expect(graphHarness.audioCtxDecodeSpy).toHaveBeenCalledTimes(1);

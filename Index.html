@@ -1570,7 +1570,15 @@
           };
         },
         async has(fileId) {
-          if (this.memoryStore.has(fileId)) return true;
+          if (this.memoryStore.has(fileId)) {
+            const normalized = this.normalizeRecord_(
+              fileId,
+              this.memoryStore.get(fileId)
+            );
+            return Boolean(
+              normalized.buffer && normalized.buffer.byteLength > 0
+            );
+          }
           const db = await this.openDb_();
           if (!db) return false;
           return new Promise((resolve) => {
@@ -1578,8 +1586,12 @@
               const tx = db.transaction(this.storeName, "readonly");
               const store = tx.objectStore(this.storeName);
               const req = store.get(fileId);
-              req.onsuccess = () =>
-                resolve(req.result !== undefined && req.result !== null);
+              req.onsuccess = () => {
+                const normalized = this.normalizeRecord_(fileId, req.result);
+                resolve(
+                  Boolean(normalized.buffer && normalized.buffer.byteLength > 0)
+                );
+              };
               req.onerror = () => resolve(false);
             } catch (_e) {
               resolve(false);
@@ -1606,9 +1618,21 @@
           }
           if (record === undefined || record === null) return undefined;
           const normalized = this.normalizeRecord_(fileId, record, Date.now());
+          if (!normalized.buffer || normalized.buffer.byteLength === 0) {
+            this.memoryStore.delete(fileId);
+            return undefined;
+          }
           normalized.lastAccessed = Date.now();
           this.memoryStore.set(fileId, normalized);
-          this.putTrack(fileId, normalized.buffer, normalized.lastAccessed);
+          try {
+            await this.putTrack(
+              fileId,
+              normalized.buffer,
+              normalized.lastAccessed
+            );
+          } catch (_e) {
+            // A recency-write failure must not turn a valid Session Asset into a miss.
+          }
           return normalized.buffer;
         },
         async putTrack(fileId, buffer, lastAccessed = Date.now()) {
@@ -1616,15 +1640,27 @@
           this.memoryStore.set(fileId, record);
           const db = await this.openDb_();
           if (!db) return record;
-          return new Promise((resolve) => {
+          return new Promise((resolve, reject) => {
+            let settled = false;
+            const fail = () => {
+              if (settled) return;
+              settled = true;
+              reject(new Error("IndexedDB audio cache transaction failed"));
+            };
             try {
               const tx = db.transaction(this.storeName, "readwrite");
+              tx.oncomplete = () => {
+                if (settled) return;
+                settled = true;
+                resolve(record);
+              };
+              tx.onerror = fail;
+              tx.onabort = fail;
               const store = tx.objectStore(this.storeName);
               const req = store.put(record, fileId);
-              req.onsuccess = () => resolve(record);
-              req.onerror = () => resolve(record);
+              req.onerror = fail;
             } catch (_e) {
-              resolve(record);
+              fail();
             }
           });
         },
@@ -1710,11 +1746,11 @@
           }
         },
         async fetchDriveAudioBearer(fileId, oauthToken) {
-          const pendingFetch = this.pendingFetches.get(fileId);
+          const token = oauthToken || this.oauthToken || "session-oauth-token";
+          const fetchKey = JSON.stringify([fileId, token]);
+          const pendingFetch = this.pendingFetches.get(fetchKey);
           if (pendingFetch) return pendingFetch;
           const fetchPromise = (async () => {
-            const token =
-              oauthToken || this.oauthToken || "session-oauth-token";
             const url =
               "https://www.googleapis.com/drive/v3/files/" +
               encodeURIComponent(fileId) +
@@ -1729,19 +1765,23 @@
                   headers: { Authorization: "Bearer " + token }
                 });
                 if (res && res.ok && typeof res.arrayBuffer === "function") {
-                  buffer = await res.arrayBuffer();
+                  const fetchedBuffer = await res.arrayBuffer();
+                  if (fetchedBuffer && fetchedBuffer.byteLength > 0) {
+                    buffer = fetchedBuffer;
+                  }
                 }
               } catch (_e) {}
             }
+            if (buffer.byteLength === 0) return undefined;
             await this.putTrack(fileId, buffer, Date.now());
             return buffer;
           })();
-          this.pendingFetches.set(fileId, fetchPromise);
+          this.pendingFetches.set(fetchKey, fetchPromise);
           try {
             return await fetchPromise;
           } finally {
-            if (this.pendingFetches.get(fileId) === fetchPromise) {
-              this.pendingFetches.delete(fileId);
+            if (this.pendingFetches.get(fetchKey) === fetchPromise) {
+              this.pendingFetches.delete(fetchKey);
             }
           }
         },
@@ -1764,17 +1804,21 @@
           let ready = 0;
           for (let i = 0; i < audioFiles.length; i++) {
             const af = audioFiles[i];
-            if (await this.has(af.id)) {
-              await this.get(af.id);
-            } else if (typeof fetchFn === "function") {
-              const bytes = await fetchFn(af);
-              await this.putTrack(af.id, bytes, Date.now());
-            } else {
-              await this.fetchDriveAudioBearer(
-                af.id,
-                (af && af.oauthToken) || this.oauthToken
-              );
+            let buffer = await this.get(af.id);
+            if (!buffer || buffer.byteLength === 0) {
+              if (typeof fetchFn === "function") {
+                buffer = await fetchFn(af);
+                if (buffer && buffer.byteLength > 0) {
+                  await this.putTrack(af.id, buffer, Date.now());
+                }
+              } else {
+                buffer = await this.fetchDriveAudioBearer(
+                  af.id,
+                  (af && af.oauthToken) || this.oauthToken
+                );
+              }
             }
+            if (!buffer || buffer.byteLength === 0) continue;
             ready++;
             if (statusEl) {
               statusEl.textContent =

@@ -1119,6 +1119,28 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       );
     });
 
+    it("logs the title returned for a created Narrative Promise", () => {
+      mocks.propsStore.set("GEMINI_API_KEY", "test-gemini-key");
+      mocks.UrlFetchApp.fetch.mockReturnValueOnce({
+        getResponseCode: () => 200,
+        getContentText: () =>
+          JSON.stringify({ tasks: [{ title: "Requested title" }] })
+      });
+      mocks.Tasks.Tasks.insert.mockReturnValueOnce({
+        id: "task_canonical",
+        title: "Canonical title returned by Tasks",
+        notes: "",
+        due: undefined,
+        status: "needsAction"
+      });
+
+      ctx.extractNarrativePromises("2026-10-31", "test-gm-key");
+
+      expect(mocks.logs).toContain(
+        "Created Task [task_canonical]: Canonical title returned by Tasks"
+      );
+    });
+
     it("normalizes relative and valid due dates and omits invalid Task timestamps", () => {
       mocks.propsStore.set("GEMINI_API_KEY", "test-gemini-key");
       mocks.UrlFetchApp.fetch.mockReturnValueOnce({

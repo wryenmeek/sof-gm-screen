@@ -1548,7 +1548,7 @@ function extractNarrativePromises(sessionDate, gmKey) {
           "Created Task [" +
             ((created && created.id) || "new") +
             "]: " +
-            taskObj.title
+            ((created && created.title) || taskObj.title)
         );
       }
       createdTasks.push(created);

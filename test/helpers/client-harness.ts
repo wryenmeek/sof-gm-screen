@@ -28,6 +28,9 @@ export interface ClientHarnessOptions {
   deferLatestAudioCue?: boolean;
   extractedPromisesResult?: any;
   audioAuthToken?: string;
+  idbPutDelayMs?: number;
+  deferIdbTransactionCompletion?: boolean;
+  abortIdbTransactions?: boolean;
   saveDelayMs?: number;
   saveError?: string;
   ruleFeedbackResult?: any;
@@ -75,51 +78,70 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   (window as any).fetch = fetchSpy;
 
   const idbStore = new Map<string, any>();
+  const deferredIdbTransactions: any[] = [];
+  const scheduleTransactionCompletion = (tx: any) => {
+    if (tx.completionScheduled) return;
+    tx.completionScheduled = true;
+    if (options.deferIdbTransactionCompletion) {
+      deferredIdbTransactions.push(tx);
+    } else {
+      setTimeout(() => {
+        const handler = options.abortIdbTransactions
+          ? tx.onabort
+          : tx.oncomplete;
+        if (handler) handler();
+      }, 0);
+    }
+  };
+  const scheduleIdbRequest = (
+    tx: any,
+    request: any,
+    action: () => void = () => {},
+    delay = 0
+  ) => {
+    setTimeout(() => {
+      action();
+      if (request.onsuccess) request.onsuccess();
+      scheduleTransactionCompletion(tx);
+    }, delay);
+    return request;
+  };
   const idbOpenSpy = vi.fn().mockImplementation(() => {
     const req: any = {
       result: {
         objectStoreNames: { contains: () => true },
         createObjectStore: vi.fn(),
-        transaction: () => ({
-          objectStore: () => ({
-            get: (key: string) => {
-              const getReq: any = { result: idbStore.get(key) };
-              setTimeout(() => getReq.onsuccess && getReq.onsuccess(), 0);
-              return getReq;
-            },
-            put: (val: any, key?: string) => {
-              const resolvedKey = key ?? (val && val.fileId);
-              if (resolvedKey) {
-                idbStore.set(resolvedKey, val);
-              }
-              const putReq: any = {};
-              setTimeout(() => putReq.onsuccess && putReq.onsuccess(), 0);
-              return putReq;
-            },
-            delete: (key: string) => {
-              idbStore.delete(key);
-              const delReq: any = {};
-              setTimeout(() => delReq.onsuccess && delReq.onsuccess(), 0);
-              return delReq;
-            },
-            clear: () => {
-              idbStore.clear();
-              const clearReq: any = {};
-              setTimeout(() => clearReq.onsuccess && clearReq.onsuccess(), 0);
-              return clearReq;
-            },
-            getAll: () => {
-              const allReq: any = { result: Array.from(idbStore.values()) };
-              setTimeout(() => allReq.onsuccess && allReq.onsuccess(), 0);
-              return allReq;
-            },
-            getAllKeys: () => {
-              const keysReq: any = { result: Array.from(idbStore.keys()) };
-              setTimeout(() => keysReq.onsuccess && keysReq.onsuccess(), 0);
-              return keysReq;
-            }
-          })
-        })
+        transaction: () => {
+          const tx: any = {
+            objectStore: () => ({
+              get: (key: string) =>
+                scheduleIdbRequest(tx, { result: idbStore.get(key) }),
+              put: (val: any, key?: string) => {
+                const resolvedKey = key ?? (val && val.fileId);
+                return scheduleIdbRequest(
+                  tx,
+                  {},
+                  () => {
+                    if (resolvedKey) idbStore.set(resolvedKey, val);
+                  },
+                  options.idbPutDelayMs || 0
+                );
+              },
+              delete: (key: string) =>
+                scheduleIdbRequest(tx, {}, () => idbStore.delete(key)),
+              clear: () => scheduleIdbRequest(tx, {}, () => idbStore.clear()),
+              getAll: () =>
+                scheduleIdbRequest(tx, {
+                  result: Array.from(idbStore.values())
+                }),
+              getAllKeys: () =>
+                scheduleIdbRequest(tx, {
+                  result: Array.from(idbStore.keys())
+                })
+            })
+          };
+          return tx;
+        }
       }
     };
     Promise.resolve().then(() => {
@@ -403,6 +425,11 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     extractNarrativePromisesSpy,
     getLatestAudioCueSpy,
     getLatestCompanionRuleQueryCueSpy,
+    completeIdbTransactions: () => {
+      deferredIdbTransactions.splice(0).forEach((tx) => {
+        if (tx.oncomplete) tx.oncomplete();
+      });
+    },
     respondToLatestAudioCue: () => {
       const respond = latestAudioCueResponses.shift();
       if (respond) respond(options.latestAudioCue);

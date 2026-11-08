@@ -4,3 +4,10 @@ dist/
 coverage/
 .vitest/
 *.log
+__pycache__/
+*.pyc
+.scratch/
+.worktrees/
+.infigraph/
+.claude/
+.agents/teamwork/

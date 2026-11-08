@@ -2,7 +2,11 @@ node_modules/
 .agents/
 dist/
 coverage/
+.vitest/
+.scratch/
+.worktrees/
 package-lock.json
 bun.lock
 bun.lockb
 .git/
+.infigraph/

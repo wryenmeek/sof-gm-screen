@@ -6,22 +6,27 @@ How the engineering skills consume this repo's domain documentation and architec
 
 - **[`GLOSSARY.md`](../../GLOSSARY.md)** at the repo root.
 - **[`CODING_STANDARDS.md`](../../CODING_STANDARDS.md)** at the repo root (lists all active ADRs with exact filenames and cross-boundary conventions).
-- **[`docs/adr/`](../adr/)**: read the numbered ADRs (`0001`–`0009`) that touch the area you're working in.
+- **[`docs/adr/`](../adr/)**: read the numbered ADRs (`0001`–`0010`) that touch the area you're working in.
 
 ## Repository layout
 
 ```text
 /
 ├── AGENTS.md
+├── CLAUDE.md
 ├── CODING_STANDARDS.md
 ├── GLOSSARY.md
 ├── Code.gs                        # Google Apps Script V8 server entrypoints & triggers
 ├── Index.html                     # GM Screen & Player Companion template, CSS & client JS
 ├── validate_session_artifacts.py  # Pre-flight validator for HTML, MD, Python & RPC contracts
+├── .github/
+│   ├── copilot-instructions.md    # GitHub Copilot context pointer
+│   └── workflows/ci.yml           # Automated quality gate workflow
 ├── scripts/
+│   ├── act/                       # Local GitHub Actions (act) runner helpers
 │   └── rpi_vad_chunker.py         # Raspberry Pi Stage 1 Silero VAD & Stage 2 3-tier classifier
 ├── docs/
-│   ├── adr/                       # Architectural Decision Records (0001–0009)
+│   ├── adr/                       # Architectural Decision Records (0001–0010)
 │   └── agents/                    # Workflow, issue tracker, triage & domain pointers
 └── test/
     ├── helpers/client-harness.ts  # Shared Happy-DOM & Web Audio / IndexedDB test harness

@@ -4,7 +4,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 ## Domain & Architecture Pointers
 
-- **Ubiquitous language:** [`GLOSSARY.md`](GLOSSARY.md). Name new functions, UI labels, test descriptions, and issue titles using the canonical terms (`Session`, `Session Asset`, `Shortcut Folder`, `GM Screen`, `Pinned Pane`, `Table Notes`, `Session Manifest`, `Encounter Dossier`, `Monster Statblock`, `Floor Map`, `Handout`, `Tabletop Mixer`, `Mood Cue`, `Audio Timeline Sidecar`, `Player Companion`, `Push-to-Talk Rules Sniffer`, `Rule Card`, `Speech Chunk`, `Attendance Quorum`, `Narrative Promise`).
+- **Ubiquitous language:** [`GLOSSARY.md`](GLOSSARY.md). Name new functions, UI labels, test descriptions, and issue titles using the canonical terms (`Session`, `Session Asset`, `Shortcut Folder`, `GM Screen`, `Pinned Pane`, `Table Notes`, `Session Manifest`, `Encounter Dossier`, `Monster Statblock`, `Floor Map`, `Handout`, `Tabletop Mixer`, `Mood Cue`, `Audio Timeline Sidecar`, `Player Companion`, `Push-to-Talk Rules Sniffer`, `Rules Glossary`, `Rule Card`, `Speech Chunk`, `Audio Cue`, `Attendance Quorum`, `Storyline Lock`, `Weather Hexflower`, `Narrative Promise`).
 - **Architectural constraints (`docs/adr/`):**
   - [`0001-google-apps-script-architecture.md`](docs/adr/0001-google-apps-script-architecture.md) — Apps Script `HtmlService` + Google Drive backend.
   - [`0002-base64-asset-inlining.md`](docs/adr/0002-base64-asset-inlining.md) — _(Superseded by ADR-0004)_.
@@ -15,6 +15,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
   - [`0007-drive-v3-bearer-fetch-indexeddb-audio-cache.md`](docs/adr/0007-drive-v3-bearer-fetch-indexeddb-audio-cache.md) — `getAudioAuthToken()` + Drive v3 `alt=media` fetch into `IndexedDB` (`sof_audio_cache_v1`) and write-ahead `localStorage` Audio Timeline Sidecar.
   - [`0008-companion-isolation-and-os-dictation-fallback.md`](docs/adr/0008-companion-isolation-and-os-dictation-fallback.md) — Server-side `?view=companion` isolation, `assertGmAccess_` RPC token guard, and native OS dictation input.
   - [`0009-edge-pi-classifier-tiered-fallback.md`](docs/adr/0009-edge-pi-classifier-tiered-fallback.md) — Edge Raspberry Pi Silero VAD chunking and 3-tier classifier failover (`Tier 1 Pi Local <= 1500ms` → `Tier 2 Gemini 2.5 Flash` → `Tier 3 Manual UI`) via `doPost(e)` + `CacheService`.
+  - [`0010-workspace-governance-quorum-and-on-demand-promises.md`](docs/adr/0010-workspace-governance-quorum-and-on-demand-promises.md) — Zero-token Wednesday Attendance Quorum audit (0-guest guard, 2d8 Weather Hexflower, managed Calendar markers) and on-demand Narrative Promise extraction with paginated Google Tasks deduplication.
 
 ## Cross-Boundary Rules
 

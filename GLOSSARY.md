@@ -73,8 +73,12 @@ The player-facing interface displaying character identity selection, voice rule 
 _Avoid_: Mobile app, player view, phone mode, mini screen.
 
 **Push-to-Talk Rules Sniffer**:
-The on-demand voice query listener activated from the Player Companion to capture a spoken rules question and match it against the campaign rules glossary.
+The on-demand voice query listener activated from the Player Companion to capture a spoken rules question and match it against the Rules Glossary.
 _Avoid_: Voice assistant, always-on mic, speech bot, rule search bar.
+
+**Rules Glossary**:
+The unified collection of 5e mechanics, spell definitions, condition summaries, and campaign lore entries indexed for instant lookup by the Player Companion and GM Screen.
+_Avoid_: Rulebook, SRD dump, lore dictionary, reference table.
 
 **Rule Card**:
 A dismissible quick-reference card displaying a matched game mechanic, spell, or condition summary with player feedback controls.
@@ -84,9 +88,21 @@ _Avoid_: Tooltip, popup, rule modal, glossary toast.
 A timestamped, voice-gated audio segment containing active table speech stripped of room silence.
 _Avoid_: Audio clip, recording slice, voice snippet, raw stream.
 
+**Audio Cue**:
+A structured intent signal derived from a classified Speech Chunk—identifying a musical shift, rules question, or table banter—dispatched to the GM Screen.
+_Avoid_: Webhook payload, intent event, voice command, classifier message.
+
 **Attendance Quorum**:
-The session readiness status calculated from player RSVPs against the campaign minimum attendance threshold and core storyline locks.
+The session readiness status calculated from player RSVPs against the campaign minimum attendance threshold and active Storyline Locks.
 _Avoid_: Headcount, invite check, RSVP tally, roster check.
+
+**Storyline Lock**:
+A designation on a player whose character is central to the upcoming session's narrative arc, requiring their confirmed attendance for Attendance Quorum to hold.
+_Avoid_: Mandatory player, VIP attendee, critical role, quorum blocker.
+
+**Weather Hexflower**:
+The campaign's maritime weather probability table rolled via 2d8 once Attendance Quorum is met to forecast sea conditions for the upcoming Session.
+_Avoid_: Weather chart, random weather table, sea forecast generator, climate roll.
 
 **Narrative Promise**:
 An in-session GM commitment—such as a pending rules adjudication, custom crafting timer, NPC favor, or plot debt—recorded in Table Notes and tracked as an actionable post-session prep task.

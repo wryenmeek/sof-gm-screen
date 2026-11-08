@@ -107,3 +107,19 @@ _Avoid_: Weather chart, random weather table, sea forecast generator, climate ro
 **Narrative Promise**:
 An in-session GM commitment—such as a pending rules adjudication, custom crafting timer, NPC favor, or plot debt—recorded in Table Notes and tracked as an actionable post-session prep task.
 _Avoid_: Todo item, reminder, action item, quest log.
+
+**GM Secret**:
+The shared authentication secret configured in Script Properties (`SOF_GM_KEY`) and passed via `gmKey` parameter or request header to guard Game Master RPCs, webhooks, and administrative actions from player exposure.
+_Avoid_: Admin password, GM token, auth code, API key.
+
+**3-Tier Classifier**:
+The tiered intent classification architecture governing Speech Chunks across Tier 1 (local Raspberry Pi edge model <= 1500ms), Tier 2 (cloud Gemini 2.5 Flash fallback), and Tier 3 (manual GM Screen UI buttons).
+_Avoid_: Classifier state machine, fallback hierarchy, intent parser.
+
+**Audio Cache**:
+The client-side IndexedDB store (`sof_audio_cache_v1`) pre-caching binary audio Session Assets from Google Drive v3 REST endpoints for zero-latency, CORS-free playback during play.
+_Avoid_: Audio storage, track database, sound buffer.
+
+**Edge Audio Manifest**:
+The local JSON catalog (`session_audio_manifest.json`) generated on the Raspberry Pi recording timestamped metadata and file paths for all sliced Speech Chunks.
+_Avoid_: Session manifest, audio log, speech list.

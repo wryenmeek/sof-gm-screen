@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
 
 async function waitForAudioPlayback(playback: Promise<unknown>) {
@@ -50,6 +50,11 @@ describe("Web Audio Engine & IndexedDB Pre-Caching (Tickets 04, 05, 06, 12)", ()
     selectFile = harness.selectFile;
     saveTableNotesSpy = harness.saveTableNotesSpy;
     mockLocalStorage = harness.mockLocalStorage;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   describe("Ticket 04 & 19: Google Drive v3 Bearer Fetch & IndexedDB Audio Pre-Caching Engine", () => {

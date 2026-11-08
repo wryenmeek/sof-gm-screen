@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import vm from "vm";
 import { setupGoogleAppsScriptMocks } from "./mocks/google-apps-script";
@@ -71,6 +71,10 @@ describe("Apps Script Server Logic (Code.gs)", () => {
 
     const code = fs.readFileSync("Code.gs", "utf8");
     vm.runInContext(code, ctx);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("constructs high-performance Google Edge CDN URLs without memory bloat", () => {

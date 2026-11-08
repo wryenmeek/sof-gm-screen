@@ -117,7 +117,8 @@ export default [
       ".gemini/**",
       "act_output.log",
       ".secrets",
-      "dist/**"
+      "dist/**",
+      "coverage/**"
     ]
   }
 ];

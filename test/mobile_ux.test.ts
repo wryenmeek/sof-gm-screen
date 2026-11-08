@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
 
 describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
@@ -27,6 +27,11 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
     logRuleFeedbackSpy = harness.logRuleFeedbackSpy;
     mockLocalStorage = harness.mockLocalStorage;
     getLastSpeechRecognitionInstance = harness.getLastSpeechRecognitionInstance;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   describe("Ticket 07 & 22: Server-Isolated Player Companion Entrypoint, Boot Identity Restore & Header", () => {

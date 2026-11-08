@@ -122,16 +122,17 @@ def check_and_fix_markdown(path, fix=False):
             content = re.sub(r"\n```$", "", content)
             modified = True
 
-    # 2. Check Homebrewery statblock pairing
+    # 2. Check Homebrewery statblock pairing if monster frame tags are present
     open_tags = len(re.findall(r"\{monster,frame", content))
-    close_tags = len(re.findall(r"\n\}", content))
-    if open_tags != close_tags:
-        issues.append(
-            f"UNBALANCED_STATBLOCK_TAGS: Found {open_tags} '{{monster,frame' but {close_tags} closing '}}'."
-        )
-        if fix and open_tags > close_tags:
-            content += "\n}\n"
-            modified = True
+    if open_tags > 0:
+        close_tags = len(re.findall(r"\n\}", content))
+        if open_tags != close_tags:
+            issues.append(
+                f"UNBALANCED_STATBLOCK_TAGS: Found {open_tags} '{{monster,frame' but {close_tags} closing '}}'."
+            )
+            if fix and open_tags > close_tags:
+                content += "\n}\n"
+                modified = True
 
     # 3. Check for absolute local paths (except in agent skill docs that document file:// link syntax)
     rel_norm = path.replace("\\", "/")
@@ -390,4 +391,4 @@ if __name__ == "__main__":
         sys.exit(0 if ok else 1)
 
     success = validate_directory(args.path, fix=args.fix)
-    sys.exit(0 if (success or args.fix) else 1)
+    sys.exit(0 if success else 1)

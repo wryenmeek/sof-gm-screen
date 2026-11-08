@@ -1,23 +1,21 @@
 # Agent Guidelines
 
-## Agent skills
+## Engineering Workflow
 
-### Engineering workflow
+Follow the end-to-end flow from initiative to merged PR in [`docs/agents/workflow.md`](docs/agents/workflow.md) before planning, speccing, ticketing, or implementing work.
 
-End-to-end flow for charting foggy initiatives (`wayfinder`), grilling designs (`grill-with-docs`), publishing specs (`to-spec`) and tracer-bullet tickets (`to-tickets`), implementing via TDD worktrees (`implement`, `implement-spec`), and running two-axis reviews (`code-review`). Read `docs/agents/workflow.md` before planning, speccing, ticketing, or implementing work.
+## Issue Tracker & Dependencies
 
-### Issue tracker
+Read [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) when creating, reading, querying, or linking specs, tickets, sub-issues, and native GitHub `blocked_by` dependencies via `gh`.
 
-Issues and specs for this repo live as GitHub issues. See `docs/agents/issue-tracker.md`.
+## Repository Labels
 
-### Triage labels
+Consult [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) for canonical triage and workflow labels.
 
-Canonical triage roles mapped 1:1 (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+## Domain Architecture & Coding Standards
 
-### Domain docs & coding standards
+Consult [`GLOSSARY.md`](GLOSSARY.md) for canonical vocabulary and [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for active ADRs (`docs/adr/`) and cross-boundary rules. See [`docs/agents/domain.md`](docs/agents/domain.md) for domain documentation conventions.
 
-Single-context layout (`GLOSSARY.md`, `CODING_STANDARDS.md`, and `docs/adr/` at repo root). See `docs/agents/domain.md` and `CODING_STANDARDS.md`.
+## Quality Gate & Local Verification
 
-### Quality gate & local CI verification
-
-Run `npm run check` before committing or opening a PR; `.githooks/pre-commit` enforces this automatically (`bun install` sets `core.hooksPath`). To verify `.github/workflows/ci.yml` locally in Docker with `act`, run `bash scripts/act/install-act.sh` (if missing) and `bash scripts/act/run-act.sh "push -j check"`.
+Run `npm run check` before committing changes or opening a PR; `.githooks/pre-commit` enforces this automatically. To verify the full `.github/workflows/ci.yml` pipeline locally in Docker, run `bash scripts/act/install-act.sh` (if `act` is missing) and `bash scripts/act/run-act.sh "push -j check"`.

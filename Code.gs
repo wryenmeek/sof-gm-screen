@@ -290,19 +290,25 @@ function getTableNotes(sessionDate, gmKey) {
  */
 function saveTableNotes(sessionDate, content, gmKey) {
   assertGmAccess_(gmKey);
-  const folder = resolveSessionFolder_(sessionDate);
-  const files = folder.getFilesByName("table_notes.md");
-  let file;
-  if (files.hasNext()) {
-    file = files.next();
-    file.setContent(content);
-  } else {
-    file = folder.createFile("table_notes.md", content, "text/markdown");
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const folder = resolveSessionFolder_(sessionDate);
+    const files = folder.getFilesByName("table_notes.md");
+    let file;
+    if (files.hasNext()) {
+      file = files.next();
+      file.setContent(content);
+    } else {
+      file = folder.createFile("table_notes.md", content, "text/markdown");
+    }
+    return {
+      id: file.getId(),
+      updated: new Date().toLocaleTimeString()
+    };
+  } finally {
+    lock.releaseLock();
   }
-  return {
-    id: file.getId(),
-    updated: new Date().toLocaleTimeString()
-  };
 }
 
 /**
@@ -1038,7 +1044,7 @@ function mergeQuorumDescription_(event, automationText) {
   const sectionRegex = new RegExp(startMarker + "[\\s\\S]*?" + endMarker);
   return sectionRegex.test(original)
     ? original.replace(sectionRegex, section)
-    : [original.replace(/\\s+$/, ""), section].filter(Boolean).join("\n\n");
+    : [original.trimEnd(), section].filter(Boolean).join("\n\n");
 }
 
 function updateQuorumDescription_(event, automationText) {
@@ -1276,7 +1282,7 @@ function runCalendarQuorumAudit_(targetDate, inGameContext, isScheduled) {
     const nextStart = shiftCalendarDateByDays_(start, 14, calendarTimeZone);
     const nextEnd = shiftCalendarDateByDays_(end, 14, calendarTimeZone);
     const note =
-      "[RESCHEDULED: Quorum < 3 confirmed players or locked player unavailable (" +
+      "[RESCHEDULED: Quorum < 3 confirmed players or Storyline Lock unavailable (" +
       confirmed.length +
       "/3)] Shifted to next alternate Saturday.";
     const description = mergeQuorumDescription_(event, note);
@@ -1640,15 +1646,11 @@ function doPost(e) {
   }
 }
 
-/**
- * Ticket 26: Returns the latest cached audio intent cue from CacheService for GM Screen polling.
- */
-function getLatestAudioCue(gmKey) {
-  assertGmAccess_(gmKey);
+function getCachedJson_(key) {
   if (typeof CacheService === "undefined" || !CacheService.getScriptCache) {
     return null;
   }
-  const raw = CacheService.getScriptCache().get("sof_latest_audio_cue");
+  const raw = CacheService.getScriptCache().get(key);
   if (!raw) {
     return null;
   }
@@ -1660,35 +1662,31 @@ function getLatestAudioCue(gmKey) {
 }
 
 /**
+ * Ticket 26: Returns the latest cached audio intent cue from CacheService for GM Screen polling.
+ */
+function getLatestAudioCue(gmKey) {
+  assertGmAccess_(gmKey);
+  return getCachedJson_("sof_latest_audio_cue");
+}
+
+/**
  * Returns only a player-safe Rule Query cue, never GM-only audio manifest data.
  */
 function getLatestRuleQueryCueForCompanion() {
-  if (typeof CacheService === "undefined" || !CacheService.getScriptCache) {
+  const cue = getCachedJson_("sof_latest_companion_rule_query");
+  if (
+    !cue ||
+    cue.intent !== "RULE_QUERY" ||
+    typeof cue.rule !== "string" ||
+    !cue.rule.trim()
+  ) {
     return null;
   }
-  const raw = CacheService.getScriptCache().get(
-    "sof_latest_companion_rule_query"
-  );
-  if (!raw) return null;
-
-  try {
-    const cue = JSON.parse(raw);
-    if (
-      !cue ||
-      cue.intent !== "RULE_QUERY" ||
-      typeof cue.rule !== "string" ||
-      !cue.rule.trim()
-    ) {
-      return null;
-    }
-    return {
-      intent: "RULE_QUERY",
-      rule: cue.rule.trim().slice(0, 200),
-      timestamp: Number.isFinite(cue.timestamp) ? cue.timestamp : null
-    };
-  } catch (_e) {
-    return null;
-  }
+  return {
+    intent: "RULE_QUERY",
+    rule: cue.rule.trim().slice(0, 200),
+    timestamp: Number.isFinite(cue.timestamp) ? cue.timestamp : null
+  };
 }
 
 /**

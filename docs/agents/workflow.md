@@ -55,11 +55,11 @@ Read [`.agents/skills/to-tickets/SKILL.md`](../../.agents/skills/to-tickets/SKIL
 
 Choose single-ticket or orchestrated execution:
 
-- **Single ticket (`implement`):** Read [`.agents/skills/implement/SKILL.md`](../../.agents/skills/implement/SKILL.md) and [`.agents/skills/tdd/SKILL.md`](../../.agents/skills/tdd/SKILL.md). Fetch the unblocked ticket via `gh issue view <n> --comments`, build via red-green-refactor vertical slices, run `npm run check` (`lint`, `typecheck`, `test`, `validate`), run `code-review`, and commit.
+- **Single ticket (`implement`):** Read [`.agents/skills/implement/SKILL.md`](../../.agents/skills/implement/SKILL.md) and [`.agents/skills/tdd/SKILL.md`](../../.agents/skills/tdd/SKILL.md). Fetch the unblocked ticket via `gh issue view <n> --comments`, build via red-green-refactor vertical slices, run `npm run check`, run `code-review`, and commit.
 - **Full spec task graph (`implement-spec`):** Read [`.agents/skills/implement-spec/SKILL.md`](../../.agents/skills/implement-spec/SKILL.md).
   1. Create an integration branch off `main`.
   2. For each unblocked frontier ticket, launch a fresh implementer subagent in an isolated git worktree on its own branch driving `tdd`.
-  3. Merge completed ticket branches into the integration branch via a merger subagent, advancing the frontier.
+  3. Merge completed ticket branches into the integration branch via a merger subagent, advancing the frontier. _(Never run git merge from inside a child worktree; perform all branch merges from the root repository or integration worktree)._
   4. Run `code-review` across the integration branch and remediate all findings in a fresh implementer subagent.
 - **Completion criterion:** Every acceptance criterion on the ticket(s) is genuinely implemented (no stubbed acceptance criteria), `npm run check` passes 100%, and `code-review` reports zero unresolved violations.
 
@@ -68,6 +68,7 @@ Choose single-ticket or orchestrated execution:
 - **Two-axis review (`code-review`):** Read [`.agents/skills/code-review/SKILL.md`](../../.agents/skills/code-review/SKILL.md). Spawn two parallel subagents (**Standards** + **Spec**) against `git diff <base>...HEAD` and aggregate their reports side by side.
 - **Pull request (`pr`):** Read [`.agents/skills/pr/SKILL.md`](../../.agents/skills/pr/SKILL.md) when opening or updating a PR.
 - **Retrospective (`retro`):** Read [`.agents/skills/retro/SKILL.md`](../../.agents/skills/retro/SKILL.md) after a build to turn mechanical mistakes into deterministic checks (`npm run check`) and judgement calls into documented standards.
+- **Completion criterion:** Two-axis code review reports zero unresolved findings, PR is opened/updated with all CI checks passing (and verified locally via `run-act.sh` if Docker is available), and persistent repository improvements are committed.
 
 ## On-ramps onto the main flow
 

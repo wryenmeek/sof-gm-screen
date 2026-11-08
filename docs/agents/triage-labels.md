@@ -1,13 +1,16 @@
-# Triage Labels
+# Repository Issue Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the label strings used in this repo's GitHub issue tracker.
+Label dictionary for triage, workflow orchestration, and subagent filtering across GitHub issues.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
-
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+| Label                | Role     | Usage                                                            |
+| -------------------- | -------- | ---------------------------------------------------------------- |
+| `needs-triage`       | Triage   | Incoming issue requiring maintainer review                       |
+| `needs-info`         | Triage   | Awaiting clarification or repro details from reporter            |
+| `ready-for-agent`    | Intake   | Fully specified spec or unblocked implementation ticket          |
+| `ready-for-human`    | Intake   | Tasks requiring human credentials or physical device interaction |
+| `wontfix`            | Terminal | Discarded or out-of-scope issue                                  |
+| `wayfinder:map`      | Workflow | Parent initiative map tracking decision tickets                  |
+| `wayfinder:research` | Workflow | Child research spike conducted on a research branch              |
+| `prototype`          | Workflow | Throwaway spike branch testing runnable behavior                 |
+| `grilling`           | Workflow | HITL design interview session ticket                             |
+| `task`               | Workflow | Scoped execution step within a Wayfinder map                     |

@@ -2,6 +2,10 @@
 <html>
   <head>
     <base target="_top" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -398,12 +402,22 @@
         font-family: "Fira Code", monospace;
       }
 
+      body.companion-only-mode {
+        height: auto;
+        min-height: 100dvh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
       #player-hud {
         display: none;
         flex-direction: column;
         width: 100%;
         min-height: 100vh;
-        padding: 16px;
+        padding: max(16px, env(safe-area-inset-top))
+          max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
         background: var(--bg);
         color: var(--text);
         gap: 16px;
@@ -430,6 +444,14 @@
         flex-wrap: wrap;
       }
 
+      .id-btn,
+      #rule-card button {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 8px 14px;
+        font-size: 14px;
+      }
+
       #ptt-btn {
         background: #1d4ed8;
         color: #ffffff;
@@ -438,6 +460,7 @@
         padding: 16px;
         border-radius: 10px;
         border: none;
+        min-height: 44px;
       }
       #ptt-btn.listening {
         background: var(--dnd-red);
@@ -446,8 +469,8 @@
       #rule-card {
         display: none;
         position: fixed;
-        right: 20px;
-        bottom: 20px;
+        right: max(20px, env(safe-area-inset-right));
+        bottom: max(20px, calc(env(safe-area-inset-bottom) + 12px));
         z-index: 1000;
         max-width: 420px;
         width: calc(100% - 40px);
@@ -666,7 +689,12 @@
         >
       </header>
 
-      <div id="identity-modal" class="id-modal">
+      <div
+        id="identity-modal"
+        class="id-modal"
+        role="region"
+        aria-label="Player Identity Selection"
+      >
         <button
           class="id-btn"
           data-player="Pog"
@@ -709,7 +737,6 @@
         id="ptt-dictation-input"
         placeholder="🎙️ Tap & Dictate or Type Rule..."
         oninput="handleDictationInput(this.value)"
-        onkeydown="handleDictationKeydown(event)"
         style="
           width: 100%;
           background: #0f172a;
@@ -721,10 +748,17 @@
         "
       />
 
-      <button id="ptt-btn" onclick="triggerPtt()">🎙️ Tap to Ask Rule</button>
+      <button id="ptt-btn" onclick="triggerPtt()" aria-pressed="false">
+        🎙️ Tap to Ask Rule
+      </button>
     </div>
 
-    <div id="rule-card">
+    <div
+      id="rule-card"
+      role="region"
+      aria-live="polite"
+      aria-labelledby="card-title"
+    >
       <h2 id="card-title">Rule Title</h2>
       <div id="card-type">Mechanic</div>
       <p id="card-text">Rule description...</p>
@@ -1113,9 +1147,15 @@
         let filtered = allFiles;
         if (q) {
           if (miniSearch) {
-            const hits = miniSearch.search(q);
-            const hitMap = new Map(allFiles.map((f) => [f.id, f]));
-            filtered = hits.map((h) => hitMap.get(h.id)).filter(Boolean);
+            try {
+              const hits = miniSearch.search(q);
+              const hitMap = new Map(allFiles.map((f) => [f.id, f]));
+              filtered = hits.map((h) => hitMap.get(h.id)).filter(Boolean);
+            } catch (_e) {
+              filtered = allFiles.filter((f) =>
+                f.name.toLowerCase().includes(q)
+              );
+            }
           } else {
             filtered = allFiles.filter((f) => f.name.toLowerCase().includes(q));
           }
@@ -1417,7 +1457,13 @@
           .getTableNotes(currentSessionDate, ...(gmKey ? [gmKey] : []));
       }
 
+      let notesSaveInFlight_ = false;
+
       function saveTableNotes_() {
+        if (notesSaveInFlight_) {
+          return Promise.resolve({ status: "in_flight" });
+        }
+        notesSaveInFlight_ = true;
         const tableNotesEl = document.getElementById("scratchpad");
         const content = tableNotesEl ? tableNotesEl.value : "";
         const status = document.getElementById("save-status");
@@ -1428,6 +1474,7 @@
         return new Promise((resolve, reject) => {
           google.script.run
             .withSuccessHandler((res) => {
+              notesSaveInFlight_ = false;
               if (status) status.textContent = "Saved at " + res.updated;
               if (res.id && cache[res.id]) {
                 delete cache[res.id];
@@ -1436,6 +1483,7 @@
               resolve(res);
             })
             .withFailureHandler((error) => {
+              notesSaveInFlight_ = false;
               if (status) {
                 status.textContent =
                   "Save failed: " +
@@ -1642,9 +1690,20 @@
           if (!db) return record;
           return new Promise((resolve, reject) => {
             let settled = false;
-            const fail = () => {
+            const fail = (err) => {
               if (settled) return;
               settled = true;
+              const errName =
+                (err &&
+                  (err.name ||
+                    (err.target &&
+                      err.target.error &&
+                      err.target.error.name))) ||
+                "";
+              if (errName === "QuotaExceededError") {
+                resolve(record);
+                return;
+              }
               reject(new Error("IndexedDB audio cache transaction failed"));
             };
             try {
@@ -1659,8 +1718,8 @@
               const store = tx.objectStore(this.storeName);
               const req = store.put(record, fileId);
               req.onerror = fail;
-            } catch (_e) {
-              fail();
+            } catch (err) {
+              fail(err);
             }
           });
         },
@@ -2172,7 +2231,8 @@
 
       function activateMixerFromUserGesture_() {
         if (isCompanionMode_()) return null;
-        if (!activeMixer.ctx) activeMixer.init();
+        if (!activeMixer.ctx || activeMixer.ctx.state === "closed")
+          activeMixer.init();
         const ctx = activeMixer.ctx;
         if (!ctx) return null;
 
@@ -2195,11 +2255,15 @@
 
       function installAudioUnlockHandler_() {
         if (isCompanionMode_()) return;
-        document.addEventListener(
-          "pointerdown",
-          activateMixerFromUserGesture_,
-          { passive: true }
-        );
+        const unlock = () => {
+          activateMixerFromUserGesture_();
+          if (activeMixer.ctx && activeMixer.ctx.state === "running") {
+            document.removeEventListener("pointerdown", unlock);
+            document.removeEventListener("keydown", unlock);
+          }
+        };
+        document.addEventListener("pointerdown", unlock, { passive: true });
+        document.addEventListener("keydown", unlock, { passive: true });
       }
 
       function findScoreAssetForMood_(mood) {
@@ -2492,30 +2556,32 @@
           indexRulesGlossary_([]);
         }
         if (rulesMiniSearch) {
-          const hits = rulesMiniSearch.search(query, {
-            prefix: true,
-            fuzzy: 0.2,
-            boost: { title: 3.0, tags: 2.0, summary: 1.0 }
-          });
-          if (hits && hits.length > 0) {
-            const top = hits[0];
-            return {
-              key: top.id || top.title.toLowerCase(),
-              id: top.id,
-              title: top.title,
-              source: top.source || "Core Mechanic",
-              summary: top.summary,
-              text: top.summary,
-              entry: {
+          try {
+            const hits = rulesMiniSearch.search(query, {
+              prefix: true,
+              fuzzy: 0.2,
+              boost: { title: 3.0, tags: 2.0, summary: 1.0 }
+            });
+            if (hits && hits.length > 0) {
+              const top = hits[0];
+              return {
+                key: top.id || top.title.toLowerCase(),
                 id: top.id,
                 title: top.title,
-                type: top.source || "Core Mechanic",
                 source: top.source || "Core Mechanic",
                 summary: top.summary,
-                text: top.summary
-              }
-            };
-          }
+                text: top.summary,
+                entry: {
+                  id: top.id,
+                  title: top.title,
+                  type: top.source || "Core Mechanic",
+                  source: top.source || "Core Mechanic",
+                  summary: top.summary,
+                  text: top.summary
+                }
+              };
+            }
+          } catch (_e) {}
         }
         const lower = query.toLowerCase();
         const keys = Object.keys(DEFAULT_GLOSSARY);
@@ -2858,9 +2924,14 @@
         const gmKey = companionMode ? "" : getClientGmKey_();
         audioCuePollInFlight_ = true;
         let completed = false;
+        let watchdogTimer = null;
         const finishRequest = (cue, succeeded) => {
           if (completed) return;
           completed = true;
+          if (watchdogTimer !== null) {
+            clearTimeout(watchdogTimer);
+            watchdogTimer = null;
+          }
           audioCuePollInFlight_ = false;
           try {
             if (
@@ -2873,6 +2944,7 @@
             scheduleNextAudioCuePoll_();
           }
         };
+        watchdogTimer = setTimeout(() => finishRequest(null, false), 45000);
 
         try {
           const runner = google.script.run.withSuccessHandler((cue) =>
@@ -2907,7 +2979,6 @@
           handleAudioIntent_(event.data.payload);
         }
       });
-      window.addEventListener("load", pollLatestAudioCue_);
     </script>
   </body>
 </html>

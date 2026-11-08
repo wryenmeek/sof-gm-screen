@@ -1,6 +1,6 @@
 # Client-Side In-Memory MiniSearch Tactical Engine
 
-In-session full-text search across session dossiers, creature statblocks, rules cards, and narrative notes is implemented directly in the browser client using [MiniSearch](https://github.com/lucaong/minisearch) running in memory over session manifest payloads, rather than compiling an offline SQLite database and synchronizing binary blobs via WASM (`sql.js`) over Google Apps Script Base64 RPCs.
+In-session full-text search across session dossiers, creature statblocks, floor maps, and handouts is implemented directly in the browser client using [MiniSearch](https://github.com/lucaong/minisearch) running in memory over session manifest payloads, rather than compiling an offline SQLite database and synchronizing binary blobs via WASM (`sql.js`) over Google Apps Script Base64 RPCs.
 
 ## Context & Problem
 
@@ -17,3 +17,4 @@ We adopt client-side in-memory **MiniSearch** directly in `Index.html`:
 2. **BM25+ Ranking & Field Boosting:** Leverages BM25+ non-linear term frequency scaling and field-length normalization with multi-field weighting (e.g., boosting `title` and `tags` over ambient narrative text).
 3. **Prefix & Fuzzy Search:** Supports instant prefix completion and Levenshtein distance fuzzy matching in a ~7KB minified bundle with zero WebAssembly or external binary dependencies.
 4. **Separation of Concerns:** Live tactical lookups are handled by in-memory MiniSearch in the browser, while deep multi-year campaign analytics and embedding pipelines remain assigned to offline DuckDB scripts.
+5. **Dual-Index Architecture:** Manifest Session Assets are indexed in `miniSearch`, while Rules Glossary mechanics and campaign lore lookups are isolated into a dedicated `rulesMiniSearch` instance.

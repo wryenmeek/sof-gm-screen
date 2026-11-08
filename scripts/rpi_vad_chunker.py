@@ -15,6 +15,7 @@ import json
 import math
 import multiprocessing
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -106,17 +107,14 @@ class Stage1VadChunker:
             self.elapsed_ms = max(self.elapsed_ms, saved_elapsed)
             self.last_audio_end_ms = saved_end
 
-        import re
-
-        sequence_numbers = []
-        for filename in os.listdir(self.chunks_dir):
-            match = re.match(r"^chunk_([0-9]+)_", filename)
-            if match:
-                sequence_numbers.append(int(match.group(1)))
-        for entry in self.manifest:
-            match = re.match(r"^chunk_([0-9]+)_", str(entry.get("chunk", "")))
-            if match:
-                sequence_numbers.append(int(match.group(1)))
+        names = list(os.listdir(self.chunks_dir)) + [
+            str(entry.get("chunk", "")) for entry in self.manifest
+        ]
+        sequence_numbers = [
+            int(m.group(1))
+            for name in names
+            if (m := re.match(r"^chunk_([0-9]+)_", name))
+        ]
         self.chunk_counter = max(sequence_numbers, default=0)
 
     @staticmethod

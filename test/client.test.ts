@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
 
 describe("Client-Side Logic (Index.html)", () => {
@@ -46,6 +46,10 @@ describe("Client-Side Logic (Index.html)", () => {
     tokenizeStatblockAndDossier = harness.tokenizeStatblockAndDossier;
     indexFilePayload = harness.indexFilePayload;
     updateSearchIndexWithContent = harness.updateSearchIndexWithContent;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe("MiniSearch Manifest Indexing (Ticket 02 / #16)", () => {

@@ -36,3 +36,9 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 4. **Single Test Harness Seam (`test/helpers/client-harness.ts`, `test/mocks/google-apps-script.ts`):**
    Route all client DOM, Web Audio, `IndexedDB`, and `google.script.run` test setup through [`setupClientHarness`](test/helpers/client-harness.ts) and all server VM mocks through [`setupGoogleAppsScriptMocks`](test/mocks/google-apps-script.ts). When adding a new top-level client function in `Index.html` that tests exercise directly, export it in `setupClientHarness`'s return block.
+
+5. **Web Audio Linear Gain Ramping (`Index.html`):**
+   Always use `linearRampToValueAtTime` (paired with `setValueAtTime`) when fading audio to or from zero gain. The Web Audio specification throws a fatal `DOMException` if `exponentialRampToValueAtTime(0, ...)` is called or if ramping starts from an initial value of `0`.
+
+6. **Webhook JSON Error Contract (`Code.gs`):**
+   Apps Script `doPost(e)` handlers must wrap execution in top-level try/catch blocks and return structured JSON responses via `ContentService.createTextOutput(...).setMimeType(ContentService.MimeType.JSON)` rather than permitting unhandled exceptions to generate Google HTML error pages, which break edge parsers.

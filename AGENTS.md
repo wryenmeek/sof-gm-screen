@@ -17,3 +17,7 @@ Canonical triage roles mapped 1:1 (`needs-triage`, `needs-info`, `ready-for-agen
 ### Domain docs & coding standards
 
 Single-context layout (`GLOSSARY.md`, `CODING_STANDARDS.md`, and `docs/adr/` at repo root). See `docs/agents/domain.md` and `CODING_STANDARDS.md`.
+
+### Quality gate & local CI verification
+
+Run `npm run check` before committing or opening a PR; `.githooks/pre-commit` enforces this automatically (`bun install` sets `core.hooksPath`). To verify `.github/workflows/ci.yml` locally in Docker with `act`, run `bash scripts/act/install-act.sh` (if missing) and `bash scripts/act/run-act.sh "push -j check"`.

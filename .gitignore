@@ -11,3 +11,8 @@ __pycache__/
 .infigraph/
 .claude/
 .agents/teamwork/
+.cursor/
+.codex/
+.gemini/
+act_output.log
+.secrets

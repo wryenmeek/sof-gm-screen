@@ -6,6 +6,7 @@ Validates and auto-repairs HTML, Markdown, Python, Apps Script RPC contracts, Im
 import argparse
 import os
 import re
+import subprocess
 import sys
 
 
@@ -234,6 +235,62 @@ def check_image(path):
     return issues
 
 
+def check_git_whitespace(dir_path):
+    """Checks committed and working-tree changes for conflict markers and whitespace errors via git diff --check."""
+    issues = []
+    if not os.path.exists(os.path.join(dir_path, ".git")):
+        return issues
+    try:
+        head_res = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=dir_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        head_sha = head_res.stdout.strip() if head_res.returncode == 0 else ""
+        mb_res = subprocess.run(
+            ["git", "merge-base", "HEAD", "origin/main"],
+            cwd=dir_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        mb_sha = mb_res.stdout.strip() if mb_res.returncode == 0 else ""
+        if mb_sha and mb_sha != head_sha:
+            base_ref = mb_sha
+        else:
+            prev_res = subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD~1"],
+                cwd=dir_path,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            base_ref = (
+                prev_res.stdout.strip() if prev_res.returncode == 0 else "HEAD"
+            )
+        res = subprocess.run(
+            ["git", "diff", "--check", base_ref],
+            cwd=dir_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if res.returncode != 0:
+            output = (res.stdout or res.stderr).strip()
+            if output:
+                for line in output.splitlines():
+                    issues.append(f"GIT_DIFF_CHECK: {line}")
+            else:
+                issues.append(
+                    f"GIT_DIFF_CHECK: git diff --check {base_ref} exited with status {res.returncode}."
+                )
+    except Exception as exc:
+        issues.append(f"GIT_DIFF_CHECK_ERROR: {exc}")
+    return issues
+
+
 def validate_directory(dir_path, fix=False):
     print("\n=======================================================")
     print(f"🔍 PRE-FLIGHT AUDIT {'& AUTO-FIX' if fix else ''}: {dir_path}")
@@ -286,6 +343,15 @@ def validate_directory(dir_path, fix=False):
             print(f"   • {iss}")
     else:
         print("  ✓ Cross-boundary RPC & helper contracts")
+
+    ws_issues = check_git_whitespace(dir_path)
+    if ws_issues:
+        total_issues += len(ws_issues)
+        print(f"\n❌ Git Whitespace & Conflict Check ({len(ws_issues)} issues):")
+        for iss in ws_issues:
+            print(f"   • {iss}")
+    else:
+        print("  ✓ Git diff whitespace & conflict marker check")
 
     print("\n-------------------------------------------------------")
     if total_issues == 0:

@@ -10,3 +10,9 @@ bun.lock
 bun.lockb
 .git/
 .infigraph/
+.claude/
+.cursor/
+.codex/
+.gemini/
+act_output.log
+.secrets

@@ -105,6 +105,19 @@ export default [
     }
   },
   {
-    ignores: ["node_modules/**", ".agents/**", "dist/**"]
+    ignores: [
+      "node_modules/**",
+      ".agents/**",
+      ".claude/**",
+      ".worktrees/**",
+      ".infigraph/**",
+      ".scratch/**",
+      ".cursor/**",
+      ".codex/**",
+      ".gemini/**",
+      "act_output.log",
+      ".secrets",
+      "dist/**"
+    ]
   }
 ];

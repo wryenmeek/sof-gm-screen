@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 .scratch/
 .worktrees/
+.infigraph/
+.claude/
+.agents/teamwork/

@@ -18,6 +18,7 @@
     "markdownlint-cli2",
     "prettier",
     "vitest",
+    "playwright",
     "knip",
     "clasp"
   ]

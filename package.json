@@ -16,6 +16,7 @@
     "format": "prettier --write \"**/*.{html,gs,js,ts,css,md,json}\" --ignore-path .gitignore --ignore-path .prettierignore",
     "audit:artifacts": "python3 validate_session_artifacts.py",
     "test": "vitest run --test-timeout=15000 --hook-timeout=15000",
+    "test:visual": "playwright test",
     "knip": "knip",
     "check": "npm run typecheck && npm run lint:js && npm run lint:css && npm run lint:md && npm run format:check && npm run audit:artifacts && npm run test && npm run knip",
     "push": "clasp push -f",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@google/clasp": "^2.4.2",
+    "@playwright/test": "^1.65.0",
     "@types/google-apps-script": "^1.0.86",
     "@types/node": "^22.13.0",
     "eslint": "^9.20.0",

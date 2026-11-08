@@ -118,7 +118,9 @@ export default [
       "act_output.log",
       ".secrets",
       "dist/**",
-      "coverage/**"
+      "coverage/**",
+      "test-results/**",
+      "playwright-report/**"
     ]
   }
 ];

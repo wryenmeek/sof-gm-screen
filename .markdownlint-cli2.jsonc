@@ -18,6 +18,8 @@
     ".codex/**",
     ".gemini/**",
     "act_output.log",
-    ".secrets"
+    ".secrets",
+    "test-results/**",
+    "playwright-report/**"
   ]
 }

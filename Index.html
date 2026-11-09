@@ -452,6 +452,73 @@
         font-size: 14px;
       }
 
+      .id-btn.active {
+        background: var(--gold);
+        color: #0f172a;
+        font-weight: 700;
+        border-color: var(--gold-light);
+      }
+
+      .companion-ctrl-btn {
+        background: #1e293b;
+        border: 1px solid var(--gold);
+        color: var(--gold-light);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        min-height: 32px;
+        min-width: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+      }
+      .companion-ctrl-btn:hover {
+        background: #334155;
+        border-color: var(--cyan);
+      }
+
+      .companion-close-btn {
+        background: transparent;
+        border: 1px solid #475569;
+        color: #94a3b8;
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 13px;
+        cursor: pointer;
+        min-height: 28px;
+        min-width: 28px;
+        line-height: 1;
+      }
+      .companion-close-btn:hover {
+        background: #334155;
+        color: #ffffff;
+        border-color: var(--gold);
+      }
+
+      .companion-link-btn {
+        text-decoration: none;
+        font-size: 11px;
+        padding: 3px 6px;
+        background: #1e293b;
+        border: 1px solid var(--gold);
+        border-radius: 4px;
+        color: var(--gold-light);
+        display: inline-flex;
+        align-items: center;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+      }
+      .companion-link-btn:hover {
+        background: #334155;
+        border-color: var(--cyan);
+      }
+
       #ptt-btn {
         background: #1d4ed8;
         color: #ffffff;
@@ -513,7 +580,16 @@
       <div class="sidebar-section">
         <div class="brand-header">
           <span>⚔️ Sea of Fortune GM</span>
-          <button onclick="refreshManifest()" title="Refresh files">↻</button>
+          <div style="display: flex; gap: 6px; align-items: center">
+            <a
+              href="?view=companion"
+              target="_top"
+              class="companion-link-btn"
+              title="Open Mobile Player Companion View"
+              >📱 Companion</a
+            >
+            <button onclick="refreshManifest()" title="Refresh files">↻</button>
+          </div>
         </div>
 
         <div class="session-control-row">
@@ -684,9 +760,33 @@
           "
           ><?= sessionDate ?></span
         >
-        <span id="player-identity-display"
-          ><span id="player-tag">Player: Guest</span></span
-        >
+        <div style="display: flex; align-items: center; gap: 6px">
+          <span
+            id="player-identity-display"
+            onclick="togglePlayerIdentityModal()"
+            style="cursor: pointer"
+            title="Click to switch character"
+            ><span id="player-tag">Player: Guest</span></span
+          >
+          <button
+            id="switch-player-btn"
+            class="companion-ctrl-btn"
+            onclick="togglePlayerIdentityModal()"
+            title="Switch Player Character"
+            aria-label="Switch Player Character"
+          >
+            🔄
+          </button>
+          <button
+            id="gm-login-trigger-btn"
+            class="companion-ctrl-btn"
+            onclick="openGmKeyModal()"
+            title="GM Login"
+            aria-label="GM Login"
+          >
+            🔑 GM
+          </button>
+        </div>
       </header>
 
       <div
@@ -695,6 +795,27 @@
         role="region"
         aria-label="Player Identity Selection"
       >
+        <div
+          style="
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+          "
+        >
+          <strong style="color: var(--gold-light); font-size: 13px"
+            >Choose Character</strong
+          >
+          <button
+            type="button"
+            class="companion-close-btn"
+            onclick="closePlayerIdentityModal()"
+            aria-label="Close character selection"
+          >
+            ✕
+          </button>
+        </div>
         <button
           class="id-btn"
           data-player="Pog"
@@ -730,6 +851,96 @@
         >
           Guest
         </button>
+      </div>
+
+      <div
+        id="gm-key-modal"
+        class="id-modal hidden"
+        role="dialog"
+        aria-labelledby="gm-modal-title"
+        style="
+          display: none;
+          flex-direction: column;
+          gap: 10px;
+          width: 100%;
+          box-sizing: border-box;
+        "
+      >
+        <div
+          style="
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          "
+        >
+          <span
+            id="gm-modal-title"
+            style="
+              font-family: Cinzel, serif;
+              color: var(--gold-light);
+              font-weight: 700;
+              font-size: 14px;
+            "
+            >🔑 GM Access</span
+          >
+          <button
+            type="button"
+            class="companion-close-btn"
+            onclick="closeGmKeyModal()"
+            aria-label="Close GM login"
+          >
+            ✕
+          </button>
+        </div>
+        <p style="font-size: 12px; color: #94a3b8; margin: 0">
+          Enter your GM secret key to unlock full GM screen controls:
+        </p>
+        <input
+          type="password"
+          id="gm-key-input"
+          placeholder="Enter GM Key..."
+          style="
+            width: 100%;
+            background: #0f172a;
+            color: var(--text);
+            border: 1px solid var(--gold);
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 14px;
+            box-sizing: border-box;
+          "
+          onkeydown="if (event.key === 'Enter') submitGmKey();"
+        />
+        <div
+          id="gm-key-error"
+          style="color: var(--dnd-red); font-size: 12px; display: none"
+        ></div>
+        <div
+          style="
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            width: 100%;
+          "
+        >
+          <button
+            type="button"
+            onclick="closeGmKeyModal()"
+            style="min-height: 38px"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="gm-key-submit-btn"
+            class="primary"
+            onclick="submitGmKey()"
+            style="min-height: 38px"
+          >
+            Unlock GM Screen
+          </button>
+        </div>
       </div>
 
       <input
@@ -799,6 +1010,12 @@
           ? ""
           : rawGmKeyTemplate;
       }
+      const rawWebAppUrl =
+        "<?= typeof webAppUrl !== 'undefined' ? webAppUrl : '' ?>";
+      let WEB_APP_URL = "";
+      if (typeof window !== "undefined") {
+        WEB_APP_URL = rawWebAppUrl.startsWith("<" + "?") ? "" : rawWebAppUrl;
+      }
       const cache = {};
       let allFiles = [];
       let currentLeftPayload = null;
@@ -818,7 +1035,20 @@
             window.location.search
           ) {
             const params = new URLSearchParams(window.location.search);
-            return params.get("gmKey") || "";
+            const key = params.get("gmKey");
+            if (key) return key;
+          }
+        } catch (_e) {}
+        try {
+          if (typeof sessionStorage !== "undefined" && sessionStorage) {
+            const sessionKey = sessionStorage.getItem("sof_gm_key");
+            if (sessionKey) return sessionKey;
+          }
+        } catch (_e) {}
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            const localKey = localStorage.getItem("sof_gm_key");
+            if (localKey) return localKey;
           }
         } catch (_e) {}
         return "";
@@ -2480,6 +2710,200 @@
 
       indexRulesGlossary_([]);
 
+      function highlightActivePlayerIdentity_() {
+        const buttons = document.querySelectorAll(".id-btn");
+        buttons.forEach((btn) => {
+          if (btn.getAttribute("data-player") === currentPlayerIdentity) {
+            btn.classList.add("active");
+          } else {
+            btn.classList.remove("active");
+          }
+        });
+      }
+
+      function togglePlayerIdentityModal() {
+        const modal = document.getElementById("identity-modal");
+        if (!modal) return;
+        const isHidden =
+          modal.classList.contains("hidden") || modal.style.display === "none";
+        if (isHidden) {
+          modal.classList.remove("hidden");
+          modal.style.display = "flex";
+          highlightActivePlayerIdentity_();
+        } else {
+          modal.classList.add("hidden");
+          modal.style.display = "none";
+        }
+      }
+
+      function closePlayerIdentityModal() {
+        const modal = document.getElementById("identity-modal");
+        if (!modal) return;
+        modal.classList.add("hidden");
+        modal.style.display = "none";
+      }
+
+      function openGmKeyModal() {
+        const modal = document.getElementById("gm-key-modal");
+        if (!modal) return;
+        modal.classList.remove("hidden");
+        modal.style.display = "flex";
+        const errorEl = document.getElementById("gm-key-error");
+        if (errorEl) {
+          errorEl.textContent = "";
+          errorEl.style.display = "none";
+        }
+        const input = document.getElementById("gm-key-input");
+        if (input) {
+          input.value = "";
+          input.focus();
+        }
+      }
+
+      function closeGmKeyModal() {
+        const modal = document.getElementById("gm-key-modal");
+        if (!modal) return;
+        modal.classList.add("hidden");
+        modal.style.display = "none";
+        const errorEl = document.getElementById("gm-key-error");
+        if (errorEl) {
+          errorEl.textContent = "";
+          errorEl.style.display = "none";
+        }
+      }
+
+      function navigateWithGmKey_(key) {
+        try {
+          if (typeof sessionStorage !== "undefined" && sessionStorage) {
+            sessionStorage.setItem("sof_gm_key", key);
+          }
+          if (typeof localStorage !== "undefined" && localStorage) {
+            localStorage.setItem("sof_gm_key", key);
+          }
+        } catch (_e) {}
+
+        let destUrl = "";
+        try {
+          if (typeof window !== "undefined" && window.location) {
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set("gmKey", key);
+            currentUrl.searchParams.delete("view");
+            destUrl = currentUrl.toString();
+          }
+        } catch (_e) {}
+
+        const webAppBase =
+          typeof WEB_APP_URL !== "undefined" && WEB_APP_URL ? WEB_APP_URL : "";
+        if (webAppBase && !webAppBase.startsWith("<" + "?")) {
+          try {
+            const u = new URL(webAppBase);
+            u.searchParams.set("gmKey", key);
+            if (currentSessionDate) {
+              u.searchParams.set("session", currentSessionDate);
+            }
+            destUrl = u.toString();
+          } catch (_e) {}
+        }
+
+        try {
+          let form = document.getElementById("gm-navigation-form");
+          if (!form) {
+            form = document.createElement("form");
+            form.id = "gm-navigation-form";
+            form.method = "GET";
+            form.target = "_top";
+            document.body.appendChild(form);
+          }
+          form.action = destUrl ? destUrl.split("?")[0] : "";
+          form.innerHTML = "";
+          const inputKey = document.createElement("input");
+          inputKey.type = "hidden";
+          inputKey.name = "gmKey";
+          inputKey.value = key;
+          form.appendChild(inputKey);
+          if (currentSessionDate) {
+            const inputSession = document.createElement("input");
+            inputSession.type = "hidden";
+            inputSession.name = "session";
+            inputSession.value = currentSessionDate;
+            form.appendChild(inputSession);
+          }
+          form.submit();
+          return;
+        } catch (_formErr) {}
+
+        if (destUrl && typeof window !== "undefined") {
+          window.location.href = destUrl;
+        }
+      }
+
+      function submitGmKey() {
+        const input = document.getElementById("gm-key-input");
+        const errorEl = document.getElementById("gm-key-error");
+        const submitBtn = document.getElementById("gm-key-submit-btn");
+        if (!input) return;
+        const gmKey = (input.value || "").trim();
+        if (!gmKey) {
+          if (errorEl) {
+            errorEl.textContent = "Please enter your GM secret key.";
+            errorEl.style.display = "block";
+          }
+          return;
+        }
+
+        if (errorEl) {
+          errorEl.textContent = "";
+          errorEl.style.display = "none";
+        }
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Verifying...";
+        }
+
+        if (
+          typeof google !== "undefined" &&
+          google.script &&
+          google.script.run &&
+          typeof google.script.run.verifyGmKey === "function"
+        ) {
+          google.script.run
+            .withSuccessHandler((isValid) => {
+              if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Unlock GM Screen";
+              }
+              if (isValid) {
+                navigateWithGmKey_(gmKey);
+              } else {
+                if (errorEl) {
+                  errorEl.textContent =
+                    "Invalid GM key. Please check your key and try again.";
+                  errorEl.style.display = "block";
+                }
+              }
+            })
+            .withFailureHandler((err) => {
+              if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Unlock GM Screen";
+              }
+              if (errorEl) {
+                errorEl.textContent =
+                  "Verification failed: " +
+                  (err && err.message ? err.message : "Unknown error");
+                errorEl.style.display = "block";
+              }
+            })
+            .verifyGmKey(gmKey);
+        } else {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Unlock GM Screen";
+          }
+          navigateWithGmKey_(gmKey);
+        }
+      }
+
       function updatePlayerIdentityDom_(playerName) {
         currentPlayerIdentity = playerName;
         const tag = document.getElementById("player-tag");
@@ -2494,6 +2918,7 @@
           modal.classList.add("hidden");
           modal.style.display = "none";
         }
+        highlightActivePlayerIdentity_();
       }
 
       function initCompanionState_() {
@@ -2520,6 +2945,8 @@
         } catch (_e) {}
         if (savedIdentity) {
           updatePlayerIdentityDom_(savedIdentity);
+        } else {
+          highlightActivePlayerIdentity_();
         }
       }
 

@@ -57,6 +57,8 @@ export default [
         document: "readonly",
         navigator: "readonly",
         localStorage: "readonly",
+        sessionStorage: "readonly",
+        URL: "readonly",
         URLSearchParams: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",

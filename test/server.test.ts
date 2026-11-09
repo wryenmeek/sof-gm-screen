@@ -1354,6 +1354,22 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       );
       expect(ctx.getAudioAuthToken("gm-secret-77")).toBe("mock_oauth_token");
     });
+
+    it("validates candidate GM key via verifyGmKey and allows setting key via setGmKey_", () => {
+      mocks.propsStore.set("SOF_GM_KEY", "my-secret-key");
+      expect(ctx.verifyGmKey("my-secret-key")).toBe(true);
+      expect(ctx.verifyGmKey("wrong-key")).toBe(false);
+
+      // setGmKey_ updates the script property
+      ctx.setGmKey_("new-gm-password");
+      expect(mocks.propsStore.get("SOF_GM_KEY")).toBe("new-gm-password");
+      expect(ctx.verifyGmKey("new-gm-password")).toBe(true);
+      expect(ctx.verifyGmKey("my-secret-key")).toBe(false);
+
+      // setGmKey_ with invalid input logs usage without throwing
+      ctx.setGmKey_("");
+      expect(mocks.propsStore.get("SOF_GM_KEY")).toBe("new-gm-password");
+    });
   });
 
   describe("Ticket 26: doPost(e) & getLatestAudioCue(gmKey) CacheService Cue Bridge", () => {

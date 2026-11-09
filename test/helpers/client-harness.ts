@@ -36,6 +36,8 @@ export interface ClientHarnessOptions {
   ruleFeedbackResult?: any;
   ruleFeedbackError?: string;
   deferRuleFeedback?: boolean;
+  verifyGmKeyResult?: boolean;
+  verifyGmKeyError?: string;
 }
 
 export function setupClientHarness(options: ClientHarnessOptions = {}) {
@@ -226,6 +228,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   const extractNarrativePromisesSpy = vi.fn();
   const getLatestAudioCueSpy = vi.fn();
   const getLatestCompanionRuleQueryCueSpy = vi.fn();
+  const verifyGmKeySpy = vi.fn();
   const latestAudioCueResponses: Array<(value: any) => void> = [];
   const ruleFeedbackResponses: Array<(value: any) => void> = [];
   const filePayloads = options.filePayloads || {};
@@ -332,6 +335,18 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
               if (cb && options.companionRuleQueryCue !== undefined) {
                 cb(options.companionRuleQueryCue);
               }
+            },
+            verifyGmKey: (candidateKey: string) => {
+              verifyGmKeySpy(candidateKey);
+              if (options.verifyGmKeyError) {
+                failureCb?.({ message: options.verifyGmKeyError });
+              } else if (cb) {
+                cb(
+                  options.verifyGmKeyResult !== undefined
+                    ? options.verifyGmKeyResult
+                    : true
+                );
+              }
             }
           };
           return runner;
@@ -341,7 +356,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         getFilePayload: getFilePayloadSpy,
         extractNarrativePromises: extractNarrativePromisesSpy,
         getLatestAudioCue: getLatestAudioCueSpy,
-        getLatestRuleQueryCueForCompanion: getLatestCompanionRuleQueryCueSpy
+        getLatestRuleQueryCueForCompanion: getLatestCompanionRuleQueryCueSpy,
+        verifyGmKey: verifyGmKeySpy
       }
     }
   };
@@ -382,6 +398,11 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
         initCompanionState: typeof initCompanionState_ !== "undefined" ? initCompanionState_ : undefined,
         selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,
+        togglePlayerIdentityModal: typeof togglePlayerIdentityModal !== "undefined" ? togglePlayerIdentityModal : undefined,
+        closePlayerIdentityModal: typeof closePlayerIdentityModal !== "undefined" ? closePlayerIdentityModal : undefined,
+        openGmKeyModal: typeof openGmKeyModal !== "undefined" ? openGmKeyModal : undefined,
+        closeGmKeyModal: typeof closeGmKeyModal !== "undefined" ? closeGmKeyModal : undefined,
+        submitGmKey: typeof submitGmKey !== "undefined" ? submitGmKey : undefined,
         loadDriveRulesGlossary: typeof loadDriveRulesGlossary_ !== "undefined" ? loadDriveRulesGlossary_ : undefined,
         indexRulesGlossary: typeof indexRulesGlossary_ !== "undefined" ? indexRulesGlossary_ : undefined,
         matchSpokenRuleQuery_: typeof matchSpokenRuleQuery_ !== "undefined" ? matchSpokenRuleQuery_ : undefined,
@@ -425,6 +446,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     extractNarrativePromisesSpy,
     getLatestAudioCueSpy,
     getLatestCompanionRuleQueryCueSpy,
+    verifyGmKeySpy,
     completeIdbTransactions: () => {
       deferredIdbTransactions.splice(0).forEach((tx) => {
         if (tx.oncomplete) tx.oncomplete();

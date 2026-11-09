@@ -4,6 +4,12 @@ import { setupClientHarness } from "./helpers/client-harness";
 
 describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
   let selectPlayerIdentity: (name: string) => void;
+  let togglePlayerIdentityModal: () => void;
+  let closePlayerIdentityModal: () => void;
+  let openGmKeyModal: () => void;
+  let closeGmKeyModal: () => void;
+  let submitGmKey: () => void;
+  let verifyGmKeySpy: ReturnType<typeof vi.fn>;
   let triggerPtt: () => void;
   let showRuleCard: (
     ruleTitle: string,
@@ -21,6 +27,12 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
     vi.useFakeTimers();
     const harness = setupClientHarness();
     selectPlayerIdentity = harness.selectPlayerIdentity;
+    togglePlayerIdentityModal = harness.togglePlayerIdentityModal;
+    closePlayerIdentityModal = harness.closePlayerIdentityModal;
+    openGmKeyModal = harness.openGmKeyModal;
+    closeGmKeyModal = harness.closeGmKeyModal;
+    submitGmKey = harness.submitGmKey;
+    verifyGmKeySpy = harness.verifyGmKeySpy;
     triggerPtt = harness.triggerPtt;
     showRuleCard = harness.showRuleCard;
     submitRuleFeedback = harness.submitRuleFeedback;
@@ -87,6 +99,95 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(document.getElementById("player-session-date")!.textContent).toBe(
         "2026-10-31"
       );
+    });
+
+    it("allows toggling character selection modal and switching character after one is chosen", () => {
+      // Initially select Pog
+      selectPlayerIdentity("Pog");
+      expect(mockLocalStorage.getItem("sof_player_identity")).toBe("Pog");
+      expect(document.getElementById("identity-modal")!.style.display).toBe(
+        "none"
+      );
+
+      // Toggle open modal via switch button
+      togglePlayerIdentityModal();
+      const modal = document.getElementById("identity-modal")!;
+      expect(modal.style.display).toBe("flex");
+      expect(modal.classList.contains("hidden")).toBe(false);
+
+      // Verify Pog button is marked active
+      const pogBtn = document.querySelector(".id-btn[data-player='Pog']")!;
+      const vaelorBtn = document.querySelector(
+        ".id-btn[data-player='Vaelor']"
+      )!;
+      expect(pogBtn.classList.contains("active")).toBe(true);
+      expect(vaelorBtn.classList.contains("active")).toBe(false);
+
+      // Switch to Vaelor
+      selectPlayerIdentity("Vaelor");
+      expect(mockLocalStorage.getItem("sof_player_identity")).toBe("Vaelor");
+      expect(
+        document.getElementById("player-identity-display")!.textContent
+      ).toBe("Player: Vaelor");
+      expect(modal.style.display).toBe("none");
+
+      // Toggle open again and verify closePlayerIdentityModal
+      togglePlayerIdentityModal();
+      expect(modal.style.display).toBe("flex");
+      expect(vaelorBtn.classList.contains("active")).toBe(true);
+      closePlayerIdentityModal();
+      expect(modal.style.display).toBe("none");
+      expect(modal.classList.contains("hidden")).toBe(true);
+    });
+
+    it("supports in-app GM login modal: opens, closes, and verifies GM key", () => {
+      const gmModal = document.getElementById("gm-key-modal")!;
+      const gmInput = document.getElementById(
+        "gm-key-input"
+      ) as HTMLInputElement;
+      const gmError = document.getElementById("gm-key-error")!;
+
+      expect(gmModal.style.display).toBe("none");
+
+      // Open GM login modal
+      openGmKeyModal();
+      expect(gmModal.style.display).toBe("flex");
+      expect(gmModal.classList.contains("hidden")).toBe(false);
+
+      // Submit empty key -> validation error
+      submitGmKey();
+      expect(gmError.style.display).toBe("block");
+      expect(gmError.textContent).toContain("Please enter your GM secret key");
+
+      // Close modal
+      closeGmKeyModal();
+      expect(gmModal.style.display).toBe("none");
+
+      // Re-open and submit valid key
+      openGmKeyModal();
+      gmInput.value = "my-secret-gm-key";
+      submitGmKey();
+
+      expect(verifyGmKeySpy).toHaveBeenCalledWith("my-secret-gm-key");
+      expect(mockLocalStorage.getItem("sof_gm_key")).toBe("my-secret-gm-key");
+    });
+
+    it("displays error when server rejects GM key", () => {
+      const failingHarness = setupClientHarness({
+        viewMode: "companion",
+        verifyGmKeyResult: false
+      });
+      failingHarness.openGmKeyModal();
+      const gmInput = document.getElementById(
+        "gm-key-input"
+      ) as HTMLInputElement;
+      const gmError = document.getElementById("gm-key-error")!;
+      gmInput.value = "wrong-key";
+
+      failingHarness.submitGmKey();
+      expect(failingHarness.verifyGmKeySpy).toHaveBeenCalledWith("wrong-key");
+      expect(gmError.style.display).toBe("block");
+      expect(gmError.textContent).toContain("Invalid GM key");
     });
   });
 

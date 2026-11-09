@@ -70,11 +70,44 @@ function doGet(e) {
         ? "gm"
         : "companion";
   template.gmKey = template.viewMode === "gm" ? gmKey : "";
+  try {
+    template.webAppUrl = ScriptApp.getService().getUrl();
+  } catch (_e) {
+    template.webAppUrl = "";
+  }
   return template
     .evaluate()
     .setTitle("Sea of Fortune GM Dashboard - " + sessionDate)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag("viewport", "width=device-width, initial-scale=1");
+}
+
+/**
+ * Validates a candidate GM key against configured Script Properties or active user.
+ * Returns true if the key grants GM access, false otherwise.
+ */
+function verifyGmKey(candidateKey) {
+  try {
+    assertGmAccess_(candidateKey);
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+/**
+ * Editor-only helper to set or update the SOF_GM_KEY script property.
+ */
+function setGmKey_(newKey) {
+  if (!newKey || typeof newKey !== "string") {
+    Logger.log("Usage: setGmKey_('your-secret-key-here')");
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty(
+    "SOF_GM_KEY",
+    newKey.trim()
+  );
+  Logger.log("SOF_GM_KEY has been successfully set.");
 }
 
 /**

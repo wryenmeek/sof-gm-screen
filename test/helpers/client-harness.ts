@@ -407,6 +407,8 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         indexRulesGlossary: typeof indexRulesGlossary_ !== "undefined" ? indexRulesGlossary_ : undefined,
         matchSpokenRuleQuery_: typeof matchSpokenRuleQuery_ !== "undefined" ? matchSpokenRuleQuery_ : undefined,
         handleDictationInput: typeof handleDictationInput !== "undefined" ? handleDictationInput : undefined,
+        handleDictationFocus: typeof handleDictationFocus !== "undefined" ? handleDictationFocus : undefined,
+        showPttStatus: typeof showPttStatus_ !== "undefined" ? showPttStatus_ : undefined,
         triggerPtt: typeof triggerPtt !== "undefined" ? triggerPtt : undefined,
         showRuleCard: typeof showRuleCard_ !== "undefined" ? showRuleCard_ : undefined,
         dismissRuleCard: typeof dismissRuleCard !== "undefined" ? dismissRuleCard : undefined,

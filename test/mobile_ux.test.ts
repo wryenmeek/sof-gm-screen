@@ -210,6 +210,54 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
         "Exhaustion"
       );
       expect(pttBtn.classList.contains("listening")).toBe(false);
+      expect(
+        (document.getElementById("ptt-dictation-input") as HTMLInputElement)
+          .value
+      ).toBe("How does Exhaustion work?");
+      expect(document.getElementById("ptt-status-msg")!.textContent).toContain(
+        'Heard: "How does Exhaustion work?"'
+      );
+    });
+
+    it("handles SpeechRecognition error (not-allowed) by surfacing iframe security advice and focusing dictation input", () => {
+      triggerPtt();
+      const pttBtn = document.getElementById("ptt-btn")!;
+      expect(pttBtn.classList.contains("listening")).toBe(true);
+
+      const lastSpeechRecognitionInstance = getLastSpeechRecognitionInstance();
+      lastSpeechRecognitionInstance.onerror({ error: "not-allowed" });
+
+      expect(pttBtn.classList.contains("listening")).toBe(false);
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      expect(statusMsg.style.display).toBe("block");
+      expect(statusMsg.textContent).toContain(
+        "Microphone access blocked by browser iframe security"
+      );
+      expect(statusMsg.textContent).toContain(
+        "tap your keyboard's 🎙️ microphone to dictate"
+      );
+    });
+
+    it("handles SpeechRecognition error (no-speech) and unmatched query with informative feedback", () => {
+      // 1. no-speech error
+      triggerPtt();
+      const lastSpeechRecognitionInstance = getLastSpeechRecognitionInstance();
+      lastSpeechRecognitionInstance.onerror({ error: "no-speech" });
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      expect(statusMsg.textContent).toContain("No speech detected");
+
+      // 2. Unmatched spoken query
+      triggerPtt();
+      lastSpeechRecognitionInstance.onresult({
+        results: [[{ transcript: "xyzzy gibberish flurble" }]]
+      });
+      expect(
+        (document.getElementById("ptt-dictation-input") as HTMLInputElement)
+          .value
+      ).toBe("xyzzy gibberish flurble");
+      expect(statusMsg.textContent).toContain(
+        'Heard: "xyzzy gibberish flurble" (no exact rule match found in glossary)'
+      );
     });
 
     it("preserves the matched glossary source on audio-triggered Rule Cards", () => {

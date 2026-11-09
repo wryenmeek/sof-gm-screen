@@ -946,8 +946,9 @@
       <input
         type="search"
         id="ptt-dictation-input"
-        placeholder="🎙️ Tap & Dictate or Type Rule..."
+        placeholder="🎙️ Tap & Dictate (Keyboard 🎙️) or Type Rule..."
         oninput="handleDictationInput(this.value)"
+        onfocus="handleDictationFocus()"
         style="
           width: 100%;
           background: #0f172a;
@@ -956,8 +957,27 @@
           border-radius: 8px;
           padding: 12px;
           font-size: 15px;
+          box-sizing: border-box;
         "
       />
+
+      <div
+        id="ptt-status-msg"
+        role="status"
+        aria-live="polite"
+        style="
+          display: none;
+          font-size: 13px;
+          color: var(--cyan);
+          text-align: center;
+          padding: 8px 12px;
+          border-radius: 6px;
+          background: #0f172a;
+          border: 1px solid #334155;
+          box-sizing: border-box;
+          line-height: 1.4;
+        "
+      ></div>
 
       <button id="ptt-btn" onclick="triggerPtt()" aria-pressed="false">
         🎙️ Tap to Ask Rule
@@ -3024,17 +3044,48 @@
         return null;
       }
 
+      function showPttStatus_(msg, isError = false) {
+        const el = document.getElementById("ptt-status-msg");
+        if (!el) return;
+        if (!msg) {
+          el.textContent = "";
+          el.style.display = "none";
+          return;
+        }
+        el.textContent = msg;
+        el.style.display = "block";
+        el.style.color = isError ? "var(--dnd-red)" : "var(--cyan)";
+      }
+
+      function handleDictationFocus() {
+        const input = document.getElementById("ptt-dictation-input");
+        if (input && !input.value.trim()) {
+          showPttStatus_(
+            "💡 Tip: Tap the 🎙️ microphone on your keyboard to speak hands-free."
+          );
+        }
+      }
+
       function executeDictationQuery_(rawQuery) {
         const cleaned = String(rawQuery || "").trim();
         if (!cleaned) return;
         const matched = matchSpokenRuleQuery_(cleaned);
         if (matched && matched.entry) {
           showRuleCard_(matched.entry, cleaned);
+          showPttStatus_(`✓ Rule found: ${matched.entry.title || cleaned}`);
+        } else {
+          showPttStatus_(
+            `No exact rule found for "${cleaned}". Try searching keywords above.`
+          );
         }
       }
 
       function handleDictationInput(val) {
         if (dictationDebounceTimer) clearTimeout(dictationDebounceTimer);
+        const cleaned = String(val || "").trim();
+        if (cleaned) {
+          showPttStatus_(`Searching for "${cleaned}"...`);
+        }
         dictationDebounceTimer = setTimeout(() => {
           executeDictationQuery_(val);
         }, 900);
@@ -3068,7 +3119,15 @@
         if (!btn) return;
         if (btn.classList.contains("listening")) {
           stopPtt_();
+          showPttStatus_("Listening stopped.");
           return;
+        }
+
+        const dictationInput = document.getElementById("ptt-dictation-input");
+        if (dictationInput && typeof dictationInput.focus === "function") {
+          try {
+            dictationInput.focus();
+          } catch (_e) {}
         }
 
         const SpeechRecognitionCtor =
@@ -3077,12 +3136,19 @@
             : null;
         if (typeof SpeechRecognitionCtor !== "function") {
           stopPtt_();
+          showPttStatus_(
+            "🎙️ Speech recognition is not supported in this browser. Use your keyboard's 🎙️ microphone to dictate!",
+            true
+          );
           focusDictationFallback_();
           return;
         }
 
         btn.classList.add("listening");
         btn.textContent = "🔴 Listening (4s)...";
+        showPttStatus_(
+          "🔴 Listening... Speak a rule name now (e.g. 'Grappling')"
+        );
 
         try {
           activeSpeechRecognition = new SpeechRecognitionCtor();
@@ -3098,14 +3164,38 @@
               event.results[0][0].transcript
                 ? event.results[0][0].transcript
                 : "";
+            if (dictationInput && transcript) {
+              dictationInput.value = transcript;
+            }
             const matched = matchSpokenRuleQuery_(transcript);
             if (matched) {
               showRuleCard_(matched.entry, transcript.toLowerCase());
+              showPttStatus_(`🎙️ Heard: "${transcript}"`);
+            } else if (transcript) {
+              showPttStatus_(
+                `🎙️ Heard: "${transcript}" (no exact rule match found in glossary)`
+              );
             }
             stopPtt_();
           };
-          activeSpeechRecognition.onerror = () => {
+          activeSpeechRecognition.onerror = (event) => {
+            const err = event && event.error ? event.error : "unknown";
             stopPtt_();
+            if (err === "not-allowed" || err === "service-not-allowed") {
+              showPttStatus_(
+                "⚠️ Microphone access blocked by browser iframe security. Tap the search bar above and tap your keyboard's 🎙️ microphone to dictate!",
+                true
+              );
+            } else if (err === "no-speech") {
+              showPttStatus_(
+                "No speech detected. Tap to try again or dictate via keyboard above."
+              );
+            } else {
+              showPttStatus_(
+                `Speech error (${err}). You can dictate using your keyboard's 🎙️ microphone above.`,
+                true
+              );
+            }
             focusDictationFallback_();
           };
           if (typeof activeSpeechRecognition.start === "function") {
@@ -3113,6 +3203,10 @@
           }
         } catch (_e) {
           stopPtt_();
+          showPttStatus_(
+            "⚠️ In-frame microphone is restricted. Tap the search bar above and use your keyboard's 🎙️ microphone to speak!",
+            true
+          );
           focusDictationFallback_();
           return;
         }

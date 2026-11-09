@@ -1347,6 +1347,26 @@ describe("Apps Script Server Logic (Code.gs)", () => {
       expect(ctx.doGet({ parameter: {} }).template.viewMode).toBe("companion");
     });
 
+    it("handles REST action requests in doGet and doPost", () => {
+      const getOut = ctx.doGet({
+        parameter: { action: "getRulesGlossary" }
+      });
+      expect(getOut.getMimeType()).toBe("application/json");
+      const rules = JSON.parse(getOut.getContent());
+      expect(Array.isArray(rules)).toBe(true);
+
+      const postOut = ctx.doPost({
+        postData: {
+          contents: JSON.stringify({
+            action: "verifyGmKey",
+            gmKey: "test-gm-key"
+          })
+        }
+      });
+      expect(postOut.getMimeType()).toBe("application/json");
+      expect(JSON.parse(postOut.getContent())).toBe(true);
+    });
+
     it("guards getAudioAuthToken with assertGmAccess_ and returns ScriptApp.getOAuthToken()", () => {
       mocks.propsStore.set("SOF_GM_KEY", "gm-secret-77");
       expect(() => ctx.getAudioAuthToken("wrong")).toThrow(

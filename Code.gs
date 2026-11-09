@@ -46,7 +46,82 @@ function assertGmAccess_(gmKey) {
   return true;
 }
 
+function handleApiAction_(action, params) {
+  params = params || {};
+  let result;
+  if (action === "getRulesGlossary") {
+    result = getRulesGlossary(
+      params.session || params.sessionDate || "2026-10-31"
+    );
+  } else if (action === "getSessionManifest") {
+    result = getSessionManifest(
+      params.session || params.sessionDate || "2026-10-31",
+      params.gmKey || ""
+    );
+  } else if (action === "getSessionList") {
+    result = getSessionList(params.gmKey || "");
+  } else if (action === "verifyGmKey") {
+    result = verifyGmKey(params.gmKey || params.key || "");
+  } else if (action === "logRuleFeedback") {
+    result = logRuleFeedback({
+      ruleId: params.ruleId || "",
+      isHelpful: params.isHelpful === true || params.isHelpful === "true",
+      notes: params.notes || "",
+      queryContext: params.queryContext || "",
+      sessionDate: params.sessionDate || params.session || "2026-10-31"
+    });
+  } else if (action === "getFilePayload") {
+    result = getFilePayload(
+      params.fileId || "",
+      params.sessionDate || "2026-10-31",
+      params.gmKey || ""
+    );
+  } else if (action === "getTableNotes") {
+    result = getTableNotes(
+      params.sessionDate || "2026-10-31",
+      params.gmKey || ""
+    );
+  } else if (action === "saveTableNotes") {
+    result = saveTableNotes(
+      params.sessionDate || "2026-10-31",
+      params.content || "",
+      params.gmKey || ""
+    );
+  } else if (action === "saveAudioTimeline") {
+    result = saveAudioTimeline(
+      params.sessionDate || params.session || "2026-10-31",
+      typeof params.jsonString === "string"
+        ? params.jsonString
+        : JSON.stringify(params.event || {}),
+      params.gmKey || ""
+    );
+  } else if (action === "getAudioAuthToken") {
+    result = getAudioAuthToken(params.gmKey || "");
+  } else if (action === "getLatestAudioCue") {
+    result = getLatestAudioCue(params.gmKey || "");
+  } else if (action === "getLatestRuleQueryCueForCompanion") {
+    result = getLatestRuleQueryCueForCompanion();
+  } else {
+    throw new Error("Unknown action: " + action);
+  }
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}
+
 function doGet(e) {
+  if (e && e.parameter && e.parameter.action) {
+    try {
+      return handleApiAction_(e.parameter.action, e.parameter);
+    } catch (err) {
+      return ContentService.createTextOutput(
+        JSON.stringify({
+          error: err instanceof Error ? err.message : String(err)
+        })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   const sessionDate =
     e && e.parameter && e.parameter.session
       ? e.parameter.session
@@ -1623,6 +1698,17 @@ function doPost(e) {
 
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return jsonResponse_({ status: "ERROR", error: "Invalid payload" });
+  }
+
+  if (body && body.action) {
+    try {
+      return handleApiAction_(body.action, body);
+    } catch (err) {
+      return jsonResponse_({
+        status: "ERROR",
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 
   const expectedGmKey =

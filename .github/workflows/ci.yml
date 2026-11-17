@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-rpi.txt
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Raspberry Pi classifier dependencies
+        run: python -m pip install -r requirements-rpi.txt
+
+      - name: Typecheck (Apps Script V8 & Tests)
+        run: npm run typecheck
+
+      - name: Lint (JS, CSS & Markdown)
+        run: npm run lint:js && npm run lint:css && npm run lint:md
+
+      - name: Format check (Prettier)
+        run: npm run format:check
+
+      - name: Pre-flight artifact & contract audit
+        run: npm run audit:artifacts
+
+      - name: Unit & behavioral tests (Vitest)
+        run: npm run test
+
+      - name: Unused code & dependency audit (Knip)
+        run: npm run knip

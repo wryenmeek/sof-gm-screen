@@ -1,7 +1,7 @@
 # Research Report: Apps Script Dual-Iframe Sandbox Constraints on WebGPU, WebRTC & SpeechRecognition
 
-**Ticket:** [03: Apps Script Dual-Iframe Sandbox Constraints on WebGPU, WebRTC & SpeechRecognition](../issues/03-iframe-sandbox-webgpu-webrtc-speech.md)  
-**Date:** 2026-11-02  
+**Ticket:** [03: Apps Script Dual-Iframe Sandbox Constraints on WebGPU, WebRTC & SpeechRecognition](../issues/03-iframe-sandbox-webgpu-webrtc-speech.md)
+**Date:** 2026-11-02
 **Status:** Verified against Google Apps Script `HtmlService` documentation, Google Issue Tracker, W3C WebGPU / Permissions-Policy specs, and Chrome Local Network Access (LNA) / Mixed Content specifications.
 
 ---
@@ -16,12 +16,12 @@ Google Apps Script's `HtmlService` renders every web app inside a **cross-origin
 
 Because Google controls the outer `script.google.com` host document and does **not** expose an API in `HtmlOutput` to add `allow="..."` Permissions-Policy directives to `#sandboxFrame`, cross-origin default-`self` browser features (`microphone`, `camera`, `local-network-access`, and cross-origin `webgpu` when gated by Permissions Policy) are **blocked or severely degraded** inside the Apps Script web app iframe.
 
-| Capability | Inside `HtmlService` (`*.googleusercontent.com` iframe) | Root Cause / Constraint | Viable Workaround |
-| :--- | :--- | :--- | :--- |
-| **`getUserMedia` / `webkitSpeechRecognition`** | **Blocked** (`NotAllowedError` / `not-allowed`) | `microphone` & `camera` Permissions-Policy default allowlist is `'self'`; `#sandboxFrame` omits `allow="microphone; camera"`. | Run voice capture in a top-level companion window/PWA or static host (`https://`) or capture audio directly on the Raspberry Pi via ALSA/PipeWire. |
-| **`navigator.gpu` (WebGPU)** | **Fragile / Restricted** + **Ephemeral Cache** | Cross-origin iframe lacks `allow="webgpu"`; `n-<hash>-script.googleusercontent.com` subdomain shifts across deployments and is subject to 3P storage partitioning, wiping multi-hundred-MB `IndexedDB` / `CacheStorage` LLM weights (`gemma-4-E2B-it`). | Run local LLM inference on a stable top-level origin or server-side/edge process rather than inside the ephemeral `googleusercontent.com` iframe. |
-| **LAN `ws://192.168.x.x` (WebSocket)** | **Blocked** (Mixed Content + LNA) | `https://` page loading `ws://` is blocked as Active Mixed Content; `wss://192.168.x.x` fails TLS cert validation + Chrome 142+ `local-network-access` iframe policy block. | Expose the Raspberry Pi `go2rtc` / signaling server via a valid HTTPS/WSS tunnel (Cloudflare Tunnel / Tailscale Funnel) or relay through WebRTC. |
-| **LAN `RTCPeerConnection` (WebRTC)** | **Signaling requires HTTPS/WSS; Media/Data works via STUN/ICE (with LNA caveat)** | SDP signaling over `http://`/`ws://` to LAN IP is blocked by Mixed Content/LNA, but once SDP is exchanged over HTTPS/WSS, UDP ICE candidates (`host`/`srflx`) can establish media/data channels. | Exchange WebRTC SDP offer/answer over an HTTPS/WSS signaling endpoint (or Tailscale Funnel / Cloudflare Tunnel) and stream audio/data over `RTCPeerConnection`. |
+| Capability                                     | Inside `HtmlService` (`*.googleusercontent.com` iframe)                           | Root Cause / Constraint                                                                                                                                                                                                                                 | Viable Workaround                                                                                                                                               |
+| :--------------------------------------------- | :-------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`getUserMedia` / `webkitSpeechRecognition`** | **Blocked** (`NotAllowedError` / `not-allowed`)                                   | `microphone` & `camera` Permissions-Policy default allowlist is `'self'`; `#sandboxFrame` omits `allow="microphone; camera"`.                                                                                                                           | Run voice capture in a top-level companion window/PWA or static host (`https://`) or capture audio directly on the Raspberry Pi via ALSA/PipeWire.              |
+| **`navigator.gpu` (WebGPU)**                   | **Fragile / Restricted** + **Ephemeral Cache**                                    | Cross-origin iframe lacks `allow="webgpu"`; `n-<hash>-script.googleusercontent.com` subdomain shifts across deployments and is subject to 3P storage partitioning, wiping multi-hundred-MB `IndexedDB` / `CacheStorage` LLM weights (`gemma-4-E2B-it`). | Run local LLM inference on a stable top-level origin or server-side/edge process rather than inside the ephemeral `googleusercontent.com` iframe.               |
+| **LAN `ws://192.168.x.x` (WebSocket)**         | **Blocked** (Mixed Content + LNA)                                                 | `https://` page loading `ws://` is blocked as Active Mixed Content; `wss://192.168.x.x` fails TLS cert validation + Chrome 142+ `local-network-access` iframe policy block.                                                                             | Expose the Raspberry Pi `go2rtc` / signaling server via a valid HTTPS/WSS tunnel (Cloudflare Tunnel / Tailscale Funnel) or relay through WebRTC.                |
+| **LAN `RTCPeerConnection` (WebRTC)**           | **Signaling requires HTTPS/WSS; Media/Data works via STUN/ICE (with LNA caveat)** | SDP signaling over `http://`/`ws://` to LAN IP is blocked by Mixed Content/LNA, but once SDP is exchanged over HTTPS/WSS, UDP ICE candidates (`host`/`srflx`) can establish media/data channels.                                                        | Exchange WebRTC SDP offer/answer over an HTTPS/WSS signaling endpoint (or Tailscale Funnel / Cloudflare Tunnel) and stream audio/data over `RTCPeerConnection`. |
 
 ---
 
@@ -88,7 +88,7 @@ Per the official [Google Apps Script HTML Service Restrictions](https://develope
 ## Primary Sources Cited
 
 1. Google Developers — [HTML Service: Restrictions (`IFRAME` sandbox flags and HTTPS active content rules)](https://developers.google.com/apps-script/guides/html/restrictions)
-2. Google Issue Tracker — Issues `486623612` & `489159857` (*Web App camera/microphone access via `getUserMedia` fails with 'Permissions policy violation'* inside Apps Script `HtmlService`)
+2. Google Issue Tracker — Issues `486623612` & `489159857` (_Web App camera/microphone access via `getUserMedia` fails with 'Permissions policy violation'_ inside Apps Script `HtmlService`)
 3. W3C — [Permissions Policy Specification (Default Allowlists `'self'` for `microphone`, `camera`)](https://www.w3.org/TR/permissions-policy-1/#default-allowlists)
 4. W3C — [WebGPU Specification — Permissions Policy Integration (`"webgpu"` feature token)](https://www.w3.org/TR/webgpu/#permissions-policy)
 5. Chrome for Developers — [Storage Partitioning in Third-Party Contexts](https://developer.chrome.com/docs/privacy-security/storage-partitioning)

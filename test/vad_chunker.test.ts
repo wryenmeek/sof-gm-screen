@@ -829,3 +829,290 @@ print(json.dumps({"results": results, "tier2_calls": tier2_calls}))
     ).toBeDefined();
   });
 });
+
+describe("Ticket 3 (Issue #36): Edge Raspberry Pi Direct Firestore Dispatcher & Fallback", () => {
+  it("dispatches direct writes to Cloud Firestore in <35ms via mock Firestore client", () => {
+    const pySnippet = [
+      "import json, time",
+      "from scripts.rpi_vad_chunker import classify_and_dispatch_chunk",
+      "state = {}",
+      "class MockRef:",
+      "    def __init__(self, name=''): self.name = name",
+      "    def set(self, data): state['written'] = data",
+      "    def collection(self, name): state['collection_' + name] = name; return self",
+      "    def document(self, name): state['doc_' + name] = name; return self",
+      "t0 = time.monotonic()",
+      "result = classify_and_dispatch_chunk(",
+      "    'chunk_0001_0_500.wav',",
+      "    tier1_fn=lambda _p: {'intent': 'MUSIC_CUE', 'mood': 'Combat'},",
+      "    firestore_client=MockRef('client'),",
+      "    session_date='2026-11-20',",
+      ")",
+      "elapsed_ms = (time.monotonic() - t0) * 1000.0",
+      "print(json.dumps({'result': result, 'state': state, 'elapsed_ms': elapsed_ms}))"
+    ].join("\n");
+
+    const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 15000
+    }).trim();
+
+    const parsed = JSON.parse(out);
+    expect(parsed.result.firestore_dispatched).toBe(true);
+    expect(parsed.result.dispatch_route).toBe("FIRESTORE");
+    expect(parsed.result.webhook_dispatched).toBe(false);
+    expect(parsed.result.offline_spooled).toBe(false);
+    expect(parsed.result.firestore_latency_ms).toBeLessThan(35);
+    expect(parsed.state.collection_sessions).toBe("sessions");
+    expect(parsed.state["doc_2026-11-20"]).toBe("2026-11-20");
+    expect(parsed.state.collection_live).toBe("live");
+    expect(parsed.state.doc_audio_cue).toBe("audio_cue");
+    expect(parsed.state.written).toMatchObject({
+      intent: "MUSIC_CUE",
+      mood: "Combat",
+      source: "RPI_EDGE_TIER1"
+    });
+  });
+
+  it("enforces 800ms timeout budget with automatic failover to local GM Screen HTTP webhook", () => {
+    const pySnippet = [
+      "import json, time",
+      "from scripts.rpi_vad_chunker import classify_and_dispatch_chunk",
+      "def slow_firestore(payload):",
+      "    time.sleep(1.2)",
+      "    return {'status': 'OK'}",
+      "webhook_called = []",
+      "def mock_webhook(payload):",
+      "    webhook_called.append(payload)",
+      "    return {'status': 'OK'}",
+      "t0 = time.monotonic()",
+      "result = classify_and_dispatch_chunk(",
+      "    'chunk_0002_500_1000.wav',",
+      "    tier1_fn=lambda _p: {'intent': 'MUSIC_CUE', 'mood': 'Tension'},",
+      "    firestore_fn=slow_firestore,",
+      "    webhook_fn=mock_webhook,",
+      "    firestore_timeout_ms=800,",
+      ")",
+      "elapsed_ms = (time.monotonic() - t0) * 1000.0",
+      "print(json.dumps({'result': result, 'webhook_called': len(webhook_called), 'elapsed_ms': elapsed_ms}))"
+    ].join("\n");
+
+    const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 15000
+    }).trim();
+
+    const parsed = JSON.parse(out);
+    expect(parsed.result.firestore_dispatched).toBe(false);
+    expect(parsed.result.firestore_error).toContain("timeout");
+    expect(parsed.result.webhook_dispatched).toBe(true);
+    expect(parsed.result.dispatch_route).toBe("WEBHOOK");
+    expect(parsed.result.offline_spooled).toBe(false);
+    expect(parsed.webhook_called).toBe(1);
+    expect(parsed.elapsed_ms).toBeGreaterThanOrEqual(750);
+    expect(parsed.elapsed_ms).toBeLessThan(1200);
+  });
+
+  it("suppresses all outbound network requests when classified intent is TABLE_BANTER", () => {
+    const pySnippet = [
+      "import json",
+      "from scripts.rpi_vad_chunker import classify_and_dispatch_chunk",
+      "def exploding_firestore(_payload):",
+      "    raise AssertionError('Firestore should not be called for table banter')",
+      "def exploding_webhook(_payload):",
+      "    raise AssertionError('Webhook should not be called for table banter')",
+      "result = classify_and_dispatch_chunk(",
+      "    'chunk_banter.wav',",
+      "    tier1_fn=lambda _p: {'intent': 'TABLE_BANTER', 'mood': None, 'rule': None},",
+      "    firestore_fn=exploding_firestore,",
+      "    webhook_fn=exploding_webhook,",
+      ")",
+      "print(json.dumps(result))"
+    ].join("\n");
+
+    const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+      timeout: 15000
+    }).trim();
+
+    const result = JSON.parse(out);
+    expect(result.dispatch_route).toBe("SUPPRESSED");
+    expect(result.firestore_dispatched).toBe(false);
+    expect(result.webhook_dispatched).toBe(false);
+    expect(result.offline_spooled).toBe(false);
+    expect(result.webhook_payload).toBeNull();
+  });
+
+  it("records unacknowledged cues into offline write-ahead queue in session_audio_manifest.json during network dropouts", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sof-spool-test-"));
+    try {
+      const manifestPath = path.join(tmpDir, "session_audio_manifest.json");
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(
+          [
+            {
+              chunk: "chunk_0001_0_500.wav",
+              start_ms: 0,
+              end_ms: 500,
+              duration_ms: 500
+            }
+          ],
+          null,
+          2
+        ),
+        "utf-8"
+      );
+
+      const pySnippet = [
+        "import json",
+        "from scripts.rpi_vad_chunker import classify_and_dispatch_chunk",
+        "def failing_firestore(_p):",
+        "    raise RuntimeError('Cloud Firestore unavailable (network partition)')",
+        "def failing_webhook(_p):",
+        "    raise RuntimeError('Local webhook unreachable')",
+        "result = classify_and_dispatch_chunk(",
+        "    'chunk_0001_0_500.wav',",
+        "    tier1_fn=lambda _p: {'intent': 'MUSIC_CUE', 'mood': 'Combat'},",
+        "    firestore_fn=failing_firestore,",
+        "    webhook_fn=failing_webhook,",
+        `    manifest_path=${JSON.stringify(manifestPath)},`,
+        ")",
+        "print(json.dumps(result))"
+      ].join("\n");
+
+      const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        timeout: 15000
+      }).trim();
+
+      const result = JSON.parse(out);
+      expect(result.firestore_dispatched).toBe(false);
+      expect(result.webhook_dispatched).toBe(false);
+      expect(result.offline_spooled).toBe(true);
+      expect(result.dispatch_route).toBe("OFFLINE_SPOOL");
+
+      const updatedManifest = JSON.parse(
+        fs.readFileSync(manifestPath, "utf-8")
+      );
+      expect(updatedManifest).toHaveLength(1);
+      expect(updatedManifest[0].chunk).toBe("chunk_0001_0_500.wav");
+      expect(updatedManifest[0].acknowledged).toBe(false);
+      expect(updatedManifest[0].status).toBe("UNACKNOWLEDGED");
+      expect(updatedManifest[0].unacknowledged_cue).toMatchObject({
+        intent: "MUSIC_CUE",
+        mood: "Combat"
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("drains unacknowledged cues from session_audio_manifest.json when connectivity is restored", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sof-drain-test-"));
+    try {
+      const manifestPath = path.join(tmpDir, "session_audio_manifest.json");
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(
+          [
+            {
+              chunk: "chunk_0001_0_500.wav",
+              acknowledged: false,
+              unacknowledged_cue: { intent: "MUSIC_CUE", mood: "Combat" }
+            },
+            {
+              chunk: "chunk_0002_500_1000.wav",
+              acknowledged: false,
+              unacknowledged_cue: { intent: "RULE_QUERY", rule: "Grappled" }
+            }
+          ],
+          null,
+          2
+        ),
+        "utf-8"
+      );
+
+      const pySnippet = [
+        "import json",
+        "from scripts.rpi_vad_chunker import drain_offline_queue",
+        "dispatched = []",
+        "def mock_firestore(payload):",
+        "    dispatched.append(payload)",
+        "    return {'status': 'OK'}",
+        `drain_res = drain_offline_queue(${JSON.stringify(manifestPath)}, firestore_fn=mock_firestore)`,
+        "print(json.dumps({'drain_res': drain_res, 'dispatched': dispatched}))"
+      ].join("\n");
+
+      const out = execFileSync("python3", ["-B", "-c", pySnippet], {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        timeout: 15000
+      }).trim();
+
+      const parsed = JSON.parse(out);
+      expect(parsed.drain_res.drained).toBe(2);
+      expect(parsed.drain_res.remaining).toBe(0);
+      expect(parsed.dispatched).toHaveLength(2);
+
+      const updatedManifest = JSON.parse(
+        fs.readFileSync(manifestPath, "utf-8")
+      );
+      expect(updatedManifest.every((e: any) => e.acknowledged === true)).toBe(
+        true
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("CLI simulation supports direct Firestore dispatch, timeout failover, and table banter suppression", () => {
+    // 1. Direct Firestore OK in <35ms
+    const fsOk = runChunkerCli([
+      "--test-classify",
+      "--firestore-status",
+      "OK",
+      "--firestore-latency-ms",
+      "22",
+      "--intent",
+      "MUSIC_CUE",
+      "--mood",
+      "Combat"
+    ]);
+    expect(fsOk.firestore_dispatched).toBe(true);
+    expect(fsOk.dispatch_route).toBe("FIRESTORE");
+    expect(fsOk.webhook_dispatched).toBe(false);
+    expect(fsOk.firestore_latency_ms).toBeLessThan(35);
+
+    // 2. Timeout budget 800ms failover to webhook
+    const fsTimeout = runChunkerCli([
+      "--test-classify",
+      "--firestore-status",
+      "TIMEOUT",
+      "--webhook-status",
+      "OK",
+      "--intent",
+      "RULE_QUERY",
+      "--rule",
+      "Grappled"
+    ]);
+    expect(fsTimeout.firestore_dispatched).toBe(false);
+    expect(fsTimeout.webhook_dispatched).toBe(true);
+    expect(fsTimeout.dispatch_route).toBe("WEBHOOK");
+
+    // 3. Table banter suppression
+    const banter = runChunkerCli([
+      "--test-classify",
+      "--intent",
+      "TABLE_BANTER"
+    ]);
+    expect(banter.dispatch_route).toBe("SUPPRESSED");
+    expect(banter.firestore_dispatched).toBe(false);
+    expect(banter.webhook_dispatched).toBe(false);
+    expect(banter.offline_spooled).toBe(false);
+  });
+});

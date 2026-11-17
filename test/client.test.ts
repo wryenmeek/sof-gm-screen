@@ -1,6 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
+import {
+  LiveTabletopClient,
+  type AudioCueDocument
+} from "../src/live_tabletop_client";
 
 describe("Client-Side Logic (Index.html)", () => {
   let parseCustomMarkdown: (content: string) => string;
@@ -440,6 +444,261 @@ A resonant construct of bronze and coral.
         document.getElementById("save-status");
       expect(statusEl).not.toBeNull();
       expect(statusEl!.textContent).toContain("3");
+    });
+  });
+
+  describe("Sub-50ms Real-Time Audio Cue & Mood Transition Listener (Ticket 02 / #35)", () => {
+    class MockLiveTabletopClient {
+      public cueListeners: Array<(cue: AudioCueDocument | null) => void> = [];
+      public errorListeners: Array<(err: Error) => void> = [];
+      public unsubscribes: Array<ReturnType<typeof vi.fn>> = [];
+      public sessionDates: string[] = [];
+
+      subscribeToAudioCue(
+        sessionDate: string,
+        callback: (cue: AudioCueDocument | null) => void,
+        onError?: (err: Error) => void
+      ) {
+        this.sessionDates.push(sessionDate);
+        this.cueListeners.push(callback);
+        if (onError) this.errorListeners.push(onError);
+
+        const unsubSpy = vi.fn(() => {
+          const idx = this.cueListeners.indexOf(callback);
+          if (idx !== -1) this.cueListeners.splice(idx, 1);
+        });
+        this.unsubscribes.push(unsubSpy);
+        return unsubSpy;
+      }
+
+      emitCue(cue: AudioCueDocument | null) {
+        for (const listener of [...this.cueListeners]) {
+          listener(cue);
+        }
+      }
+
+      emitError(err: Error) {
+        for (const onError of [...this.errorListeners]) {
+          onError(err);
+        }
+      }
+    }
+
+    const combatScoreId = "combat-score-drive-id";
+    const sampleScoreManifest = [
+      {
+        id: combatScoreId,
+        name: "[Score] combat_theme.mp3",
+        simpleName: "combat_theme.mp3",
+        mimeType: "audio/mpeg"
+      }
+    ];
+
+    it("subscribes to sessions/{date}/live/audio_cue and triggers instant mood crossfades in <50ms without polling", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.renderManifest(sampleScoreManifest);
+      harness.AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(16));
+      harness.TabletopMixer.init();
+
+      // Subscribe to live audio cues
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(mockClient.sessionDates).toContain("2026-10-31");
+      expect(mockClient.cueListeners).toHaveLength(1);
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Verify HTTP polling is suppressed
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+
+      // Simulate incoming live audio cue snapshot
+      const start = performance.now();
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "pi_vad_tier1",
+        triggeredAt: 1730500000100
+      });
+      const elapsedMs = performance.now() - start;
+
+      // Acceptance criterion: instant crossfade executed in <50ms without polling
+      expect(elapsedMs).toBeLessThan(50);
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(
+        harness.TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+
+      const crossfades = harness.TabletopMixer.timeline.filter(
+        (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+      );
+      expect(crossfades).toHaveLength(1);
+
+      // Verify classifier tier label updated in UI
+      const tierEl = document.getElementById("classifier-tier-status");
+      expect(tierEl?.textContent).toBe("Tier: pi_vad_tier1");
+    });
+
+    it("triggers speech ducking instantly when cue payload specifies ducking", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.renderManifest(sampleScoreManifest);
+      harness.AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(16));
+      harness.TabletopMixer.init();
+      harness.initLiveAudioCueSubscription("2026-10-31");
+
+      const duckSpy = vi.spyOn(harness.TabletopMixer, "duckTrackForSpeech");
+
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "gemini_tier2",
+        triggeredAt: 1730500000200,
+        payload: {
+          ducking: true,
+          duckingGain: 0.15,
+          duckingDurationMs: 1200
+        }
+      });
+
+      expect(duckSpy).toHaveBeenCalledWith(1200, 0.15);
+      const duckEvents = harness.TabletopMixer.timeline.filter(
+        (e: any) => e.eventType === "DUCK"
+      );
+      expect(duckEvents).toHaveLength(1);
+      expect(duckEvents[0].gain).toBe(0.15);
+    });
+
+    it("deduplicates audio cues by timestamp and handles Firestore Timestamp objects", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.renderManifest(sampleScoreManifest);
+      harness.AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(16));
+      harness.TabletopMixer.init();
+      harness.initLiveAudioCueSubscription("2026-10-31");
+
+      const firestoreTimestamp = {
+        toMillis: () => 1730500000300
+      };
+
+      // First emission
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "gm_manual_tier3",
+        triggeredAt: firestoreTimestamp
+      });
+
+      expect(
+        harness.TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
+
+      // Duplicate emission with identical toMillis timestamp is ignored
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "gm_manual_tier3",
+        triggeredAt: firestoreTimestamp
+      });
+
+      expect(
+        harness.TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
+    });
+
+    it("resumes HTTP polling fallback on Firestore error and suppresses again on reconnect", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Suppressed while live
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+
+      // Stream error: failover to HTTP polling
+      mockClient.emitError(new Error("Network connection dropped"));
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+
+      // Reconnect: snapshot arrives and restores live state
+      mockClient.emitCue({
+        intent: "RULE_QUERY",
+        mood: null as any,
+        rule: "grappled",
+        source: "pi_vad_tier1",
+        triggeredAt: 1730500000400
+      });
+
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Subsequent polling calls are suppressed again
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("unsubscribes prior listener on session switch to prevent memory leaks and zombie reads", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(mockClient.sessionDates).toEqual(["2026-10-31"]);
+      const initialUnsub = mockClient.unsubscribes[0];
+      expect(initialUnsub).not.toHaveBeenCalled();
+
+      // Switch session to 2026-11-20
+      harness.loadSession("2026-11-20");
+
+      expect(initialUnsub).toHaveBeenCalledTimes(1);
+      expect(mockClient.sessionDates).toEqual(["2026-10-31", "2026-11-20"]);
+      expect(mockClient.cueListeners).toHaveLength(1);
+
+      // Teardown on unmount
+      harness.teardownLiveAudioCueSubscription();
+      const secondUnsub = mockClient.unsubscribes[1];
+      expect(secondUnsub).toHaveBeenCalledTimes(1);
+      expect(harness.isFirestoreLive()).toBe(false);
+    });
+
+    it("subscribes and disposes cleanly using the real LiveTabletopClient modular instance", () => {
+      const realClient = new LiveTabletopClient({
+        appName: `real-client-test-${Date.now()}`
+      });
+      const harness = setupClientHarness({
+        liveTabletopClient: realClient
+      });
+
+      const unsub = harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(unsub).toBeDefined();
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Polling is suppressed
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+
+      // Clean unmount
+      harness.teardownLiveAudioCueSubscription();
+      expect(harness.isFirestoreLive()).toBe(false);
+      realClient.destroy();
     });
   });
 });

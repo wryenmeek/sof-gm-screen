@@ -116,6 +116,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
       result: {
         objectStoreNames: { contains: () => true },
         createObjectStore: vi.fn(),
+        close: vi.fn(),
         transaction: () => {
           const tx: any = {
             objectStore: () => ({
@@ -415,10 +416,26 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         triggerPtt: typeof triggerPtt !== "undefined" ? triggerPtt : undefined,
         showRuleCard: typeof showRuleCard_ !== "undefined" ? showRuleCard_ : undefined,
         dismissRuleCard: typeof dismissRuleCard !== "undefined" ? dismissRuleCard : undefined,
-        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined
+        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined,
+        initLiveAudioCueSubscription: typeof initLiveAudioCueSubscription_ !== "undefined" ? initLiveAudioCueSubscription_ : undefined,
+        teardownLiveAudioCueSubscription: typeof teardownLiveAudioCueSubscription_ !== "undefined" ? teardownLiveAudioCueSubscription_ : undefined,
+        isFirestoreLive: () => typeof isFirestoreLive_ !== "undefined" ? isFirestoreLive_ : false,
+        getAudioCueUnsubscribe: () => typeof audioCueUnsubscribe_ !== "undefined" ? audioCueUnsubscribe_ : null,
+        setFirestoreLiveState: typeof setFirestoreLiveState_ !== "undefined" ? setFirestoreLiveState_ : undefined
       };
     `
   );
+
+  const liveTabletopClient =
+    options.liveTabletopClient ??
+    (options.initLiveTabletopClient
+      ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
+      : undefined);
+
+  if (liveTabletopClient) {
+    (window as any).liveTabletopClient = liveTabletopClient;
+  }
+  (window as any).LiveTabletopClient = LiveTabletopClient;
 
   const exported = fn(
     window,
@@ -428,12 +445,6 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     (window as any).google,
     mockLocalStorage
   );
-
-  const liveTabletopClient =
-    options.liveTabletopClient ??
-    (options.initLiveTabletopClient
-      ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
-      : undefined);
 
   return {
     ...exported,

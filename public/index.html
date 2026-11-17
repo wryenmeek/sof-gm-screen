@@ -1199,6 +1199,7 @@
         if (isCompanionMode_()) {
           document.body.classList.add("companion-only-mode");
           loadDriveRulesGlossary_(currentSessionDate);
+          initLiveAudioCueSubscription_(currentSessionDate);
           return;
         }
         installAudioUnlockHandler_();
@@ -1209,6 +1210,7 @@
         loadTableNotes_();
         loadDriveRulesGlossary_(currentSessionDate);
         startNotesAutoSave_();
+        initLiveAudioCueSubscription_(currentSessionDate);
         pollLatestAudioCue_();
       };
 
@@ -1302,6 +1304,7 @@
 
         refreshManifest();
         loadTableNotes_();
+        initLiveAudioCueSubscription_(currentSessionDate);
       }
 
       const loadSession = switchSession;
@@ -2539,6 +2542,44 @@
             });
           }, 1500);
         },
+        duckTrackForSpeech(durationMs = 1500, targetGain = null) {
+          if (!this.channel2Gain) return;
+          const now = this.now_();
+          const duckedGain =
+            typeof targetGain === "number"
+              ? targetGain
+              : Number(
+                  (this.baseChannel2Gain * Math.pow(10, -8 / 20)).toFixed(3)
+                );
+          const normalGain = this.baseChannel2Gain;
+          this.channel2Gain.gain.linearRampToValueAtTime(
+            duckedGain,
+            now + 0.05
+          );
+          this.logEvent_({
+            timestamp: Date.now(),
+            track: "speech_ducking",
+            channel: 2,
+            eventType: "DUCK",
+            gain: duckedGain
+          });
+          if (this.duckTimer) clearTimeout(this.duckTimer);
+          this.duckTimer = setTimeout(() => {
+            if (this.channel2Gain) {
+              this.channel2Gain.gain.linearRampToValueAtTime(
+                normalGain,
+                this.now_() + 0.4
+              );
+            }
+            this.logEvent_({
+              timestamp: Date.now(),
+              track: "speech_ducking",
+              channel: 2,
+              eventType: "RESTORE",
+              gain: normalGain
+            });
+          }, durationMs);
+        },
         playSfx(sfxId, audioBuffer = null) {
           return this.triggerSfx(sfxId, audioBuffer);
         }
@@ -3461,22 +3502,60 @@
 
       let lastHandledCueTimestamp_ = null;
 
+      function extractCueTimestamp_(cue) {
+        if (!cue) return null;
+        if (cue.timestamp !== undefined && cue.timestamp !== null) {
+          return cue.timestamp;
+        }
+        if (cue.triggeredAt !== undefined && cue.triggeredAt !== null) {
+          if (typeof cue.triggeredAt.toMillis === "function") {
+            return cue.triggeredAt.toMillis();
+          }
+          if (typeof cue.triggeredAt.getTime === "function") {
+            return cue.triggeredAt.getTime();
+          }
+          if (
+            typeof cue.triggeredAt === "number" ||
+            typeof cue.triggeredAt === "string"
+          ) {
+            return cue.triggeredAt;
+          }
+        }
+        return null;
+      }
+
       function handleAudioIntent_(intentPayload) {
         if (!intentPayload || !intentPayload.intent) return;
-        if (
-          intentPayload.timestamp !== undefined &&
-          intentPayload.timestamp !== null
-        ) {
-          if (intentPayload.timestamp === lastHandledCueTimestamp_) {
+        const cueTimestamp = extractCueTimestamp_(intentPayload);
+        if (cueTimestamp !== null && cueTimestamp !== undefined) {
+          if (cueTimestamp === lastHandledCueTimestamp_) {
             return;
           }
-          lastHandledCueTimestamp_ = intentPayload.timestamp;
+          lastHandledCueTimestamp_ = cueTimestamp;
         }
-        const tierLabel = intentPayload.tier || intentPayload.activeTier;
+        const tierLabel =
+          intentPayload.tier ||
+          intentPayload.activeTier ||
+          intentPayload.source;
         if (tierLabel) {
           const tierEl = document.getElementById("classifier-tier-status");
           if (tierEl) {
             tierEl.textContent = "Tier: " + tierLabel;
+          }
+        }
+        const payload = intentPayload.payload || {};
+        const shouldDuck = Boolean(intentPayload.ducking || payload.ducking);
+        if (shouldDuck && !isCompanionMode_()) {
+          const duckDuration =
+            payload.duckingDurationMs ||
+            intentPayload.duckingDurationMs ||
+            1500;
+          const duckGain =
+            payload.duckingGain !== undefined
+              ? payload.duckingGain
+              : intentPayload.duckingGain;
+          if (typeof activeMixer.duckTrackForSpeech === "function") {
+            activeMixer.duckTrackForSpeech(duckDuration, duckGain);
           }
         }
         if (intentPayload.intent === "MUSIC_CUE" && intentPayload.mood) {
@@ -3486,6 +3565,13 @@
             } else {
               playMusicCue_(intentPayload);
             }
+          }
+        } else if (
+          intentPayload.intent === "SFX" &&
+          (intentPayload.trackId || payload.trackTitle)
+        ) {
+          if (!isCompanionMode_()) {
+            activeMixer.triggerSfx(intentPayload.trackId || payload.trackTitle);
           }
         } else if (
           intentPayload.intent === "RULE_QUERY" &&
@@ -3505,11 +3591,102 @@
         }
       }
 
+      let isFirestoreLive_ = false;
+      let liveTabletopClient_ = null;
+      let audioCueUnsubscribe_ = null;
+
+      function getLiveTabletopClient_() {
+        if (liveTabletopClient_) return liveTabletopClient_;
+        if (typeof window !== "undefined") {
+          if (window.liveTabletopClient) {
+            liveTabletopClient_ = window.liveTabletopClient;
+            return liveTabletopClient_;
+          }
+          if (typeof window.LiveTabletopClient === "function") {
+            try {
+              liveTabletopClient_ = new window.LiveTabletopClient();
+              return liveTabletopClient_;
+            } catch (err) {
+              console.warn(
+                "[LiveTabletop] Failed to instantiate LiveTabletopClient:",
+                err
+              );
+            }
+          }
+        }
+        return null;
+      }
+
+      function setFirestoreLiveState_(isLive) {
+        isFirestoreLive_ = Boolean(isLive);
+        if (isFirestoreLive_) {
+          if (audioCuePollTimer_ !== null) {
+            clearTimeout(audioCuePollTimer_);
+            audioCuePollTimer_ = null;
+          }
+        } else {
+          scheduleNextAudioCuePoll_();
+        }
+      }
+
+      function initLiveAudioCueSubscription_(sessionDate = currentSessionDate) {
+        if (audioCueUnsubscribe_) {
+          try {
+            audioCueUnsubscribe_();
+          } catch (_e) {}
+          audioCueUnsubscribe_ = null;
+        }
+
+        const client = getLiveTabletopClient_();
+        if (!client || typeof client.subscribeToAudioCue !== "function") {
+          setFirestoreLiveState_(false);
+          return null;
+        }
+
+        try {
+          audioCueUnsubscribe_ = client.subscribeToAudioCue(
+            sessionDate,
+            (cue) => {
+              setFirestoreLiveState_(true);
+              if (cue) {
+                handleAudioIntent_(cue);
+              }
+            },
+            (err) => {
+              console.warn(
+                "[LiveTabletop] Real-time audio cue stream error:",
+                err
+              );
+              setFirestoreLiveState_(false);
+            }
+          );
+          setFirestoreLiveState_(true);
+        } catch (err) {
+          console.warn(
+            "[LiveTabletop] Failed to subscribe to real-time audio cue:",
+            err
+          );
+          setFirestoreLiveState_(false);
+        }
+        return audioCueUnsubscribe_;
+      }
+
+      function teardownLiveAudioCueSubscription_() {
+        if (audioCueUnsubscribe_) {
+          try {
+            audioCueUnsubscribe_();
+          } catch (_e) {}
+          audioCueUnsubscribe_ = null;
+        }
+        setFirestoreLiveState_(false);
+      }
+
       const AUDIO_CUE_POLL_INTERVAL_MS = 5000;
       let audioCuePollTimer_ = null;
       let audioCuePollInFlight_ = false;
 
       function scheduleNextAudioCuePoll_() {
+        if (isFirestoreLive_) return;
         if (audioCuePollTimer_ !== null) clearTimeout(audioCuePollTimer_);
         audioCuePollTimer_ = setTimeout(() => {
           audioCuePollTimer_ = null;
@@ -3518,6 +3695,7 @@
       }
 
       function pollLatestAudioCue_() {
+        if (isFirestoreLive_) return;
         if (audioCuePollInFlight_) return;
         if (
           typeof google === "undefined" ||
@@ -3579,6 +3757,11 @@
           finishRequest(null, false);
         }
       }
+
+      window.addEventListener(
+        "beforeunload",
+        teardownLiveAudioCueSubscription_
+      );
 
       window.addEventListener("message", (event) => {
         if (

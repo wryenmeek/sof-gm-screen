@@ -53,3 +53,73 @@ _Avoid_: Battlemap, dungeon map, plan, diagram.
 **Handout**:
 A player-facing document, prop, translated script, or companion handout referenced during play or linked from an Encounter Dossier.
 _Avoid_: Player doc, companion handout, attachment, paper, handout file.
+
+### Audio, Companion & Campaign Governance
+
+**Tabletop Mixer**:
+The multi-channel audio mixing engine managing continuous ambient loops, thematic musical scores with crossfades, and one-shot sound effects with automatic score ducking during a session.
+_Avoid_: Soundboard, music player, audio controller, synthesizer.
+
+**Mood Cue**:
+A named thematic state transition—such as exploration, tension, combat, or rest—that triggers a musical score crossfade in the Tabletop Mixer.
+_Avoid_: Music trigger, track switch, vibe shift, playlist cue.
+
+**Audio Timeline Sidecar**:
+The chronological event log recording mixer state transitions and track cues during play for post-session recap synchronization.
+_Avoid_: Audio history, playback log, track history, mixer dump.
+
+**Player Companion**:
+The player-facing interface displaying character identity selection, voice rule lookups, and dismissible rule cards without exposing GM-only encounter notes.
+_Avoid_: Mobile app, player view, phone mode, mini screen.
+
+**Push-to-Talk Rules Sniffer**:
+The on-demand voice query listener activated from the Player Companion to capture a spoken rules question and match it against the Rules Glossary.
+_Avoid_: Voice assistant, always-on mic, speech bot, rule search bar.
+
+**Rules Glossary**:
+The unified collection of 5e mechanics, spell definitions, condition summaries, and campaign lore entries indexed for instant lookup by the Player Companion and GM Screen.
+_Avoid_: Rulebook, SRD dump, lore dictionary, reference table.
+
+**Rule Card**:
+A dismissible quick-reference card displaying a matched game mechanic, spell, or condition summary with player feedback controls.
+_Avoid_: Tooltip, popup, rule modal, glossary toast.
+
+**Speech Chunk**:
+A timestamped, voice-gated audio segment containing active table speech stripped of room silence.
+_Avoid_: Audio clip, recording slice, voice snippet, raw stream.
+
+**Audio Cue**:
+A structured intent signal derived from a classified Speech Chunk—identifying a musical shift, rules question, or table banter—dispatched to the GM Screen.
+_Avoid_: Webhook payload, intent event, voice command, classifier message.
+
+**Attendance Quorum**:
+The session readiness status calculated from player RSVPs against the campaign minimum attendance threshold and active Storyline Locks.
+_Avoid_: Headcount, invite check, RSVP tally, roster check.
+
+**Storyline Lock**:
+A designation on a player whose character is central to the upcoming session's narrative arc, requiring their confirmed attendance for Attendance Quorum to hold.
+_Avoid_: Mandatory player, VIP attendee, critical role, quorum blocker.
+
+**Weather Hexflower**:
+The campaign's maritime weather probability table rolled via 2d8 once Attendance Quorum is met to forecast sea conditions for the upcoming Session.
+_Avoid_: Weather chart, random weather table, sea forecast generator, climate roll.
+
+**Narrative Promise**:
+An in-session GM commitment—such as a pending rules adjudication, custom crafting timer, NPC favor, or plot debt—recorded in Table Notes and tracked as an actionable post-session prep task.
+_Avoid_: Todo item, reminder, action item, quest log.
+
+**GM Secret**:
+The shared authentication secret configured in Script Properties (`SOF_GM_KEY`) and passed via `gmKey` parameter or request header to guard Game Master RPCs, webhooks, and administrative actions from player exposure.
+_Avoid_: Admin password, GM token, auth code, API key.
+
+**3-Tier Classifier**:
+The tiered intent classification architecture governing Speech Chunks across Tier 1 (local Raspberry Pi edge model <= 1500ms), Tier 2 (cloud Gemini 2.5 Flash fallback), and Tier 3 (manual GM Screen UI buttons).
+_Avoid_: Classifier state machine, fallback hierarchy, intent parser.
+
+**Audio Cache**:
+The client-side IndexedDB store (`sof_audio_cache_v1`) pre-caching binary audio Session Assets from Google Drive v3 REST endpoints for zero-latency, CORS-free playback during play.
+_Avoid_: Audio storage, track database, sound buffer.
+
+**Edge Audio Manifest**:
+The local JSON catalog (`session_audio_manifest.json`) generated on the Raspberry Pi recording timestamped metadata and file paths for all sliced Speech Chunks.
+_Avoid_: Session manifest, audio log, speech list.

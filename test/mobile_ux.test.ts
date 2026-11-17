@@ -766,4 +766,223 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(rosterList.textContent).toContain("Unclaimed");
     });
   });
+
+  describe("Ticket 06 / #39: Player Companion Ambient HUD: Web Haptics Turn Alerts & Table Reactions Drawer", () => {
+    it("detects when activeCombatantId === myCharacterId, displays illuminated turn banner, and fires navigator.vibrate([100, 50, 100])", () => {
+      const vibrateSpy = vi.fn();
+      (navigator as any).vibrate = vibrateSpy;
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        }
+      });
+      (window as any).onload();
+
+      const banner = document.getElementById("player-turn-banner")!;
+      expect(banner).not.toBeNull();
+      expect(banner.style.display).toBe("none");
+
+      // Combat payload where Pog is active at index 0
+      const combatStatePogActive = {
+        round: 1,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 18,
+            statusBand: "UNINJURED" as const,
+            claimedBy: "anon_test_uid"
+          },
+          {
+            id: "goblin",
+            name: "Goblin",
+            initiative: 12,
+            statusBand: "INJURED" as const,
+            claimedBy: null
+          }
+        ]
+      };
+
+      harness.renderPlayerCombat(combatStatePogActive);
+
+      // Banner illuminated
+      expect(banner.style.display).toBe("flex");
+      // Haptics fired
+      expect(vibrateSpy).toHaveBeenCalledWith([100, 50, 100]);
+
+      // Turn advances to Goblin (not Pog)
+      const combatStateGoblinActive = {
+        round: 1,
+        activeIndex: 1,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 18,
+            statusBand: "UNINJURED" as const,
+            claimedBy: "anon_test_uid"
+          },
+          {
+            id: "goblin",
+            name: "Goblin",
+            initiative: 12,
+            statusBand: "INJURED" as const,
+            claimedBy: null
+          }
+        ]
+      };
+
+      vibrateSpy.mockClear();
+      harness.renderPlayerCombat(combatStateGoblinActive);
+
+      // Banner hides
+      expect(banner.style.display).toBe("none");
+      // No extra vibration
+      expect(vibrateSpy).not.toHaveBeenCalled();
+
+      // Turn returns to Pog in Round 2 -> triggers haptics again
+      const combatStatePogRound2 = {
+        round: 2,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 18,
+            statusBand: "UNINJURED" as const,
+            claimedBy: "anon_test_uid"
+          },
+          {
+            id: "goblin",
+            name: "Goblin",
+            initiative: 12,
+            statusBand: "INJURED" as const,
+            claimedBy: null
+          }
+        ]
+      };
+
+      harness.renderPlayerCombat(combatStatePogRound2);
+      expect(banner.style.display).toBe("flex");
+      expect(vibrateSpy).toHaveBeenCalledWith([100, 50, 100]);
+    });
+
+    it("degrades gracefully without throwing when navigator.vibrate is unavailable or throws (e.g. iOS Safari)", () => {
+      // Delete navigator.vibrate
+      delete (navigator as any).vibrate;
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        }
+      });
+      (window as any).onload();
+
+      const banner = document.getElementById("player-turn-banner")!;
+      expect(() => {
+        harness.renderPlayerCombat({
+          round: 1,
+          activeIndex: 0,
+          isRunning: true,
+          combatants: [
+            {
+              id: "pog",
+              name: "Pog",
+              initiative: 18,
+              statusBand: "UNINJURED" as const,
+              claimedBy: null
+            }
+          ]
+        });
+      }).not.toThrow();
+
+      expect(banner.style.display).toBe("flex");
+
+      // When navigator.vibrate throws
+      (navigator as any).vibrate = vi.fn().mockImplementation(() => {
+        throw new Error("SecurityError: vibrate not allowed in iframe");
+      });
+
+      expect(() => {
+        harness.renderPlayerCombat({
+          round: 1,
+          activeIndex: 0,
+          isRunning: true,
+          combatants: [
+            {
+              id: "pog",
+              name: "Pog",
+              initiative: 18,
+              statusBand: "UNINJURED" as const,
+              claimedBy: null
+            }
+          ]
+        });
+      }).not.toThrow();
+    });
+
+    it("renders persistent 5-emoji bottom reaction drawer with >= 44px hitboxes", () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+      (window as any).onload();
+
+      const drawer = document.getElementById("companion-reaction-drawer")!;
+      expect(drawer).not.toBeNull();
+      expect(drawer.getAttribute("role")).toBe("toolbar");
+
+      const buttons =
+        drawer.querySelectorAll<HTMLButtonElement>(".reaction-btn");
+      expect(buttons.length).toBe(5);
+
+      const expectedEmojis = ["⚔️", "🛡️", "🎲", "🍻", "💀"];
+      const actualEmojis = Array.from(buttons).map((btn) =>
+        btn.getAttribute("data-emoji")
+      );
+      expect(actualEmojis).toEqual(expectedEmojis);
+
+      // Verify touch hitboxes >= 44px class presence
+      for (const btn of Array.from(buttons)) {
+        expect(btn.classList.contains("reaction-btn")).toBe(true);
+      }
+    });
+
+    it("clicking reaction emoji writes to sessions/{date}/live/reactions via sendReaction", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_reactor", isAnonymous: true },
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        }
+      });
+      (window as any).onload();
+
+      const drawer = document.getElementById("companion-reaction-drawer")!;
+      const diceBtn = drawer.querySelector<HTMLButtonElement>(
+        '.reaction-btn[data-emoji="🎲"]'
+      )!;
+      expect(diceBtn).not.toBeNull();
+
+      diceBtn.click();
+      await vi.advanceTimersByTimeAsync(50);
+
+      const reactions = harness.liveTabletopClient.reactionsStore;
+      expect(reactions.length).toBe(1);
+      expect(reactions[0].emoji).toBe("🎲");
+      expect(reactions[0].characterName).toBe("Pog");
+      expect(reactions[0].uid).toBe("anon_reactor");
+      expect(typeof reactions[0].timestamp).toBe("number");
+      expect(reactions[0].id).toMatch(/^rx_/);
+    });
+  });
 });

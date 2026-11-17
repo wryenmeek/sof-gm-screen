@@ -923,5 +923,87 @@ A resonant construct of bronze and coral.
       expect(listEl!.innerHTML).toContain("BLOODIED");
       expect(listEl!.innerHTML).toContain("active-combatant");
     });
+
+    it("Ticket 06 / #39: GM Screen subscribes to live/reactions and renders transient floating reaction bubbles above initiative tracker", async () => {
+      vi.useFakeTimers();
+      try {
+        const gmHarness = setupClientHarness({
+          viewMode: "gm"
+        });
+        (window as any).onload();
+
+        const reactionsContainer = document.getElementById(
+          "gm-reactions-container"
+        );
+        expect(reactionsContainer).not.toBeNull();
+
+        // Emit reaction on liveTabletopClient
+        await gmHarness.liveTabletopClient.sendReaction("2026-10-31", {
+          id: "rx_test_1",
+          uid: "player_pog",
+          characterName: "Pog",
+          emoji: "⚔️",
+          timestamp: Date.now()
+        });
+
+        // Advance timer for reaction listener callback
+        await vi.advanceTimersByTimeAsync(50);
+
+        // Verify bubble rendered inside #gm-reactions-container
+        const bubbles = reactionsContainer!.querySelectorAll(
+          ".floating-reaction-bubble"
+        );
+        expect(bubbles.length).toBe(1);
+        expect(bubbles[0].textContent).toContain("⚔️");
+        expect(bubbles[0].textContent).toContain("Pog");
+        expect(bubbles[0].getAttribute("data-reaction-id")).toBe("rx_test_1");
+
+        // Verify transient cleanup after timeout (2400ms)
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(
+          reactionsContainer!.querySelectorAll(".floating-reaction-bubble")
+            .length
+        ).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("Ticket 06 / #39: FIFO bounds logic in sendReaction ensures reactions array never exceeds 20 items", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+      const client = harness.liveTabletopClient;
+
+      // Seed 20 reactions
+      for (let i = 1; i <= 20; i++) {
+        await client.sendReaction("2026-10-31", {
+          id: `rx_${i}`,
+          uid: "player_1",
+          characterName: "Pog",
+          emoji: "⚔️",
+          timestamp: 1000 + i
+        });
+      }
+
+      expect(client.reactionsStore.length).toBe(20);
+      expect(client.reactionsStore[0].id).toBe("rx_1");
+      expect(client.reactionsStore[19].id).toBe("rx_20");
+
+      // Send 21st reaction
+      await client.sendReaction("2026-10-31", {
+        id: "rx_21_overflow",
+        uid: "player_1",
+        characterName: "Pog",
+        emoji: "💀",
+        timestamp: 2000
+      });
+
+      // Still capped at 20 items, oldest reaction rx_1 evicted, newest is rx_21_overflow
+      expect(client.reactionsStore.length).toBe(20);
+      expect(client.reactionsStore[0].id).toBe("rx_2");
+      expect(client.reactionsStore[19].id).toBe("rx_21_overflow");
+      expect(client.reactionsStore[19].emoji).toBe("💀");
+    });
   });
 });

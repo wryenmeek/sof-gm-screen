@@ -293,6 +293,63 @@ describe("Cloud Firestore Security Rules & Access Boundary Suite (SEC-01 - SEC-1
     );
   });
 
+  it("Ticket 06 / #39: Anonymous Companion can read live/reactions and append each canonical 5-emoji reaction", async () => {
+    const player1 = testEnv.authenticatedContext("player_1", {
+      firebase: { sign_in_provider: "anonymous" }
+    });
+    const db = player1.firestore();
+    const docRef = db.doc(`sessions/${SESSION_DATE}/live/reactions`);
+
+    // 1. Read live/reactions
+    const snap = await assertSucceeds(docRef.get());
+    expect(snap.exists()).toBe(true);
+
+    // 2. Write each of the 5 canonical emojis (⚔️, 🛡️, 🎲, 🍻, 💀)
+    const emojis = ["⚔️", "🛡️", "🎲", "🍻", "💀"];
+    for (let i = 0; i < emojis.length; i++) {
+      await assertSucceeds(
+        docRef.update({
+          recentReactions: [
+            {
+              id: `rx_canon_${i}`,
+              uid: "player_1",
+              characterName: "Pog",
+              emoji: emojis[i],
+              timestamp: 3100 + i
+            }
+          ],
+          updatedAt: 3100 + i
+        })
+      );
+    }
+  });
+
+  it("Ticket 06 / #39: Unauthenticated client cannot read or write live/reactions, and companion cannot delete", async () => {
+    const unauth = testEnv.unauthenticatedContext();
+    const docRef = unauth
+      .firestore()
+      .doc(`sessions/${SESSION_DATE}/live/reactions`);
+
+    await assertFails(docRef.get());
+    await assertFails(
+      docRef.update({
+        recentReactions: [],
+        updatedAt: 3000
+      })
+    );
+
+    // Authenticated companion cannot delete live/reactions (GM only)
+    const player1 = testEnv.authenticatedContext("player_1", {
+      firebase: { sign_in_provider: "anonymous" }
+    });
+    await assertFails(
+      player1
+        .firestore()
+        .doc(`sessions/${SESSION_DATE}/live/reactions`)
+        .delete()
+    );
+  });
+
   it("SEC-12: Anonymous Player can submit valid Rule Card feedback", async () => {
     const player1 = testEnv.authenticatedContext("player_1", {
       firebase: { sign_in_provider: "anonymous" }

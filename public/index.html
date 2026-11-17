@@ -848,6 +848,189 @@
         color: var(--cyan);
         margin-left: 6px;
       }
+
+      /* Ambient HUD Turn Alert Banner (Ticket 06 / #39) */
+      .player-turn-banner {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 12px 16px;
+        border-radius: 8px;
+        background: linear-gradient(
+          135deg,
+          rgba(217, 119, 6, 0.25) 0%,
+          rgba(15, 23, 42, 0.95) 100%
+        );
+        border: 2px solid var(--gold);
+        color: #fef08a;
+        box-shadow:
+          0 0 15px rgba(217, 119, 6, 0.5),
+          inset 0 0 10px rgba(217, 119, 6, 0.2);
+        margin-bottom: 12px;
+        box-sizing: border-box;
+        animation: turn-pulse 2s infinite ease-in-out;
+      }
+
+      @keyframes turn-pulse {
+        0%,
+        100% {
+          box-shadow:
+            0 0 12px rgba(217, 119, 6, 0.4),
+            inset 0 0 8px rgba(217, 119, 6, 0.2);
+          border-color: var(--gold);
+        }
+
+        50% {
+          box-shadow:
+            0 0 24px rgba(217, 119, 6, 0.8),
+            inset 0 0 16px rgba(217, 119, 6, 0.4);
+          border-color: #fde047;
+        }
+      }
+
+      .turn-banner-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .turn-banner-icon {
+        font-size: 20px;
+      }
+
+      /* Persistent 5-Emoji Reaction Drawer (Ticket 06 / #39) */
+      .companion-reaction-drawer {
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid var(--card-border, #334155);
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        z-index: 50;
+        margin-top: auto;
+      }
+
+      .reaction-drawer-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+      }
+
+      .reaction-buttons-container {
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        width: 100%;
+        max-width: 420px;
+        gap: 8px;
+      }
+
+      .reaction-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 48px;
+        min-height: 48px;
+        width: 52px;
+        height: 52px;
+        border-radius: 12px;
+        background: #1e293b;
+        border: 1px solid #334155;
+        color: var(--text);
+        font-size: 24px;
+        cursor: pointer;
+        transition:
+          transform 0.15s ease,
+          background 0.15s ease,
+          border-color 0.15s ease;
+        user-select: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .reaction-btn:hover {
+        background: #334155;
+        border-color: var(--gold);
+        transform: translateY(-2px);
+      }
+
+      .reaction-btn:active {
+        transform: scale(0.92);
+        background: #0f172a;
+      }
+
+      /* GM Screen Floating Reaction Bubbles (Ticket 06 / #39) */
+      .gm-reactions-container {
+        position: relative;
+        width: 100%;
+        min-height: 0;
+        pointer-events: none;
+        overflow: visible;
+      }
+
+      .floating-reaction-bubble {
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid var(--gold);
+        border-radius: 20px;
+        padding: 4px 10px;
+        color: var(--text);
+        font-size: 13px;
+        box-shadow:
+          0 4px 12px rgba(0, 0, 0, 0.4),
+          0 0 10px rgba(217, 119, 6, 0.3);
+        animation: float-up-fade 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        pointer-events: none;
+        z-index: 100;
+        white-space: nowrap;
+      }
+
+      @keyframes float-up-fade {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, 10px) scale(0.8);
+        }
+
+        15% {
+          opacity: 1;
+          transform: translate(-50%, 0) scale(1.05);
+        }
+
+        30% {
+          transform: translate(-50%, -5px) scale(1);
+        }
+
+        75% {
+          opacity: 0.95;
+          transform: translate(-50%, -35px) scale(1);
+        }
+
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -55px) scale(0.85);
+        }
+      }
+
       @media print {
         body {
           background: #ffffff;
@@ -1045,6 +1228,12 @@
 
       <!-- GM Combat Tracker Section (Ticket 04 / #37) -->
       <div id="gm-combat-tracker" class="sidebar-section">
+        <!-- Floating Table Reactions Container (Ticket 06 / #39) -->
+        <div
+          id="gm-reactions-container"
+          class="gm-reactions-container"
+          aria-live="polite"
+        ></div>
         <div class="combat-tracker-header">
           <span class="combat-tracker-title">⚔️ Combat Tracker</span>
           <div class="combat-controls">
@@ -1429,6 +1618,22 @@
         </div>
       </div>
 
+      <!-- Player Companion Turn Alert Banner (Ticket 06 / #39) -->
+      <div
+        id="player-turn-banner"
+        class="player-turn-banner"
+        role="alert"
+        aria-live="assertive"
+        style="display: none"
+      >
+        <div class="turn-banner-content">
+          <span class="turn-banner-icon">⚔️</span>
+          <span class="turn-banner-text"
+            ><strong>YOUR TURN!</strong> Take your action</span
+          >
+        </div>
+      </div>
+
       <!-- Player Companion Combat Tracker (Ticket 04 / #37) -->
       <div
         id="player-combat-tracker"
@@ -1485,6 +1690,63 @@
       <button id="ptt-btn" onclick="triggerPtt()" aria-pressed="false">
         🎙️ Tap to Ask Rule
       </button>
+
+      <!-- Player Companion 5-Emoji Table Reaction Drawer (Ticket 06 / #39) -->
+      <nav
+        id="companion-reaction-drawer"
+        class="companion-reaction-drawer"
+        role="toolbar"
+        aria-label="Table Reactions"
+      >
+        <div class="reaction-drawer-title">Table Reactions</div>
+        <div class="reaction-buttons-container">
+          <button
+            type="button"
+            class="reaction-btn"
+            data-emoji="⚔️"
+            aria-label="React with Swords"
+            onclick="sendReaction('⚔️')"
+          >
+            <span class="reaction-emoji">⚔️</span>
+          </button>
+          <button
+            type="button"
+            class="reaction-btn"
+            data-emoji="🛡️"
+            aria-label="React with Shield"
+            onclick="sendReaction('🛡️')"
+          >
+            <span class="reaction-emoji">🛡️</span>
+          </button>
+          <button
+            type="button"
+            class="reaction-btn"
+            data-emoji="🎲"
+            aria-label="React with Dice"
+            onclick="sendReaction('🎲')"
+          >
+            <span class="reaction-emoji">🎲</span>
+          </button>
+          <button
+            type="button"
+            class="reaction-btn"
+            data-emoji="🍻"
+            aria-label="React with Cheers"
+            onclick="sendReaction('🍻')"
+          >
+            <span class="reaction-emoji">🍻</span>
+          </button>
+          <button
+            type="button"
+            class="reaction-btn"
+            data-emoji="💀"
+            aria-label="React with Skull"
+            onclick="sendReaction('💀')"
+          >
+            <span class="reaction-emoji">💀</span>
+          </button>
+        </div>
+      </nav>
     </div>
 
     <div
@@ -1712,8 +1974,113 @@
           .join("");
       }
 
+      let lastTurnWasMyTurn_ = false;
+      let lastActiveCombatantId_ = null;
+
+      function triggerTurnHaptics_() {
+        if (
+          typeof navigator !== "undefined" &&
+          typeof navigator.vibrate === "function"
+        ) {
+          try {
+            navigator.vibrate([100, 50, 100]);
+          } catch (_e) {
+            // Graceful degradation when vibration fails or is unsupported
+          }
+        }
+      }
+
+      function checkTurnAlert_(combat) {
+        const banner = document.getElementById("player-turn-banner");
+        if (
+          !combat ||
+          !Array.isArray(combat.combatants) ||
+          combat.combatants.length === 0 ||
+          combat.isRunning === false
+        ) {
+          if (banner) {
+            banner.style.display = "none";
+          }
+          lastTurnWasMyTurn_ = false;
+          lastActiveCombatantId_ = null;
+          return;
+        }
+
+        const activeIndex =
+          typeof combat.activeIndex === "number" ? combat.activeIndex : -1;
+        const activeCombatant =
+          activeIndex >= 0 && activeIndex < combat.combatants.length
+            ? combat.combatants[activeIndex]
+            : null;
+        const currentCombatantId = activeCombatant ? activeCombatant.id : null;
+
+        const client = getOrCreateLiveTabletopClient_();
+        const currentUid =
+          currentAnonymousUid ||
+          (client &&
+            client.getCurrentUser &&
+            client.getCurrentUser() &&
+            client.getCurrentUser().uid);
+        const myCharId =
+          currentClaimedCharacterId ||
+          (currentPlayerIdentity
+            ? currentPlayerIdentity.toLowerCase().replace(/[^a-z0-9]/g, "")
+            : null);
+
+        let isMyTurn = false;
+        if (activeCombatant) {
+          if (
+            myCharId &&
+            (activeCombatant.id === myCharId ||
+              (activeCombatant.id &&
+                activeCombatant.id.toLowerCase() === myCharId.toLowerCase()))
+          ) {
+            isMyTurn = true;
+          } else if (
+            currentClaimedCharacterId &&
+            activeCombatant.id === currentClaimedCharacterId
+          ) {
+            isMyTurn = true;
+          } else if (
+            currentUid &&
+            activeCombatant.claimedBy &&
+            activeCombatant.claimedBy === currentUid
+          ) {
+            isMyTurn = true;
+          } else if (
+            currentPlayerIdentity &&
+            activeCombatant.name &&
+            activeCombatant.name.toLowerCase() ===
+              currentPlayerIdentity.toLowerCase()
+          ) {
+            isMyTurn = true;
+          }
+        }
+
+        if (isMyTurn) {
+          if (banner) {
+            banner.style.display = "flex";
+          }
+          if (
+            !lastTurnWasMyTurn_ ||
+            lastActiveCombatantId_ !== currentCombatantId
+          ) {
+            triggerTurnHaptics_();
+          }
+          lastTurnWasMyTurn_ = true;
+          lastActiveCombatantId_ = currentCombatantId;
+        } else {
+          if (banner) {
+            banner.style.display = "none";
+          }
+          lastTurnWasMyTurn_ = false;
+          lastActiveCombatantId_ = currentCombatantId;
+        }
+      }
+
       function renderPlayerCombat_(combat) {
         activeCombatPlayerState_ = combat;
+        checkTurnAlert_(combat);
         const container = document.getElementById("player-combat-tracker");
         const listEl = document.getElementById("player-combat-list");
         const roundEl = document.getElementById("player-combat-round");
@@ -1793,23 +2160,133 @@
         if (client) {
           activeLiveTabletopClient_ = client;
         }
+        if (!activeLiveTabletopClient_) {
+          activeLiveTabletopClient_ = getOrCreateLiveTabletopClient_();
+        }
         if (!activeLiveTabletopClient_) return;
         if (isCompanionMode_()) {
-          activeLiveTabletopClient_.subscribeToCombat(
-            currentSessionDate,
-            (combat) => {
-              renderPlayerCombat_(combat);
-            }
-          );
+          if (
+            typeof activeLiveTabletopClient_.subscribeToCombat === "function"
+          ) {
+            activeLiveTabletopClient_.subscribeToCombat(
+              currentSessionDate,
+              (combat) => {
+                renderPlayerCombat_(combat);
+              }
+            );
+          }
         } else {
-          activeLiveTabletopClient_.subscribeToCombatGm(
+          if (
+            typeof activeLiveTabletopClient_.subscribeToCombatGm === "function"
+          ) {
+            activeLiveTabletopClient_.subscribeToCombatGm(
+              currentSessionDate,
+              (combatGm) => {
+                if (combatGm) {
+                  renderGmCombat_(combatGm);
+                }
+              }
+            );
+          }
+        }
+      }
+
+      function sendReaction(emoji) {
+        const client = getOrCreateLiveTabletopClient_();
+        if (!client || typeof client.sendReaction !== "function") {
+          console.warn("LiveTabletopClient not available for reaction");
+          return Promise.resolve();
+        }
+        const currentUid =
+          currentAnonymousUid ||
+          (client.getCurrentUser &&
+            client.getCurrentUser() &&
+            client.getCurrentUser().uid) ||
+          "anon_player";
+        const reactionId =
+          "rx_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+        const characterName = currentPlayerIdentity || "Companion";
+
+        const reaction = {
+          id: reactionId,
+          uid: currentUid,
+          characterName: characterName,
+          emoji: emoji,
+          timestamp: Date.now()
+        };
+
+        return client
+          .sendReaction(currentSessionDate, reaction)
+          .catch((err) => {
+            console.warn("Failed to send reaction:", err);
+          });
+      }
+
+      let gmReactionsUnsubscribe_ = null;
+      const seenReactionIds_ = new Set();
+
+      function renderFloatingReactionBubble_(rx) {
+        const container = document.getElementById("gm-reactions-container");
+        if (!container || !rx) return null;
+
+        const bubble = document.createElement("div");
+        bubble.className = "floating-reaction-bubble";
+        bubble.setAttribute("data-reaction-id", rx.id || "");
+
+        const randomLeft = 25 + Math.floor(Math.random() * 50);
+        bubble.style.left = randomLeft + "%";
+
+        const emojiSpan = document.createElement("span");
+        emojiSpan.className = "reaction-bubble-emoji";
+        emojiSpan.textContent = rx.emoji || "⚔️";
+
+        const senderSpan = document.createElement("span");
+        senderSpan.className = "reaction-bubble-sender";
+        senderSpan.textContent = rx.characterName || "Player";
+
+        bubble.appendChild(emojiSpan);
+        bubble.appendChild(senderSpan);
+        container.appendChild(bubble);
+
+        setTimeout(() => {
+          if (bubble.parentNode) {
+            bubble.remove();
+          }
+        }, 2400);
+        return bubble;
+      }
+
+      function handleIncomingReactions_(reactions) {
+        if (!Array.isArray(reactions)) return;
+        for (const rx of reactions) {
+          if (rx && rx.id && !seenReactionIds_.has(rx.id)) {
+            seenReactionIds_.add(rx.id);
+            renderFloatingReactionBubble_(rx);
+          }
+        }
+      }
+
+      function initGmReactionsSubscription_() {
+        if (gmReactionsUnsubscribe_) {
+          try {
+            gmReactionsUnsubscribe_();
+          } catch (_e) {}
+          gmReactionsUnsubscribe_ = null;
+        }
+        const client = getOrCreateLiveTabletopClient_();
+        if (!client || typeof client.subscribeToReactions !== "function")
+          return;
+        try {
+          gmReactionsUnsubscribe_ = client.subscribeToReactions(
             currentSessionDate,
-            (combatGm) => {
-              if (combatGm) {
-                renderGmCombat_(combatGm);
+            (reactionsDoc) => {
+              if (reactionsDoc && Array.isArray(reactionsDoc.recentReactions)) {
+                handleIncomingReactions_(reactionsDoc.recentReactions);
               }
             }
           );
+        } catch (err) {
+          console.warn("[LiveTabletop] Reactions subscription error:", err);
         }
       }
 
@@ -1887,6 +2364,7 @@
           document.body.classList.add("companion-only-mode");
           loadDriveRulesGlossary_(currentSessionDate);
           initLiveAudioCueSubscription_(currentSessionDate);
+          initCombatTracker();
           return;
         }
         installAudioUnlockHandler_();
@@ -1900,6 +2378,8 @@
         initLiveAudioCueSubscription_(currentSessionDate);
         pollLatestAudioCue_();
         initGmRoster_();
+        initCombatTracker();
+        initGmReactionsSubscription_();
       };
 
       // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
@@ -3851,6 +4331,9 @@
             currentClaimedCharacterId = cachedId;
             updatePlayerIdentityDom_(char.name);
             closePlayerIdentityModal();
+            if (activeCombatPlayerState_) {
+              checkTurnAlert_(activeCombatPlayerState_);
+            }
           } else if (char && char.claimedBy !== currentUid) {
             // Lost claim (e.g. GM force release or expired claim): clear cache and show picker modal
             try {
@@ -3861,6 +4344,9 @@
               }
             } catch (_e) {}
             currentClaimedCharacterId = null;
+            if (activeCombatPlayerState_) {
+              checkTurnAlert_(activeCombatPlayerState_);
+            }
             const modal = document.getElementById("identity-modal");
             if (modal) {
               modal.classList.remove("hidden");
@@ -4177,7 +4663,22 @@
         } else {
           highlightActivePlayerIdentity_();
         }
+        initReactionDrawer_();
         bootstrapCompanionRoster_();
+      }
+
+      function initReactionDrawer_() {
+        const drawer = document.getElementById("companion-reaction-drawer");
+        if (!drawer) return;
+        const buttons = drawer.querySelectorAll(".reaction-btn");
+        buttons.forEach((btn) => {
+          btn.onclick = () => {
+            const emoji = btn.getAttribute("data-emoji");
+            if (emoji) {
+              void sendReaction(emoji);
+            }
+          };
+        });
       }
 
       function selectPlayerIdentity(playerName, characterId) {
@@ -4199,6 +4700,9 @@
           }
         } catch (_e) {}
         updatePlayerIdentityDom_(playerName);
+        if (activeCombatPlayerState_) {
+          checkTurnAlert_(activeCombatPlayerState_);
+        }
       }
 
       if (typeof window !== "undefined") {
@@ -4209,6 +4713,11 @@
         window.selectPlayerIdentity = selectPlayerIdentity;
         window.togglePlayerIdentityModal = togglePlayerIdentityModal;
         window.closePlayerIdentityModal = closePlayerIdentityModal;
+        window.sendReaction = sendReaction;
+        window.handleSendReaction = sendReaction;
+        window.renderFloatingReactionBubble = renderFloatingReactionBubble_;
+        window.initGmReactionsSubscription = initGmReactionsSubscription_;
+        window.initCombatTracker = initCombatTracker;
       }
 
       function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {

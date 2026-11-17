@@ -259,14 +259,44 @@ export class MockLiveTabletopClient {
     return () => this.combatListeners.delete(cb);
   }
 
+  public subscribeToCombatGm(_sessionDate: string, cb: any): () => void {
+    this.combatListeners.add(cb);
+    return () => this.combatListeners.delete(cb);
+  }
+
+  public reactionsStore: Array<{
+    id: string;
+    uid: string;
+    characterName: string;
+    emoji: string;
+    timestamp: number;
+  }> = [];
+
   public subscribeToReactions(_sessionDate: string, cb: any): () => void {
     this.reactionsListeners.add(cb);
+    cb({ recentReactions: [...this.reactionsStore], updatedAt: Date.now() });
     return () => this.reactionsListeners.delete(cb);
   }
 
   public async publishAudioCue(): Promise<void> {}
   public async updateCombat(): Promise<void> {}
-  public async sendReaction(): Promise<void> {}
+  public async sendReaction(
+    _sessionDate: string,
+    reaction: any
+  ): Promise<void> {
+    const MAX_REACTIONS = 20;
+    this.reactionsStore = [
+      ...this.reactionsStore.slice(-(MAX_REACTIONS - 1)),
+      reaction
+    ];
+    const snap = {
+      recentReactions: [...this.reactionsStore],
+      updatedAt: Date.now()
+    };
+    for (const cb of this.reactionsListeners) {
+      cb(snap);
+    }
+  }
   public async submitRuleFeedback(): Promise<string> {
     return "mock_fb_id";
   }
@@ -703,7 +733,13 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         advanceCombatTurn: typeof advanceCombatTurn !== "undefined" ? advanceCombatTurn : undefined,
         initCombatTracker: typeof initCombatTracker !== "undefined" ? initCombatTracker : undefined,
         getActiveCombatGmState: typeof getActiveCombatGmState !== "undefined" ? getActiveCombatGmState : undefined,
-        getActiveCombatPlayerState: typeof getActiveCombatPlayerState !== "undefined" ? getActiveCombatPlayerState : undefined
+        getActiveCombatPlayerState: typeof getActiveCombatPlayerState !== "undefined" ? getActiveCombatPlayerState : undefined,
+        sendReaction: typeof sendReaction !== "undefined" ? sendReaction : undefined,
+        handleSendReaction: typeof sendReaction !== "undefined" ? sendReaction : undefined,
+        renderFloatingReactionBubble: typeof renderFloatingReactionBubble_ !== "undefined" ? renderFloatingReactionBubble_ : undefined,
+        initGmReactionsSubscription: typeof initGmReactionsSubscription_ !== "undefined" ? initGmReactionsSubscription_ : undefined,
+        checkTurnAlert: typeof checkTurnAlert_ !== "undefined" ? checkTurnAlert_ : undefined,
+        triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined
       };
     `
   );

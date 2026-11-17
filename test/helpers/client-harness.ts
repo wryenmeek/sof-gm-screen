@@ -2,7 +2,11 @@ import fs from "fs";
 import { vi } from "vitest";
 import { marked } from "marked";
 import MiniSearch from "minisearch";
-import { LiveTabletopClient } from "../../src/live_tabletop_client";
+import {
+  type LiveTabletopClient,
+  type CharacterRosterDoc,
+  type ClaimResult
+} from "../../src/live_tabletop_client";
 
 const cachedHtml = fs.readFileSync("Index.html", "utf8");
 const bodyMatch = cachedHtml.match(
@@ -16,6 +20,266 @@ if (!scriptMatch) {
   throw new Error("Could not find client script in Index.html");
 }
 const cachedScript = scriptMatch[1].replace("<?= sessionDate ?>", "2026-10-31");
+
+export interface MockLiveTabletopOptions {
+  sessionDate?: string;
+  currentUser?: { uid: string; isAnonymous?: boolean } | null;
+  initialRoster?: CharacterRosterDoc[];
+  simDelayMs?: number;
+  forceContentionForCharacterId?: string | null;
+}
+
+export class MockLiveTabletopClient {
+  public currentUser: { uid: string; isAnonymous: boolean } | null = null;
+  public rosterStore: Map<string, CharacterRosterDoc> = new Map();
+  public rosterListeners: Set<(roster: CharacterRosterDoc[]) => void> =
+    new Set();
+  public audioCueListeners: Set<(cue: any) => void> = new Set();
+  public combatListeners: Set<(combat: any) => void> = new Set();
+  public reactionsListeners: Set<(reactions: any) => void> = new Set();
+  public sessionDate: string = "2026-10-31";
+  public simDelayMs: number = 0;
+  public forceContentionForCharacterId: string | null = null;
+  public claimHistory: Array<{
+    characterId: string;
+    uid: string;
+    timestamp: number;
+  }> = [];
+  public releaseHistory: Array<{
+    characterId: string;
+    uid: string;
+    timestamp: number;
+  }> = [];
+
+  constructor(options?: MockLiveTabletopOptions) {
+    if (options?.sessionDate) this.sessionDate = options.sessionDate;
+    this.simDelayMs = options?.simDelayMs || 0;
+    this.forceContentionForCharacterId =
+      options?.forceContentionForCharacterId ?? null;
+    this.currentUser =
+      options?.currentUser !== undefined
+        ? options.currentUser
+          ? {
+              uid: options.currentUser.uid,
+              isAnonymous: options.currentUser.isAnonymous ?? true
+            }
+          : null
+        : { uid: "anon_test_uid", isAnonymous: true };
+
+    const initial = options?.initialRoster || [
+      { characterId: "pog", name: "Pog", claimedBy: null, color: "#f59e0b" },
+      {
+        characterId: "vaelor",
+        name: "Vaelor",
+        claimedBy: null,
+        color: "#3b82f6"
+      },
+      { characterId: "orca", name: "Orca", claimedBy: null, color: "#10b981" },
+      { characterId: "fade", name: "Fade", claimedBy: null, color: "#8b5cf6" },
+      { characterId: "guest", name: "Guest", claimedBy: null, color: "#64748b" }
+    ];
+    for (const c of initial) {
+      this.rosterStore.set(c.characterId, { ...c });
+    }
+  }
+
+  public async signInAnonymously(): Promise<any> {
+    if (!this.currentUser) {
+      this.currentUser = { uid: "anon_test_uid", isAnonymous: true };
+    }
+    return this.currentUser;
+  }
+
+  public async bootstrapPlayerAuth(): Promise<any> {
+    return this.signInAnonymously();
+  }
+
+  public getCurrentUser(): any {
+    return this.currentUser;
+  }
+
+  public onAuthStateChanged(callback: (user: any) => void): () => void {
+    callback(this.currentUser);
+    return () => {};
+  }
+
+  public subscribeToRoster(
+    _sessionDate: string,
+    callback: (roster: CharacterRosterDoc[]) => void
+  ): () => void {
+    this.rosterListeners.add(callback);
+    callback(this.getRosterSnapshot());
+    return () => {
+      this.rosterListeners.delete(callback);
+    };
+  }
+
+  public getRosterSnapshot(): CharacterRosterDoc[] {
+    return Array.from(this.rosterStore.values()).map((doc) => ({ ...doc }));
+  }
+
+  public emitRosterUpdate(): void {
+    const snap = this.getRosterSnapshot();
+    for (const cb of this.rosterListeners) {
+      cb(snap);
+    }
+  }
+
+  public setCharacterClaim(
+    characterId: string,
+    claimedBy: string | null
+  ): void {
+    const doc = this.rosterStore.get(characterId);
+    if (doc) {
+      doc.claimedBy = claimedBy;
+      doc.claimedAt = claimedBy ? Date.now() : null;
+      this.emitRosterUpdate();
+    }
+  }
+
+  public async claimCharacter(
+    sessionDate: string,
+    characterId: string,
+    uid: string
+  ): Promise<ClaimResult> {
+    if (this.simDelayMs) {
+      await new Promise((r) => setTimeout(r, this.simDelayMs));
+    }
+    if (this.forceContentionForCharacterId === characterId) {
+      return {
+        success: false,
+        code: "ALREADY_CLAIMED",
+        claimedByUid: "other_player_uid"
+      };
+    }
+    const doc = this.rosterStore.get(characterId);
+    if (!doc) {
+      return { success: false, code: "ERROR", error: "Character not found" };
+    }
+    if (doc.claimedBy && doc.claimedBy !== uid) {
+      return {
+        success: false,
+        code: "ALREADY_CLAIMED",
+        claimedByUid: doc.claimedBy
+      };
+    }
+    doc.claimedBy = uid;
+    doc.claimedAt = Date.now();
+    this.claimHistory.push({ characterId, uid, timestamp: Date.now() });
+    if (typeof localStorage !== "undefined" && localStorage) {
+      localStorage.setItem(`sof_claimed_character_${sessionDate}`, characterId);
+      localStorage.setItem("sof_player_identity", doc.name);
+    }
+    this.emitRosterUpdate();
+    return { success: true, code: "CLAIMED", claimedByUid: uid };
+  }
+
+  public async releaseCharacter(
+    sessionDate: string,
+    characterId: string,
+    uid: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const doc = this.rosterStore.get(characterId);
+    if (!doc) return { success: false, error: "Character not found" };
+    if (doc.claimedBy && doc.claimedBy !== uid) {
+      return { success: false, error: "Claimed by another user" };
+    }
+    doc.claimedBy = null;
+    doc.claimedAt = null;
+    this.releaseHistory.push({ characterId, uid, timestamp: Date.now() });
+    if (typeof localStorage !== "undefined" && localStorage) {
+      localStorage.removeItem(`sof_claimed_character_${sessionDate}`);
+    }
+    this.emitRosterUpdate();
+    return { success: true };
+  }
+
+  public async forceReleaseCharacter(
+    _sessionDate: string,
+    characterId: string
+  ): Promise<void> {
+    const doc = this.rosterStore.get(characterId);
+    if (doc) {
+      doc.claimedBy = null;
+      doc.claimedAt = null;
+      this.emitRosterUpdate();
+    }
+  }
+
+  public async switchCharacter(
+    sessionDate: string,
+    oldCharacterId: string,
+    newCharacterId: string,
+    uid: string
+  ): Promise<ClaimResult> {
+    const newDoc = this.rosterStore.get(newCharacterId);
+    if (!newDoc) return { success: false, code: "ERROR", error: "Not found" };
+    if (newDoc.claimedBy && newDoc.claimedBy !== uid) {
+      return {
+        success: false,
+        code: "ALREADY_CLAIMED",
+        claimedByUid: newDoc.claimedBy
+      };
+    }
+    const oldDoc = this.rosterStore.get(oldCharacterId);
+    if (oldDoc && oldDoc.claimedBy === uid) {
+      oldDoc.claimedBy = null;
+      oldDoc.claimedAt = null;
+      this.releaseHistory.push({
+        characterId: oldCharacterId,
+        uid,
+        timestamp: Date.now()
+      });
+    }
+    newDoc.claimedBy = uid;
+    newDoc.claimedAt = Date.now();
+    this.claimHistory.push({
+      characterId: newCharacterId,
+      uid,
+      timestamp: Date.now()
+    });
+    if (typeof localStorage !== "undefined" && localStorage) {
+      localStorage.setItem(
+        `sof_claimed_character_${sessionDate}`,
+        newCharacterId
+      );
+      localStorage.setItem("sof_player_identity", newDoc.name);
+    }
+    this.emitRosterUpdate();
+    return { success: true, code: "CLAIMED", claimedByUid: uid };
+  }
+
+  public subscribeToAudioCue(_sessionDate: string, cb: any): () => void {
+    this.audioCueListeners.add(cb);
+    return () => this.audioCueListeners.delete(cb);
+  }
+
+  public subscribeToCombat(_sessionDate: string, cb: any): () => void {
+    this.combatListeners.add(cb);
+    return () => this.combatListeners.delete(cb);
+  }
+
+  public subscribeToReactions(_sessionDate: string, cb: any): () => void {
+    this.reactionsListeners.add(cb);
+    return () => this.reactionsListeners.delete(cb);
+  }
+
+  public async publishAudioCue(): Promise<void> {}
+  public async updateCombat(): Promise<void> {}
+  public async sendReaction(): Promise<void> {}
+  public async submitRuleFeedback(): Promise<string> {
+    return "mock_fb_id";
+  }
+  public unsubscribeAll(): void {
+    this.rosterListeners.clear();
+    this.audioCueListeners.clear();
+    this.combatListeners.clear();
+    this.reactionsListeners.clear();
+  }
+  public destroy(): void {
+    this.unsubscribeAll();
+  }
+}
 
 export interface ClientHarnessOptions {
   sessionDate?: string;
@@ -40,7 +304,10 @@ export interface ClientHarnessOptions {
   verifyGmKeyResult?: boolean;
   verifyGmKeyError?: string;
   initLiveTabletopClient?: boolean;
-  liveTabletopClient?: LiveTabletopClient;
+  liveTabletopClient?: LiveTabletopClient | MockLiveTabletopClient;
+  mockRoster?: CharacterRosterDoc[];
+  mockUser?: { uid: string; isAnonymous?: boolean } | null;
+  forceContentionForCharacterId?: string | null;
 }
 
 export function setupClientHarness(options: ClientHarnessOptions = {}) {
@@ -415,10 +682,30 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         triggerPtt: typeof triggerPtt !== "undefined" ? triggerPtt : undefined,
         showRuleCard: typeof showRuleCard_ !== "undefined" ? showRuleCard_ : undefined,
         dismissRuleCard: typeof dismissRuleCard !== "undefined" ? dismissRuleCard : undefined,
-        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined
+        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined,
+        handleCharacterCardClick: typeof handleCharacterCardClick !== "undefined" ? handleCharacterCardClick : undefined,
+        confirmSwitchCharacter: typeof confirmSwitchCharacter !== "undefined" ? confirmSwitchCharacter : undefined,
+        cancelSwitchCharacter: typeof cancelSwitchCharacter !== "undefined" ? cancelSwitchCharacter : undefined,
+        forceReleaseCharacter_: typeof forceReleaseCharacter_ !== "undefined" ? forceReleaseCharacter_ : undefined,
+        showToast_: typeof showToast_ !== "undefined" ? showToast_ : undefined,
+        updateRosterDom_: typeof updateRosterDom_ !== "undefined" ? updateRosterDom_ : undefined,
+        updateGmRosterDom_: typeof updateGmRosterDom_ !== "undefined" ? updateGmRosterDom_ : undefined,
+        bootstrapCompanionRoster_: typeof bootstrapCompanionRoster_ !== "undefined" ? bootstrapCompanionRoster_ : undefined,
+        onRosterSnapshotUpdate_: typeof onRosterSnapshotUpdate_ !== "undefined" ? onRosterSnapshotUpdate_ : undefined
       };
     `
   );
+
+  const liveTabletopClient =
+    options.liveTabletopClient ??
+    new MockLiveTabletopClient({
+      sessionDate: options.sessionDate || "2026-10-31",
+      initialRoster: options.mockRoster,
+      currentUser: options.mockUser,
+      forceContentionForCharacterId: options.forceContentionForCharacterId
+    });
+  (window as any).LiveTabletopClient = MockLiveTabletopClient;
+  (window as any).liveTabletopClient = liveTabletopClient;
 
   const exported = fn(
     window,
@@ -428,12 +715,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     (window as any).google,
     mockLocalStorage
   );
-
-  const liveTabletopClient =
-    options.liveTabletopClient ??
-    (options.initLiveTabletopClient
-      ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
-      : undefined);
+  Object.assign(window, exported);
 
   return {
     ...exported,

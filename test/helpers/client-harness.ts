@@ -697,7 +697,13 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         updateRosterDom_: typeof updateRosterDom_ !== "undefined" ? updateRosterDom_ : undefined,
         updateGmRosterDom_: typeof updateGmRosterDom_ !== "undefined" ? updateGmRosterDom_ : undefined,
         bootstrapCompanionRoster_: typeof bootstrapCompanionRoster_ !== "undefined" ? bootstrapCompanionRoster_ : undefined,
-        onRosterSnapshotUpdate_: typeof onRosterSnapshotUpdate_ !== "undefined" ? onRosterSnapshotUpdate_ : undefined
+        onRosterSnapshotUpdate_: typeof onRosterSnapshotUpdate_ !== "undefined" ? onRosterSnapshotUpdate_ : undefined,
+        renderGmCombat: typeof renderGmCombat_ !== "undefined" ? renderGmCombat_ : undefined,
+        renderPlayerCombat: typeof renderPlayerCombat_ !== "undefined" ? renderPlayerCombat_ : undefined,
+        advanceCombatTurn: typeof advanceCombatTurn !== "undefined" ? advanceCombatTurn : undefined,
+        initCombatTracker: typeof initCombatTracker !== "undefined" ? initCombatTracker : undefined,
+        getActiveCombatGmState: typeof getActiveCombatGmState !== "undefined" ? getActiveCombatGmState : undefined,
+        getActiveCombatPlayerState: typeof getActiveCombatPlayerState !== "undefined" ? getActiveCombatPlayerState : undefined
       };
     `
   );

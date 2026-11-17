@@ -644,17 +644,227 @@
         background: #b91c1c;
       }
 
+      .combat-tracker-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .combat-tracker-title {
+        font-family: Cinzel, serif;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--gold-light);
+      }
+
+      .combat-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .combat-round-badge {
+        font-family: "Fira Code", monospace;
+        font-size: 11px;
+        background: #1e293b;
+        color: var(--cyan);
+        border: 1px solid #334155;
+        border-radius: 4px;
+        padding: 2px 6px;
+      }
+
+      .combat-ctrl-btn {
+        background: #1e293b;
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        min-height: 24px;
+        min-width: 24px;
+        line-height: 1;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+      }
+
+      .combat-ctrl-btn:hover {
+        background: #334155;
+        border-color: var(--cyan);
+      }
+
+      .combat-table-wrapper {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .combat-stat-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      .combat-stat-table th,
+      .combat-stat-table td {
+        padding: 4px 6px;
+        text-align: left;
+        border-bottom: 1px solid #1e293b;
+      }
+
+      .combat-stat-table th {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .combat-stat-table tr.active-row {
+        background: rgba(56, 189, 248, 0.15);
+        border-left: 3px solid var(--cyan);
+        font-weight: 600;
+      }
+
+      .ambush-badge {
+        font-size: 10px;
+        color: #f43f5e;
+        background: rgba(244, 63, 94, 0.15);
+        border: 1px solid #f43f5e;
+        border-radius: 3px;
+        padding: 1px 4px;
+        display: inline-block;
+      }
+
+      .visible-badge {
+        font-size: 10px;
+        color: #10b981;
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid #10b981;
+        border-radius: 3px;
+        padding: 1px 4px;
+        display: inline-block;
+      }
+
+      .player-combat-section {
+        background: #161b26;
+        border: 1px solid var(--gold);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+
+      .player-combat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .player-combat-title {
+        font-family: Cinzel, serif;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--gold-light);
+      }
+
+      .player-combat-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .player-combatant {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+
+      .player-combatant.active-combatant {
+        border-color: var(--cyan);
+        background: rgba(56, 189, 248, 0.1);
+        font-weight: 700;
+      }
+
+      .combatant-init {
+        font-family: "Fira Code", monospace;
+        font-size: 12px;
+        color: var(--cyan);
+        width: 24px;
+      }
+
+      .combatant-name {
+        flex: 1;
+        margin: 0 8px;
+        color: var(--text);
+      }
+
+      .status-band {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        padding: 2px 6px;
+        border-radius: 3px;
+        letter-spacing: 0.05em;
+      }
+
+      .status-band.band-uninjured {
+        color: #34d399;
+        background: rgba(52, 211, 153, 0.15);
+        border: 1px solid #34d399;
+      }
+
+      .status-band.band-injured {
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.15);
+        border: 1px solid #fbbf24;
+      }
+
+      .status-band.band-bloodied {
+        color: #f97316;
+        background: rgba(249, 115, 22, 0.15);
+        border: 1px solid #f97316;
+      }
+
+      .status-band.band-critical {
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid #ef4444;
+      }
+
+      .status-band.band-down {
+        color: #94a3b8;
+        background: rgba(148, 163, 184, 0.15);
+        border: 1px solid #94a3b8;
+      }
+
+      .active-badge {
+        font-size: 10px;
+        color: var(--cyan);
+        margin-left: 6px;
+      }
       @media print {
         body {
           background: #ffffff;
           color: #000000;
           overflow: visible;
         }
+
         #sidebar {
           display: none;
         }
+
         table,
-        td {
+        td,
+        th,
+        .combat-stat-table,
+        .combat-stat-table td,
+        .combat-stat-table th {
           background: #ffffff;
           color: #000000;
         }
@@ -830,6 +1040,59 @@
           <button class="primary" onclick="handleManualSave_()">
             Save (Ctrl+S)
           </button>
+        </div>
+      </div>
+
+      <!-- GM Combat Tracker Section (Ticket 04 / #37) -->
+      <div id="gm-combat-tracker" class="sidebar-section">
+        <div class="combat-tracker-header">
+          <span class="combat-tracker-title">⚔️ Combat Tracker</span>
+          <div class="combat-controls">
+            <span id="gm-combat-round" class="combat-round-badge">Round 1</span>
+            <button
+              id="combat-prev-btn"
+              class="combat-ctrl-btn"
+              onclick="advanceCombatTurn(-1)"
+              title="Previous Turn"
+            >
+              ◀
+            </button>
+            <button
+              id="combat-next-btn"
+              class="combat-ctrl-btn"
+              onclick="advanceCombatTurn(1)"
+              title="Next Turn"
+            >
+              ▶
+            </button>
+          </div>
+        </div>
+        <div id="gm-combat-container" class="combat-table-wrapper">
+          <table class="combat-stat-table" id="gm-combat-table">
+            <thead>
+              <tr>
+                <th style="width: 28px">#</th>
+                <th>Combatant</th>
+                <th style="width: 52px">HP</th>
+                <th style="width: 32px">AC</th>
+                <th style="width: 44px">Vis</th>
+              </tr>
+            </thead>
+            <tbody id="gm-combat-list">
+              <tr>
+                <td
+                  colspan="5"
+                  style="
+                    text-align: center;
+                    color: var(--text-muted);
+                    font-size: 11px;
+                  "
+                >
+                  No active encounter
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1166,6 +1429,23 @@
         </div>
       </div>
 
+      <!-- Player Companion Combat Tracker (Ticket 04 / #37) -->
+      <div
+        id="player-combat-tracker"
+        class="player-combat-section"
+        style="display: none"
+      >
+        <div class="player-combat-header">
+          <span class="player-combat-title">⚔️ Initiative Order</span>
+          <span id="player-combat-round" class="combat-round-badge"
+            >Round 1</span
+          >
+        </div>
+        <div id="player-combat-list" class="player-combat-list">
+          <!-- Rendered public combatants with status bands -->
+        </div>
+      </div>
+
       <input
         type="search"
         id="ptt-dictation-input"
@@ -1369,6 +1649,177 @@
       let rosterUnsubscribe = null;
       const NOTES_AUTOSAVE_MS = 60000;
       let notesAutoSaveTimer = null;
+      let activeLiveTabletopClient_ = null;
+      let activeCombatGmState_ = null;
+      let activeCombatPlayerState_ = null;
+
+      function escapeHtml_(str) {
+        if (!str) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function renderGmCombat_(combatGm) {
+        activeCombatGmState_ = combatGm;
+        const container = document.getElementById("gm-combat-tracker");
+        const listEl = document.getElementById("gm-combat-list");
+        const roundEl = document.getElementById("gm-combat-round");
+        if (!container || !listEl) return;
+
+        if (
+          !combatGm ||
+          !Array.isArray(combatGm.combatants) ||
+          combatGm.combatants.length === 0
+        ) {
+          listEl.innerHTML =
+            '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); font-size: 11px;">No active encounter</td></tr>';
+          if (roundEl) roundEl.textContent = "Round 1";
+          return;
+        }
+
+        if (roundEl) {
+          roundEl.textContent = "Round " + (combatGm.round || 1);
+        }
+
+        listEl.innerHTML = combatGm.combatants
+          .map((c, idx) => {
+            const isActive = idx === combatGm.activeIndex;
+            const isAmbush = c.isPlayerVisible === false;
+            const activeClass = isActive ? ' class="active-row"' : "";
+            const ambushBadge = isAmbush
+              ? '<span class="ambush-badge" title="Hidden Ambush Monster">👁️ Hidden</span>'
+              : '<span class="visible-badge" title="Visible to Players">👁️ Public</span>';
+            const hpText =
+              typeof c.hp === "number" ? `${c.hp}/${c.maxHp ?? c.hp}` : "-";
+            const acText =
+              c.ac !== undefined && c.ac !== null ? String(c.ac) : "-";
+            const initText =
+              c.initiative !== undefined ? String(c.initiative) : "0";
+            return (
+              `<tr${activeClass} data-combatant-id="${escapeHtml_(c.id)}">` +
+              `<td>${initText}</td>` +
+              `<td>${escapeHtml_(c.name)}</td>` +
+              `<td>${hpText}</td>` +
+              `<td>${acText}</td>` +
+              `<td>${ambushBadge}</td>` +
+              `</tr>`
+            );
+          })
+          .join("");
+      }
+
+      function renderPlayerCombat_(combat) {
+        activeCombatPlayerState_ = combat;
+        const container = document.getElementById("player-combat-tracker");
+        const listEl = document.getElementById("player-combat-list");
+        const roundEl = document.getElementById("player-combat-round");
+        if (!container || !listEl) return;
+
+        if (
+          !combat ||
+          !Array.isArray(combat.combatants) ||
+          combat.combatants.length === 0 ||
+          combat.isRunning === false
+        ) {
+          container.style.display = "none";
+          listEl.innerHTML = "";
+          return;
+        }
+
+        container.style.display = "block";
+        if (roundEl) {
+          roundEl.textContent = "Round " + (combat.round || 1);
+        }
+
+        listEl.innerHTML = combat.combatants
+          .map((c, idx) => {
+            const isActive = idx === combat.activeIndex;
+            const band = (c.statusBand || "UNINJURED").toUpperCase();
+            const bandClass = "band-" + band.toLowerCase();
+            const activeClass = isActive ? " active-combatant" : "";
+            const initText =
+              c.initiative !== undefined ? String(c.initiative) : "0";
+            const activeBadge = isActive
+              ? '<span class="active-badge">Active</span>'
+              : "";
+            return (
+              `<div class="player-combatant${activeClass}" data-combatant-id="${escapeHtml_(c.id)}">` +
+              `<span class="combatant-init">${initText}</span>` +
+              `<span class="combatant-name">${escapeHtml_(c.name)}</span>` +
+              `<span class="status-band ${bandClass}">${escapeHtml_(band)}</span>` +
+              activeBadge +
+              `</div>`
+            );
+          })
+          .join("");
+      }
+
+      function advanceCombatTurn(delta) {
+        if (
+          !activeCombatGmState_ ||
+          !Array.isArray(activeCombatGmState_.combatants) ||
+          activeCombatGmState_.combatants.length === 0
+        ) {
+          return;
+        }
+        let newIndex = (activeCombatGmState_.activeIndex ?? 0) + delta;
+        let newRound = activeCombatGmState_.round || 1;
+        const count = activeCombatGmState_.combatants.length;
+        if (newIndex >= count) {
+          newIndex = 0;
+          newRound += 1;
+        } else if (newIndex < 0) {
+          newIndex = count - 1;
+          newRound = Math.max(1, newRound - 1);
+        }
+        activeCombatGmState_.activeIndex = newIndex;
+        activeCombatGmState_.round = newRound;
+        renderGmCombat_(activeCombatGmState_);
+
+        if (activeLiveTabletopClient_) {
+          void activeLiveTabletopClient_
+            .updateCombat(currentSessionDate, activeCombatGmState_)
+            .catch((err) => {
+              console.error("Failed to update combat:", err);
+            });
+        }
+      }
+
+      function initCombatTracker(client) {
+        if (client) {
+          activeLiveTabletopClient_ = client;
+        }
+        if (!activeLiveTabletopClient_) return;
+        if (isCompanionMode_()) {
+          activeLiveTabletopClient_.subscribeToCombat(
+            currentSessionDate,
+            (combat) => {
+              renderPlayerCombat_(combat);
+            }
+          );
+        } else {
+          activeLiveTabletopClient_.subscribeToCombatGm(
+            currentSessionDate,
+            (combatGm) => {
+              if (combatGm) {
+                renderGmCombat_(combatGm);
+              }
+            }
+          );
+        }
+      }
+
+      function getActiveCombatGmState() {
+        return activeCombatGmState_;
+      }
+
+      function getActiveCombatPlayerState() {
+        return activeCombatPlayerState_;
+      }
 
       function getClientGmKey_() {
         if (typeof window !== "undefined" && window.INITIAL_GM_KEY) {
@@ -3709,6 +4160,10 @@
           const workspaceEl = document.getElementById("workspace");
           if (workspaceEl && typeof workspaceEl.remove === "function") {
             workspaceEl.remove();
+          }
+          const gmTrackerEl = document.getElementById("gm-combat-tracker");
+          if (gmTrackerEl && typeof gmTrackerEl.remove === "function") {
+            gmTrackerEl.remove();
           }
         }
         let savedIdentity = null;

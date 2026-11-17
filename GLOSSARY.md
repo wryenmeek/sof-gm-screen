@@ -123,3 +123,21 @@ _Avoid_: Audio storage, track database, sound buffer.
 **Edge Audio Manifest**:
 The local JSON catalog (`session_audio_manifest.json`) generated on the Raspberry Pi recording timestamped metadata and file paths for all sliced Speech Chunks.
 _Avoid_: Session manifest, audio log, speech list.
+
+### Tactical Tabletop & Combat
+
+**Combat Tracker**:
+The real-time initiative and encounter synchronization engine tracking turn order, round count, and combatant states between private Game Master administration and public player observation.
+_Avoid_: Battle tracker, turn manager, initiative list, fight widget.
+
+**Status Band**:
+A descriptive health classification—UNINJURED (100%), INJURED (50-99%), BLOODIED (25-49%), CRITICAL (1-24%), or DOWN (0 HP)—projected to players to reflect physical condition without disclosing exact numerical hit points.
+_Avoid_: Health bar, HP tier, wound category, damage status.
+
+**Ambush Combatant**:
+A hidden adversary or unrevealed threat present in the Game Master's private encounter state but suppressed from public player projections until deliberately revealed.
+_Avoid_: Hidden monster, secret NPC, ambush enemy, stealth combatant.
+
+**Initiative Projection**:
+The real-time, player-safe public broadcast reflecting current turn sequence, active combatant, and Status Bands while strictly filtering out Ambush Combatants and precise monster statistics.
+_Avoid_: Public combat view, player initiative, sanitized feed.

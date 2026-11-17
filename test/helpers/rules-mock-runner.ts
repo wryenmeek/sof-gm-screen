@@ -27,6 +27,10 @@ export interface MockDocRef {
   set(data: Record<string, any>, options?: { merge?: boolean }): Promise<void>;
   update(data: Record<string, any>): Promise<void>;
   delete(): Promise<void>;
+  onSnapshot(
+    callback: (snap: MockDocSnapshot) => void,
+    onError?: (err: Error) => void
+  ): () => void;
 }
 
 export interface MockCollectionRef {
@@ -375,6 +379,17 @@ export class MockFirestoreClient {
           );
         }
         db.deleteRaw(path);
+      },
+      onSnapshot(
+        callback: (snap: MockDocSnapshot) => void,
+        onError?: (err: Error) => void
+      ): () => void {
+        this.get()
+          .then((snap) => callback(snap))
+          .catch((err) => {
+            if (onError) onError(err);
+          });
+        return () => {};
       }
     };
   }

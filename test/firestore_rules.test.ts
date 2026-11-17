@@ -429,6 +429,7 @@ describe("Cloud Firestore Security Rules & Access Boundary Suite (SEC-01 - SEC-1
       expect(client).toBeDefined();
       expect(typeof client.subscribeToAudioCue).toBe("function");
       expect(typeof client.subscribeToCombat).toBe("function");
+      expect(typeof client.subscribeToCombatGm).toBe("function");
       expect(typeof client.subscribeToReactions).toBe("function");
       expect(typeof client.subscribeToRoster).toBe("function");
       expect(typeof client.publishAudioCue).toBe("function");
@@ -438,6 +439,101 @@ describe("Cloud Firestore Security Rules & Access Boundary Suite (SEC-01 - SEC-1
       expect(typeof client.releaseCharacter).toBe("function");
       expect(typeof client.submitRuleFeedback).toBe("function");
       expect(typeof client.destroy).toBe("function");
+
+      client.destroy();
+    });
+
+    it("Ticket 04 / #37: updateCombat synchronizes partitioned combat_gm and projected combat documents", async () => {
+      const gmContext = testEnv.authenticatedContext("gm_user_1", { gm: true });
+      const gmDb = gmContext.firestore();
+
+      // Instantiate client pointing to mock DB
+      const client = new LiveTabletopClient({
+        firestore: gmDb as any,
+        auth: { currentUser: { uid: "gm_user_1" } } as any
+      });
+
+      const encounterPayload = {
+        round: 1,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          {
+            id: "c_stalker",
+            name: "Deep Stalker",
+            hp: 90,
+            maxHp: 90,
+            ac: 16,
+            initiative: 20,
+            status: "active" as const,
+            claimedBy: null,
+            isPlayerVisible: false
+          },
+          {
+            id: "c_pog",
+            name: "Pog",
+            hp: 45,
+            maxHp: 45,
+            ac: 17,
+            initiative: 15,
+            status: "active" as const,
+            claimedBy: "player_1",
+            isPlayerVisible: true
+          },
+          {
+            id: "c_drake",
+            name: "Coral Drake",
+            hp: 15,
+            maxHp: 50,
+            ac: 14,
+            initiative: 10,
+            status: "active" as const,
+            claimedBy: null,
+            isPlayerVisible: true
+          }
+        ]
+      };
+
+      await client.updateCombat(SESSION_DATE, encounterPayload);
+
+      // 1. GM secret document sessions/{date}/live/combat_gm has all combatants
+      const gmDocSnap = await gmDb
+        .doc(`sessions/${SESSION_DATE}/live/combat_gm`)
+        .get();
+      expect(gmDocSnap.exists()).toBe(true);
+      const gmData = gmDocSnap.data();
+      expect(gmData?.combatants.length).toBe(3);
+      expect(gmData?.combatants[0].name).toBe("Deep Stalker");
+      expect(gmData?.combatants[0].isPlayerVisible).toBe(false);
+
+      // 2. Anonymous player cannot read combat_gm (mathematically proven)
+      const anon = testEnv.authenticatedContext("player_anon_proof", {
+        firebase: { sign_in_provider: "anonymous" }
+      });
+      const anonDb = anon.firestore();
+      await assertFails(
+        anonDb.doc(`sessions/${SESSION_DATE}/live/combat_gm`).get()
+      );
+
+      // 3. Anonymous player reads projected combat document
+      const publicSnap = await assertSucceeds(
+        anonDb.doc(`sessions/${SESSION_DATE}/live/combat`).get()
+      );
+      expect(publicSnap.exists()).toBe(true);
+      const publicData = publicSnap.data();
+
+      // Proves hidden ambush monsters are strictly absent
+      expect(publicData?.combatants.length).toBe(2);
+      const names = publicData?.combatants.map((c: any) => c.name);
+      expect(names).not.toContain("Deep Stalker");
+      expect(names).toEqual(["Pog", "Coral Drake"]);
+
+      // Proves status bands are computed
+      expect(publicData?.combatants[0].statusBand).toBe("UNINJURED");
+      expect(publicData?.combatants[1].statusBand).toBe("BLOODIED"); // 15/50 = 30%
+
+      // Proves active turn index was masked to -1 because activeIndex 0 was the hidden Deep Stalker
+      expect(publicData?.activeIndex).toBe(-1);
 
       client.destroy();
     });

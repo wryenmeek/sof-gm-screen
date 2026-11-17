@@ -106,6 +106,22 @@ If DevTools isolation is desired within the single Apps Script repository:
 
 ---
 
+## Addendum: Firebase Top-Level Hosting & Dual-Engine Architecture (ADR-0011)
+
+**Date:** 2026-11-16
+**Context:** Re-evaluated following the adoption of [ADR-0011 (Dual-Engine Architecture)](../FIREBASE_APPS_SCRIPT_SYNERGY.md) and deployment to multi-site Firebase Hosting (`https://sea-of-fortune-dnd.web.app` and `https://sea-of-fortune-gm.web.app`).
+
+1. **Resolution of the `google.script.run` DevTools Exposure Vector:**
+   - In Apps Script, every global server function not ending with an underscore was exposed to any visitor opening browser DevTools on personal smartphones, necessitating custom passcode headers (`SOF_GM_KEY`) and procedural guard helpers (`assertGmAccess_`).
+   - Under the Dual-Engine Architecture, player-facing interactions (rule lookups, reaction voting, character switching) interface directly with **Cloud Firestore**. Access control is governed by declarative **Firestore Security Rules** evaluated at the database engine level. Even if a player inspects DevTools or issues arbitrary network requests, GM-only collections (e.g. `sessions/{date}/gm_private/*`) are physically unreadable without a verified GM auth token (`request.auth.token.email == gmEmail`).
+2. **Frictionless Onboarding via Firebase Anonymous Auth:**
+   - The primary hurdle with Apps Script was that consumer `@gmail.com` accounts could not be identified without triggering Google's full unverified app OAuth consent flow.
+   - Firebase Anonymous Auth completely resolves this: players scan the table QR code (`https://sea-of-fortune-dnd.web.app?view=companion`) and receive a cryptographically signed anonymous UID instantly. No Google account login, consent screens, or permission dialogs are required.
+3. **Robust GM Authentication via Google Sign-In:**
+   - Rather than relying on fragile cookie propagation across Apps Script iframes (which frequently yielded `Session.getActiveUser().getEmail() === ""`), the GM authenticates cleanly on the top-level origin (`https://sea-of-fortune-gm.web.app`) via Firebase Google Sign-In, granting verified GM claims for administrative actions.
+
+---
+
 ## Primary Sources
 
 1. **Google Apps Script — Web Apps Guide (`doGet(e)`, `e.parameter`, Deployment Permissions):**

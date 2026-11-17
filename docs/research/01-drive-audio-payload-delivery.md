@@ -115,3 +115,18 @@ function getAudioFileChunk(fileId, startByte, endByte) {
 1. **Adopt Option A (Direct Browser `fetch()` to `https://www.googleapis.com/drive/v3/files/{fileId}?alt=media` with `Authorization: Bearer <token>`)** as the primary delivery mechanism for pre-warming **Tabletop Mixer** audio **Session Assets** into the browser's `IndexedDB` cache.
 2. **Token Provisioning Pattern:** Expose a lightweight `getDriveAccessToken()` helper (or include the token in the initial `getSessionManifest(sessionDate)` response) in `Code.gs` using `ScriptApp.getOAuthToken()`. Because [`appsscript.json`](../../../appsscript.json) already enforces `executeAs: "USER_DEPLOYING"` and `access: "MYSELF"` with the `https://www.googleapis.com/auth/drive` scope, no new OAuth consent flow or GCP configuration is required.
 3. **Retain Option B (Chunked `Range` RPC) Only as an Architectural Escape Hatch:** If a restrictive browser extension or network proxy ever interferes with direct `googleapis.com` requests, a 4MB-chunked `Range` fetcher in `Code.gs` can serve as a fallback, but it is unnecessary for standard Chrome/Safari sessions.
+
+---
+
+## Addendum: Firebase Top-Level Hosting & Dual-Engine Architecture (ADR-0011)
+
+**Date:** 2026-11-16
+**Context:** Re-evaluated following the adoption of [ADR-0011 (Dual-Engine Architecture)](../FIREBASE_APPS_SCRIPT_SYNERGY.md) and deployment to multi-site Firebase Hosting (`https://sea-of-fortune-gm.web.app`).
+
+1. **Elimination of Third-Party Iframe Storage Partitioning:**
+   - In the initial research spike, caching audio assets into `IndexedDB` occurred from inside Apps Script's `https://n-*-script.googleusercontent.com` iframe. In browsers enforcing storage partitioning (such as Safari ITP and modern Chromium), iframe storage is treated as third-party, subjecting cached 20MB audio loops to aggressive eviction (e.g., Safari's 7-day partition purge).
+   - Under Firebase Hosting on `https://sea-of-fortune-gm.web.app`, `IndexedDB` is registered under a permanent **first-party top-level origin**. Cached ambient loops and sound effects in `sof_audio_cache_v1` persist indefinitely across sessions without danger of iframe eviction.
+2. **Drive v3 Direct Streaming Retained as Cost-Free Storage Engine:**
+   - Option A (Direct Browser `fetch()` against Google Drive API v3 `alt=media` via Bearer OAuth token) remains the optimal path for asset delivery. It provides the campaign with 15GB–2TB of zero-cost audio asset storage inside Google Drive while bypassing Firebase Cloud Storage bandwidth costs.
+3. **Decoupled Real-Time Cue Sync (Cloud Firestore):**
+   - While audio blobs continue to be fetched from Google Drive v3, live cue triggers and mixer synchronization no longer rely on polling Apps Script `CacheService` via `doGet`/`doPost`. Instead, Cloud Firestore provides `<50ms` real-time WebSocket push updates (`onSnapshot`) to the top-level GM Screen and Player Companion clients.

@@ -85,6 +85,22 @@ Per the official [Google Apps Script HTML Service Restrictions](https://develope
 
 ---
 
+## Addendum: Firebase Top-Level Hosting & Dual-Engine Architecture (ADR-0011)
+
+**Date:** 2026-11-16
+**Context:** Re-evaluated following the adoption of [ADR-0011 (Dual-Engine Architecture)](../FIREBASE_APPS_SCRIPT_SYNERGY.md) and deployment to multi-site Firebase Hosting (`https://sea-of-fortune-gm.web.app` and `https://sea-of-fortune-dnd.web.app`).
+
+1. **Unblocking `getUserMedia` and Web Speech Recognition:**
+   - The initial research proved that `getUserMedia` and `webkitSpeechRecognition` are unconditionally blocked inside Google Apps Script because `#sandboxFrame` omits `allow="microphone"`.
+   - By hosting the application directly on top-level Firebase Hosting domains (`https://*.web.app`), the browser executes in a first-party, top-level secure context. The browser can now directly request microphone permissions from the user. This unblocks native in-browser voice capture for the Push-to-Talk rules sniffer on both desktop and mobile web without requiring external hardware or native keyboard dictation workarounds.
+2. **First-Party Storage Persistence Unlocks In-Browser AI & Caching:**
+   - On `https://sea-of-fortune-gm.web.app`, `IndexedDB` and `CacheStorage` are first-party and immune to third-party iframe eviction policies (such as Safari ITP's 7-day purge). Subdomains no longer rotate across deployments.
+   - This provides the persistent storage foundation required for long-term client-side caching of rule embeddings and tactical search indexes, and re-opens the viability of in-browser quantized LLM execution (via WebGPU or WASM) on desktop GM hardware.
+3. **Chrome Local Network Access (LNA) Prompts Allowed:**
+   - While cross-origin iframes without explicit permission delegation are silently denied local network access under Chrome 142+, top-level origins (`https://*.web.app`) can initiate LNA requests to local RFC 1918 private IP addresses (e.g., direct WebSocket or HTTP communication with a Raspberry Pi on `192.168.x.x`), subject to standard user authorization prompts.
+
+---
+
 ## Primary Sources Cited
 
 1. Google Developers — [HTML Service: Restrictions (`IFRAME` sandbox flags and HTTPS active content rules)](https://developers.google.com/apps-script/guides/html/restrictions)

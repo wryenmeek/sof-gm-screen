@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
+import {
+  projectCombatPublic,
+  calculateStatusBand,
+  type CombatGmDocument,
+  type CombatantState
+} from "../src/live_tabletop_client";
 
 describe("Client-Side Logic (Index.html)", () => {
   let parseCustomMarkdown: (content: string) => string;
@@ -440,6 +446,225 @@ A resonant construct of bronze and coral.
         document.getElementById("save-status");
       expect(statusEl).not.toBeNull();
       expect(statusEl!.textContent).toContain("3");
+    });
+  });
+
+  describe("Ticket 04 / #37: Real-Time Combat Synchronization & DevTools Leak Prevention", () => {
+    const sampleCombatants: CombatantState[] = [
+      {
+        id: "c_assassin",
+        name: "Deep Assassin",
+        hp: 80,
+        maxHp: 80,
+        ac: 16,
+        initiative: 22,
+        status: "active",
+        claimedBy: null,
+        isPlayerVisible: false
+      },
+      {
+        id: "c_pog",
+        name: "Pog",
+        hp: 45,
+        maxHp: 45,
+        ac: 17,
+        initiative: 18,
+        status: "active",
+        claimedBy: "player_pog",
+        isPlayerVisible: true
+      },
+      {
+        id: "c_sahuagin",
+        name: "Sahuagin Raider",
+        hp: 20,
+        maxHp: 45,
+        ac: 14,
+        initiative: 12,
+        status: "active",
+        claimedBy: null,
+        isPlayerVisible: true
+      },
+      {
+        id: "c_lurker",
+        name: "Coral Lurker",
+        hp: 35,
+        maxHp: 35,
+        ac: 15,
+        initiative: 8,
+        status: "active",
+        claimedBy: null,
+        isPlayerVisible: false
+      }
+    ];
+
+    it("projectCombatPublic filters out hidden ambush monsters and maps status bands without secret stats", () => {
+      const gmState: CombatGmDocument = {
+        round: 1,
+        activeIndex: 1, // Pog
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      const publicProjection = projectCombatPublic(gmState);
+
+      expect(publicProjection.round).toBe(1);
+      expect(publicProjection.isRunning).toBe(true);
+      expect(publicProjection.combatants).toBeDefined();
+      expect(publicProjection.combatants!.length).toBe(2);
+
+      // DevTools Inspection Leak Prevention: Verify hidden ambush monsters are strictly absent
+      const hiddenMonsterNames = publicProjection.combatants!.map(
+        (c) => c.name
+      );
+      expect(hiddenMonsterNames).not.toContain("Deep Assassin");
+      expect(hiddenMonsterNames).not.toContain("Coral Lurker");
+      expect(hiddenMonsterNames).toEqual(["Pog", "Sahuagin Raider"]);
+
+      // Verify status bands and complete absence of secret monster stats
+      const publicPog = publicProjection.combatants![0];
+      const publicSahuagin = publicProjection.combatants![1];
+
+      expect(publicPog.statusBand).toBe("UNINJURED");
+      expect(publicSahuagin.statusBand).toBe("BLOODIED");
+
+      // Verify secret numbers (ac, raw hp, maxHp) are not leaked on public combatants
+      expect((publicSahuagin as any).ac).toBeUndefined();
+      expect((publicSahuagin as any).hp).toBeUndefined();
+      expect((publicSahuagin as any).maxHp).toBeUndefined();
+      expect((publicSahuagin as any).notes).toBeUndefined();
+    });
+
+    it("masks activeIndex to -1 when current turn belongs to a hidden ambush monster", () => {
+      const gmStateAmbushActive: CombatGmDocument = {
+        round: 1,
+        activeIndex: 0, // Deep Assassin (isPlayerVisible: false)
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      const publicProjection = projectCombatPublic(gmStateAmbushActive);
+
+      // Active index masked so curious players inspecting DevTools cannot infer a hidden turn
+      expect(publicProjection.activeIndex).toBe(-1);
+
+      // When turn switches to a visible combatant, activeIndex correctly maps to the visible list index
+      const gmStateVisibleActive: CombatGmDocument = {
+        round: 1,
+        activeIndex: 2, // Sahuagin Raider (index 1 in visible list)
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      const visibleProjection = projectCombatPublic(gmStateVisibleActive);
+      expect(visibleProjection.activeIndex).toBe(1);
+    });
+
+    it("calculates 5e Status Bands aligned strictly with GLOSSARY.md thresholds", () => {
+      expect(calculateStatusBand(45, 45)).toBe("UNINJURED"); // 100%
+      expect(calculateStatusBand(50, 45)).toBe("UNINJURED"); // Over max
+      expect(calculateStatusBand(35, 45)).toBe("INJURED"); // 77.8% (50-99%)
+      expect(calculateStatusBand(23, 45)).toBe("INJURED"); // 51.1%
+      expect(calculateStatusBand(20, 45)).toBe("BLOODIED"); // 44.4% (25-49%)
+      expect(calculateStatusBand(12, 45)).toBe("BLOODIED"); // 26.7%
+      expect(calculateStatusBand(10, 45)).toBe("CRITICAL"); // 22.2% (1-24%)
+      expect(calculateStatusBand(1, 45)).toBe("CRITICAL"); // 2.2%
+      expect(calculateStatusBand(0, 45)).toBe("DOWN"); // 0 HP
+      expect(calculateStatusBand(-10, 45)).toBe("DOWN"); // Negative HP
+    });
+
+    it("prevents DevTools DOM inspection by stripping GM Combat Tracker in Companion Mode (ADR-0008)", () => {
+      const companionHarness = setupClientHarness({
+        viewMode: "companion"
+      });
+
+      expect(companionHarness.initCompanionState).toBeDefined();
+      (window as any).onload();
+
+      // In Companion mode, GM combat tracker and stat table are removed from the DOM
+      expect(document.getElementById("gm-combat-tracker")).toBeNull();
+      expect(document.getElementById("gm-combat-table")).toBeNull();
+
+      // Player combat tracker exists in Companion HUD
+      expect(document.getElementById("player-combat-tracker")).not.toBeNull();
+    });
+
+    it("renders GM combat tracker with ambush indicators and advances turns in desktop mode", () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm"
+      });
+
+      expect(gmHarness.renderGmCombat).toBeDefined();
+      expect(gmHarness.advanceCombatTurn).toBeDefined();
+
+      const gmState: CombatGmDocument = {
+        round: 1,
+        activeIndex: 0,
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      gmHarness.renderGmCombat(gmState);
+
+      const tableEl = document.getElementById("gm-combat-table");
+      const listEl = document.getElementById("gm-combat-list");
+      const roundEl = document.getElementById("gm-combat-round");
+
+      expect(tableEl).not.toBeNull();
+      expect(listEl).not.toBeNull();
+      expect(roundEl?.textContent).toBe("Round 1");
+      expect(listEl!.children.length).toBe(4);
+
+      // Verify ambush badges rendered in GM view
+      expect(listEl!.innerHTML).toContain("👁️ Hidden");
+      expect(listEl!.innerHTML).toContain("👁️ Public");
+
+      // Advance turn
+      gmHarness.advanceCombatTurn(1);
+      const activeState = gmHarness.getActiveCombatGmState();
+      expect(activeState.activeIndex).toBe(1);
+
+      // Advance across all combatants to wrap round
+      gmHarness.advanceCombatTurn(1); // 2
+      gmHarness.advanceCombatTurn(1); // 3
+      gmHarness.advanceCombatTurn(1); // Wraps to 0, Round 2
+      const wrappedState = gmHarness.getActiveCombatGmState();
+      expect(wrappedState.activeIndex).toBe(0);
+      expect(wrappedState.round).toBe(2);
+      expect(roundEl?.textContent).toBe("Round 2");
+    });
+
+    it("renders player combat projection with status bands and no ambush monsters", () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+
+      expect(harness.renderPlayerCombat).toBeDefined();
+
+      const projected = projectCombatPublic({
+        round: 2,
+        activeIndex: 1,
+        combatants: sampleCombatants,
+        isRunning: true
+      });
+
+      harness.renderPlayerCombat(projected);
+
+      const trackerEl = document.getElementById("player-combat-tracker");
+      const listEl = document.getElementById("player-combat-list");
+      const roundEl = document.getElementById("player-combat-round");
+
+      expect(trackerEl?.style.display).toBe("block");
+      expect(roundEl?.textContent).toBe("Round 2");
+      expect(listEl!.children.length).toBe(2);
+
+      // Verify DOM does not contain hidden monsters
+      expect(listEl!.textContent).not.toContain("Deep Assassin");
+      expect(listEl!.textContent).not.toContain("Coral Lurker");
+
+      // Verify status bands rendered
+      expect(listEl!.innerHTML).toContain("UNINJURED");
+      expect(listEl!.innerHTML).toContain("BLOODIED");
+      expect(listEl!.innerHTML).toContain("active-combatant");
     });
   });
 });

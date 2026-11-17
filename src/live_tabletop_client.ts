@@ -12,7 +12,6 @@ import {
   doc,
   collection,
   setDoc,
-  updateDoc,
   addDoc,
   onSnapshot,
   serverTimestamp,
@@ -55,6 +54,9 @@ export interface AudioCueDocument {
   payload?: AudioCuePayload;
 }
 
+export type CombatStatusBand =
+  "UNINJURED" | "INJURED" | "BLOODIED" | "CRITICAL" | "DOWN";
+
 export interface CombatantState {
   id: string;
   name: string;
@@ -72,14 +74,129 @@ export interface CombatantState {
     | "dead";
   claimedBy: string | null;
   isPlayerVisible: boolean;
+  statusBand?: CombatStatusBand;
+  notes?: string;
 }
 
-export interface CombatDocument {
+export interface PublicCombatantState {
+  id: string;
+  name: string;
+  initiative: number;
+  statusBand: CombatStatusBand;
+  status?:
+    | "active"
+    | "downed"
+    | "concentrating"
+    | "stunned"
+    | "paralyzed"
+    | "unconscious"
+    | "dead"
+    | string;
+  claimedBy: string | null;
+  hp?: number;
+  maxHp?: number;
+  isPlayerVisible?: boolean;
+}
+
+export interface CombatGmDocument {
   round: number;
   activeIndex: number;
   combatants: CombatantState[];
   isRunning: boolean;
   updatedAt?: any;
+}
+
+export interface PublicCombatDocument {
+  round?: number;
+  activeIndex?: number;
+  combatants?: PublicCombatantState[];
+  isRunning?: boolean;
+  updatedAt?: any;
+}
+
+export interface CombatDocument {
+  round: number;
+  activeIndex: number;
+  combatants: (PublicCombatantState | CombatantState)[];
+  isRunning: boolean;
+  updatedAt?: any;
+}
+
+/**
+ * Calculates the descriptive 5e status band based on current and maximum HP.
+ * UNINJURED (100%), INJURED (50-99%), BLOODIED (25-49%), CRITICAL (1-24%), DOWN (<=0).
+ */
+export function calculateStatusBand(
+  hp: number,
+  maxHp: number
+): CombatStatusBand {
+  if (hp <= 0) return "DOWN";
+  if (maxHp <= 0) return "UNINJURED";
+  const ratio = hp / maxHp;
+  if (ratio < 0.25) return "CRITICAL";
+  if (ratio < 0.5) return "BLOODIED";
+  if (ratio < 1.0) return "INJURED";
+  return "UNINJURED";
+}
+
+/**
+ * Transforms private GM combat state into a player-safe public projection.
+ * Filters out unrevealed ambush monsters (isPlayerVisible === false),
+ * converts raw hit points into status bands, masks secret stats (AC/HP),
+ * and adjusts activeIndex if the current turn belongs to a hidden monster.
+ */
+export function projectCombatPublic(
+  combatGm: Partial<CombatGmDocument> | Partial<CombatDocument>
+): PublicCombatDocument {
+  const result: PublicCombatDocument = {};
+  if (typeof combatGm.round === "number") {
+    result.round = combatGm.round;
+  }
+  if (typeof combatGm.isRunning === "boolean") {
+    result.isRunning = combatGm.isRunning;
+  }
+  if (combatGm.updatedAt !== undefined) {
+    result.updatedAt = combatGm.updatedAt;
+  }
+
+  if (Array.isArray(combatGm.combatants)) {
+    const visibleCombatants = combatGm.combatants.filter(
+      (c) => c.isPlayerVisible !== false
+    );
+
+    let activeIndex =
+      typeof combatGm.activeIndex === "number" ? combatGm.activeIndex : -1;
+    if (activeIndex >= 0 && activeIndex < combatGm.combatants.length) {
+      const activeCombatant = combatGm.combatants[activeIndex];
+      if (activeCombatant && activeCombatant.isPlayerVisible === false) {
+        // Active turn is hidden from players
+        activeIndex = -1;
+      } else if (activeCombatant) {
+        activeIndex = visibleCombatants.findIndex(
+          (c) => c.id === activeCombatant.id
+        );
+      }
+    }
+    result.activeIndex = activeIndex;
+
+    result.combatants = visibleCombatants.map((c) => {
+      const maxHp = typeof c.maxHp === "number" ? c.maxHp : (c.hp ?? 0);
+      const hp = typeof c.hp === "number" ? c.hp : maxHp;
+      return {
+        id: c.id,
+        name: c.name,
+        initiative: c.initiative ?? 0,
+        statusBand: calculateStatusBand(hp, maxHp),
+        status: c.status,
+        claimedBy: c.claimedBy ?? null,
+        isPlayerVisible: true
+      };
+    });
+  } else if (typeof combatGm.activeIndex === "number") {
+    result.activeIndex = combatGm.activeIndex;
+  }
+
+  return result;
 }
 
 export interface TableReaction {
@@ -238,6 +355,61 @@ export class LiveTabletopClient {
     };
   }
 
+  private async setDocument(
+    path: string,
+    data: Record<string, any>,
+    options: { merge?: boolean } = {}
+  ): Promise<void> {
+    if (typeof (this.db as any).doc === "function") {
+      const dRef = (this.db as any).doc(path);
+      if (typeof dRef.set === "function") {
+        await dRef.set(data, options);
+        return;
+      }
+    }
+    const docRef = doc(this.db, path);
+    await setDoc(docRef, data, options);
+  }
+
+  /**
+   * Subscribes to private GM Combat state document (sessions/{date}/live/combat_gm).
+   */
+  public subscribeToCombatGm(
+    sessionDate: string,
+    callback: (combat: CombatGmDocument | null) => void,
+    onError?: (err: Error) => void
+  ): Unsubscribe {
+    const path = `sessions/${sessionDate}/live/combat_gm`;
+    if (typeof (this.db as any).doc === "function") {
+      const dRef = (this.db as any).doc(path);
+      if (typeof dRef.onSnapshot === "function") {
+        const unsub = dRef.onSnapshot(
+          (snap: any) =>
+            callback(snap.exists() ? (snap.data() as CombatGmDocument) : null),
+          onError
+        );
+        this.activeUnsubscribes.add(unsub);
+        return () => {
+          this.activeUnsubscribes.delete(unsub);
+          unsub();
+        };
+      }
+    }
+    const combatGmDocRef = doc(this.db, path);
+    const unsub = onSnapshot(
+      combatGmDocRef,
+      (snap) => {
+        callback(snap.exists() ? (snap.data() as CombatGmDocument) : null);
+      },
+      onError
+    );
+    this.activeUnsubscribes.add(unsub);
+    return () => {
+      this.activeUnsubscribes.delete(unsub);
+      unsub();
+    };
+  }
+
   /**
    * Subscribes to public Combat state projections.
    */
@@ -246,7 +418,23 @@ export class LiveTabletopClient {
     callback: (combat: CombatDocument | null) => void,
     onError?: (err: Error) => void
   ): Unsubscribe {
-    const combatDocRef = doc(this.db, `sessions/${sessionDate}/live/combat`);
+    const path = `sessions/${sessionDate}/live/combat`;
+    if (typeof (this.db as any).doc === "function") {
+      const dRef = (this.db as any).doc(path);
+      if (typeof dRef.onSnapshot === "function") {
+        const unsub = dRef.onSnapshot(
+          (snap: any) =>
+            callback(snap.exists() ? (snap.data() as CombatDocument) : null),
+          onError
+        );
+        this.activeUnsubscribes.add(unsub);
+        return () => {
+          this.activeUnsubscribes.delete(unsub);
+          unsub();
+        };
+      }
+    }
+    const combatDocRef = doc(this.db, path);
     const unsub = onSnapshot(
       combatDocRef,
       (snap) => {
@@ -329,17 +517,38 @@ export class LiveTabletopClient {
   }
 
   /**
-   * Updates tactical combat state projection (GM only).
+   * Updates tactical combat state partitioned between private GM data and public projection (GM only).
+   * Writes raw combat data (including hidden ambush monsters, exact HP, AC) to combat_gm,
+   * automatically computes the public projection with status bands and hidden monster filtering,
+   * and publishes the projection to combat.
    */
   public async updateCombat(
     sessionDate: string,
-    combat: Partial<CombatDocument>
+    combat: Partial<CombatGmDocument> | Partial<CombatDocument>
   ): Promise<void> {
-    const combatDocRef = doc(this.db, `sessions/${sessionDate}/live/combat`);
-    await updateDoc(combatDocRef, {
-      ...combat,
-      updatedAt: serverTimestamp()
-    });
+    const gmPath = `sessions/${sessionDate}/live/combat_gm`;
+    const publicPath = `sessions/${sessionDate}/live/combat`;
+
+    const projection = projectCombatPublic(combat);
+
+    await Promise.all([
+      this.setDocument(
+        gmPath,
+        {
+          ...combat,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      ),
+      this.setDocument(
+        publicPath,
+        {
+          ...projection,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      )
+    ]);
   }
 
   /**

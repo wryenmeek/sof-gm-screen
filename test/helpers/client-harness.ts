@@ -415,7 +415,13 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         triggerPtt: typeof triggerPtt !== "undefined" ? triggerPtt : undefined,
         showRuleCard: typeof showRuleCard_ !== "undefined" ? showRuleCard_ : undefined,
         dismissRuleCard: typeof dismissRuleCard !== "undefined" ? dismissRuleCard : undefined,
-        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined
+        submitRuleFeedback: typeof submitRuleFeedback !== "undefined" ? submitRuleFeedback : undefined,
+        renderGmCombat: typeof renderGmCombat_ !== "undefined" ? renderGmCombat_ : undefined,
+        renderPlayerCombat: typeof renderPlayerCombat_ !== "undefined" ? renderPlayerCombat_ : undefined,
+        advanceCombatTurn: typeof advanceCombatTurn !== "undefined" ? advanceCombatTurn : undefined,
+        initCombatTracker: typeof initCombatTracker !== "undefined" ? initCombatTracker : undefined,
+        getActiveCombatGmState: typeof getActiveCombatGmState !== "undefined" ? getActiveCombatGmState : undefined,
+        getActiveCombatPlayerState: typeof getActiveCombatPlayerState !== "undefined" ? getActiveCombatPlayerState : undefined
       };
     `
   );

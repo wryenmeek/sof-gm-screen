@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <base target="_self" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      Prototype: Edge Raspberry Pi Direct Firestore Audio Cue Dispatcher
+    </title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card-bg: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --heading: #f0f6fc;
+        --accent: #58a6ff;
+        --success: #3fb950;
+        --warning: #d29922;
+        --danger: #f85149;
+        --muted: #8b949e;
+        --code-bg: #0b0e14;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        line-height: 1.5;
+        padding: 24px;
+        max-width: 1040px;
+        margin: 0 auto;
+      }
+
+      @media print {
+        body {
+          background: #ffffff;
+          color: #000000;
+        }
+      }
+
+      header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 16px;
+        margin-bottom: 24px;
+      }
+
+      h1 {
+        color: var(--heading);
+        font-size: 22px;
+        margin-bottom: 8px;
+      }
+
+      .question-banner {
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: 6px;
+        padding: 12px 16px;
+        margin-top: 12px;
+        font-size: 14px;
+      }
+
+      .question-banner strong {
+        color: var(--accent);
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 24px;
+      }
+
+      @media (max-width: 768px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 16px;
+      }
+
+      .card-title {
+        font-size: 15px;
+        color: var(--heading);
+        font-weight: 600;
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 12px;
+        text-transform: uppercase;
+      }
+
+      .badge-success {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--success);
+      }
+      .badge-warning {
+        background: rgba(210, 153, 34, 0.15);
+        color: var(--warning);
+      }
+      .badge-danger {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--danger);
+      }
+      .badge-accent {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent);
+      }
+
+      .state-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+        font-size: 13px;
+      }
+
+      .state-row:last-child {
+        border-bottom: none;
+      }
+
+      .state-label {
+        color: var(--muted);
+      }
+
+      .state-val {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        color: var(--heading);
+        font-weight: 500;
+      }
+
+      .btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      button {
+        background: #21262d;
+        color: var(--heading);
+        border: 1px solid var(--border);
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 500;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      button:hover {
+        background: #30363d;
+        border-color: #8b949e;
+      }
+
+      button.primary {
+        background: #1f6feb;
+        border-color: #388bfd;
+        color: #ffffff;
+      }
+
+      button.primary:hover {
+        background: #388bfd;
+      }
+
+      button.danger {
+        background: #da3633;
+        border-color: #f85149;
+        color: #ffffff;
+      }
+
+      .tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 16px;
+      }
+
+      .tab-btn {
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        padding: 8px 16px;
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .tab-btn.active {
+        color: var(--heading);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
+
+      .scenario-desc {
+        font-size: 13px;
+        color: var(--text);
+        margin-bottom: 16px;
+        background: #0b0e14;
+        padding: 12px;
+        border-radius: 6px;
+        border-left: 3px solid var(--accent);
+      }
+
+      .scenario-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .step-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 13px;
+      }
+
+      .step-num {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--border);
+        color: var(--heading);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 11px;
+      }
+
+      .log-box {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        height: 220px;
+        overflow-y: auto;
+        color: var(--text);
+      }
+
+      .log-entry {
+        margin-bottom: 4px;
+        padding: 2px 0;
+        border-bottom: 1px solid rgba(48, 54, 61, 0.2);
+      }
+
+      .log-time {
+        color: var(--muted);
+      }
+      .log-firestore {
+        color: var(--success);
+      }
+      .log-webhook {
+        color: var(--warning);
+      }
+      .log-spool {
+        color: var(--danger);
+      }
+      .log-suppress {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>
+        Wayfinder 14 Prototype: Edge Raspberry Pi Direct Firestore Audio Cue
+        Dispatcher
+      </h1>
+      <div class="question-banner">
+        <strong>Core Design Question:</strong> How should the Edge Raspberry Pi
+        VAD chunker dispatch classified Audio Cues directly to Cloud Firestore
+        using the Python SDK, while managing connection timeouts (800ms budget),
+        instant fallback to the local GM Screen HTTP webhook, and offline
+        write-ahead spooling during table network drops?
+      </div>
+    </header>
+
+    <div class="grid-2">
+      <!-- State Panel -->
+      <div class="card">
+        <div class="card-title">
+          <span>Current Edge Dispatch State</span>
+          <span id="system-status-badge" class="badge badge-success"
+            >ONLINE</span
+          >
+        </div>
+
+        <div class="state-row">
+          <span class="state-label">Firestore Direct Connection</span>
+          <span id="state-firestore-status" class="state-val">CONNECTED</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Local GM Webhook</span>
+          <span id="state-webhook-status" class="state-val">AVAILABLE</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Active Mood / Score</span>
+          <span
+            id="state-active-mood"
+            class="state-val"
+            style="color: var(--accent)"
+            >exploration</span
+          >
+        </div>
+        <div class="state-row">
+          <span class="state-label">Last Dispatched Cue</span>
+          <span id="state-last-cue" class="state-val">None</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Primary Dispatch Route</span>
+          <span id="state-dispatch-route" class="state-val">-</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Classifier Latency</span>
+          <span id="state-latency" class="state-val">-</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Offline Spool Queue</span>
+          <span id="state-spool-count" class="state-val">0 unsent cues</span>
+        </div>
+      </div>
+
+      <!-- Free-Play Actions -->
+      <div class="card">
+        <div class="card-title">Free-Play Controls</div>
+
+        <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px">
+          Simulate Speech Chunk Classification:
+        </div>
+        <div class="btn-group">
+          <button
+            class="primary"
+            onclick="
+              simulateSpeechChunk('MUSIC_CUE', 'combat', null, 'tier1', 420)
+            "
+          >
+            Voice: "Roll for Initiative!" (Combat)
+          </button>
+          <button
+            onclick="
+              simulateSpeechChunk('MUSIC_CUE', 'tension', null, 'tier1', 380)
+            "
+          >
+            Voice: "The door creeps open..." (Tension)
+          </button>
+          <button
+            onclick="
+              simulateSpeechChunk(
+                'RULE_QUERY',
+                null,
+                'srd_sneak_attack',
+                'tier2',
+                1150
+              )
+            "
+          >
+            Voice: "How does Sneak Attack work?" (Rule)
+          </button>
+          <button
+            onclick="
+              simulateSpeechChunk('TABLE_BANTER', null, null, 'tier1', 250)
+            "
+          >
+            Voice: "Pass the chips, please" (Banter)
+          </button>
+        </div>
+
+        <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px">
+          Simulate Network Conditions:
+        </div>
+        <div class="btn-group">
+          <button id="btn-toggle-firestore" onclick="toggleFirestore()">
+            Firestore: Online
+          </button>
+          <button id="btn-toggle-webhook" onclick="toggleWebhook()">
+            Webhook: Online
+          </button>
+          <button onclick="drainSpoolQueue()">Drain Spool Queue</button>
+          <button class="danger" onclick="resetState()">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Guided Walkthroughs -->
+    <div class="card" style="margin-bottom: 24px">
+      <div class="card-title">Guided Architectural Scenarios</div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchScenario(1)">
+          1. Golden Path (Fast Direct Push)
+        </button>
+        <button class="tab-btn" onclick="switchScenario(2)">
+          2. Firestore Timeout / Flaky WAN
+        </button>
+        <button class="tab-btn" onclick="switchScenario(3)">
+          3. Complete Offline Table Outage
+        </button>
+        <button class="tab-btn" onclick="switchScenario(4)">
+          4. Banter Suppression
+        </button>
+      </div>
+
+      <div id="scenario-1" class="scenario-content">
+        <div class="scenario-desc">
+          <strong>Scenario 1: Happy Path:</strong> The table says "Roll for
+          Initiative!" Local ONNX model on the Raspberry Pi classifies
+          <code>combat</code> in 420ms (well under the 1,500ms budget). The Edge
+          dispatcher writes directly to Cloud Firestore in 24ms. Both GM Screen
+          and Player Companions receive <code>onSnapshot</code> events
+          instantly.
+        </div>
+        <div class="scenario-steps">
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <button class="primary" onclick="runStep1_1()">
+              Emit "Roll for Initiative!" (Combat Cue)
+            </button>
+            <span>Watches direct Firestore write path succeed.</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="scenario-2" class="scenario-content" style="display: none">
+        <div class="scenario-desc">
+          <strong>Scenario 2: Cloud Firestore Timeout / Flaky WAN:</strong>
+          Internet connection to Google Cloud experiences high jitter or hangs
+          (>800ms budget). The edge dispatcher times out on Firestore and
+          immediately falls back to posting an outbound HTTP JSON payload to the
+          local GM Screen LAN webhook (<code>192.168.1.100:8080/api/cue</code>),
+          keeping music transitions instant.
+        </div>
+        <div class="scenario-steps">
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <button onclick="runStep2_1()">
+              Simulate WAN Hang (Firestore Offline)
+            </button>
+          </div>
+          <div class="step-item">
+            <span class="step-num">2</span>
+            <button class="primary" onclick="runStep2_2()">
+              Emit "Tension" Speech Chunk
+            </button>
+            <span>Observes automatic failover to local GM Webhook.</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="scenario-3" class="scenario-content" style="display: none">
+        <div class="scenario-desc">
+          <strong>Scenario 3: Total Table Network Outage:</strong> Both home
+          Wi-Fi and cloud internet drop at a convention. The edge dispatcher
+          fails to reach Firestore, fails to reach the local webhook, and
+          automatically spools the cue into
+          <code>session_audio_manifest.json</code>. When internet recovers, the
+          queue is drained automatically.
+        </div>
+        <div class="scenario-steps">
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <button onclick="runStep3_1()">
+              Disconnect All Network Connections
+            </button>
+          </div>
+          <div class="step-item">
+            <span class="step-num">2</span>
+            <button class="primary" onclick="runStep3_2()">
+              Emit Multiple Audio Cues
+            </button>
+            <span>Cues are saved to offline spool queue.</span>
+          </div>
+          <div class="step-item">
+            <span class="step-num">3</span>
+            <button onclick="runStep3_3()">
+              Restore Connection & Drain Queue
+            </button>
+            <span>Queued cues are delivered in order.</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="scenario-4" class="scenario-content" style="display: none">
+        <div class="scenario-desc">
+          <strong>Scenario 4: Banter & Low Confidence Filtering:</strong> Casual
+          table chatter ("Pass the pretzels") is classified as
+          <code>TABLE_BANTER</code>. The dispatcher verifies that no actionable
+          intent is present and suppresses all network calls, eliminating
+          unnecessary database writes.
+        </div>
+        <div class="scenario-steps">
+          <div class="step-item">
+            <span class="step-num">1</span>
+            <button class="primary" onclick="runStep4_1()">
+              Emit "Pass the chips, please" (Banter)
+            </button>
+            <span>Confirms zero network traffic emitted.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Event Log -->
+    <div class="card">
+      <div class="card-title">Edge Dispatch Event Log</div>
+      <div id="log-box" class="log-box"></div>
+    </div>
+
+    <!-- Pure Logic Module -->
+    <script>
+      /**
+       * EdgeDispatcherLogic: Self-contained pure logic module for Raspberry Pi Audio Cue Dispatching.
+       * Can be lifted directly into scripts/rpi_vad_chunker.py.
+       */
+      const EdgeDispatcherLogic = {
+        createInitialState() {
+          return {
+            firestoreStatus: "ONLINE", // ONLINE | SLOW | OFFLINE
+            webhookStatus: "ONLINE", // ONLINE | OFFLINE
+            activeMood: "exploration",
+            lastCue: null,
+            lastRoute: "-",
+            lastLatency: "-",
+            spoolQueue: [],
+            logs: []
+          };
+        },
+
+        /**
+         * Dispatches an audio cue through the tiered fallback pipeline:
+         * 1. Check if actionable intent (MUSIC_CUE, RULE_QUERY, SFX). Suppress BANTER.
+         * 2. Try direct Cloud Firestore write (timeout budget: 800ms).
+         * 3. On Firestore failure, try local GM Screen webhook (timeout: 500ms).
+         * 4. On both failures, spool into write-ahead offline queue.
+         */
+        dispatch(state, cueInput) {
+          const nextState = {
+            ...state,
+            spoolQueue: [...state.spoolQueue],
+            logs: [...state.logs]
+          };
+          const now = new Date().toLocaleTimeString();
+
+          // 1. Check Actionable Intent
+          if (cueInput.intent === "TABLE_BANTER") {
+            nextState.lastCue = "Banter (Suppressed)";
+            nextState.lastRoute = "SUPPRESSED";
+            nextState.lastLatency = `${cueInput.latencyMs}ms (${cueInput.tier})`;
+            nextState.logs.unshift({
+              time: now,
+              type: "suppress",
+              msg: `[SUPPRESSED] Banter classified (${cueInput.latencyMs}ms, ${cueInput.tier}). No network traffic emitted.`
+            });
+            return nextState;
+          }
+
+          // Actionable payload
+          const payload = {
+            intent: cueInput.intent,
+            mood: cueInput.mood,
+            rule: cueInput.rule,
+            source: `pi_vad_${cueInput.tier}`,
+            triggeredAt: Date.now(),
+            latencyMs: cueInput.latencyMs
+          };
+
+          nextState.lastCue = `${payload.intent}${payload.mood ? ": " + payload.mood : ""}${payload.rule ? ": " + payload.rule : ""}`;
+          nextState.lastLatency = `${cueInput.latencyMs}ms (${cueInput.tier})`;
+
+          // 2. Route 1: Direct Cloud Firestore Write
+          if (nextState.firestoreStatus === "ONLINE") {
+            nextState.lastRoute = "FIRESTORE (Direct <35ms)";
+            if (payload.mood) nextState.activeMood = payload.mood;
+            nextState.logs.unshift({
+              time: now,
+              type: "firestore",
+              msg: `[FIRESTORE SUCCESS] Dispatched to sessions/live/audio_cue in 28ms. Mood: ${payload.mood || "-"}`
+            });
+            return nextState;
+          }
+
+          // 3. Route 2: Fallback to Local GM Screen Webhook
+          if (nextState.webhookStatus === "ONLINE") {
+            nextState.lastRoute = "LOCAL WEBHOOK (Fallback)";
+            if (payload.mood) nextState.activeMood = payload.mood;
+            nextState.logs.unshift({
+              time: now,
+              type: "webhook",
+              msg: `[WEBHOOK FALLBACK] Firestore timed out (>800ms). Dispatched to http://192.168.1.100:8080/api/cue in 14ms.`
+            });
+            return nextState;
+          }
+
+          // 4. Route 3: Offline Spooling
+          nextState.lastRoute = "OFFLINE SPOOL";
+          nextState.spoolQueue.push(payload);
+          nextState.logs.unshift({
+            time: now,
+            type: "spool",
+            msg: `[OFFLINE SPOOL] All networks unreachable. Enqueued to session_audio_manifest.json (Queue size: ${nextState.spoolQueue.length}).`
+          });
+
+          return nextState;
+        },
+
+        drainSpool(state) {
+          if (state.spoolQueue.length === 0) return state;
+          const nextState = { ...state, spoolQueue: [], logs: [...state.logs] };
+          const now = new Date().toLocaleTimeString();
+
+          if (nextState.firestoreStatus === "ONLINE") {
+            nextState.logs.unshift({
+              time: now,
+              type: "firestore",
+              msg: `[SPOOL DRAINED] Successfully flushed ${state.spoolQueue.length} queued cues to Cloud Firestore.`
+            });
+          } else if (nextState.webhookStatus === "ONLINE") {
+            nextState.logs.unshift({
+              time: now,
+              type: "webhook",
+              msg: `[SPOOL DRAINED] Successfully flushed ${state.spoolQueue.length} queued cues to Local Webhook.`
+            });
+          } else {
+            // Cannot drain while offline
+            nextState.spoolQueue = [...state.spoolQueue];
+            nextState.logs.unshift({
+              time: now,
+              type: "spool",
+              msg: `[SPOOL DRAIN FAILED] Still offline. Retaining ${state.spoolQueue.length} queued cues.`
+            });
+          }
+          return nextState;
+        }
+      };
+
+      // UI State Harness
+      let appState = EdgeDispatcherLogic.createInitialState();
+
+      function renderUI() {
+        document.getElementById("state-firestore-status").textContent =
+          appState.firestoreStatus;
+        document.getElementById("state-firestore-status").style.color =
+          appState.firestoreStatus === "ONLINE"
+            ? "var(--success)"
+            : "var(--danger)";
+
+        document.getElementById("state-webhook-status").textContent =
+          appState.webhookStatus;
+        document.getElementById("state-webhook-status").style.color =
+          appState.webhookStatus === "ONLINE"
+            ? "var(--success)"
+            : "var(--danger)";
+
+        document.getElementById("state-active-mood").textContent =
+          appState.activeMood;
+        document.getElementById("state-last-cue").textContent =
+          appState.lastCue || "None";
+        document.getElementById("state-dispatch-route").textContent =
+          appState.lastRoute;
+        document.getElementById("state-latency").textContent =
+          appState.lastLatency;
+        document.getElementById("state-spool-count").textContent =
+          `${appState.spoolQueue.length} unsent cues`;
+
+        const badge = document.getElementById("system-status-badge");
+        if (appState.firestoreStatus === "ONLINE") {
+          badge.className = "badge badge-success";
+          badge.textContent = "ONLINE (CLOUD)";
+        } else if (appState.webhookStatus === "ONLINE") {
+          badge.className = "badge badge-warning";
+          badge.textContent = "DEGRADED (LAN)";
+        } else {
+          badge.className = "badge badge-danger";
+          badge.textContent = "OFFLINE";
+        }
+
+        document.getElementById("btn-toggle-firestore").textContent =
+          `Firestore: ${appState.firestoreStatus === "ONLINE" ? "Online" : "Offline"}`;
+        document.getElementById("btn-toggle-webhook").textContent =
+          `Webhook: ${appState.webhookStatus === "ONLINE" ? "Online" : "Offline"}`;
+
+        const logBox = document.getElementById("log-box");
+        logBox.innerHTML = appState.logs
+          .map(
+            (log) => `
+        <div class="log-entry">
+          <span class="log-time">[${log.time}]</span>
+          <span class="log-${log.type}">${escapeHtml(log.msg)}</span>
+        </div>
+      `
+          )
+          .join("");
+      }
+
+      function escapeHtml(str) {
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      function simulateSpeechChunk(intent, mood, rule, tier, latencyMs) {
+        appState = EdgeDispatcherLogic.dispatch(appState, {
+          intent,
+          mood,
+          rule,
+          tier,
+          latencyMs
+        });
+        renderUI();
+      }
+
+      function toggleFirestore() {
+        appState.firestoreStatus =
+          appState.firestoreStatus === "ONLINE" ? "OFFLINE" : "ONLINE";
+        renderUI();
+      }
+
+      function toggleWebhook() {
+        appState.webhookStatus =
+          appState.webhookStatus === "ONLINE" ? "OFFLINE" : "ONLINE";
+        renderUI();
+      }
+
+      function drainSpoolQueue() {
+        appState = EdgeDispatcherLogic.drainSpool(appState);
+        renderUI();
+      }
+
+      function resetState() {
+        appState = EdgeDispatcherLogic.createInitialState();
+        renderUI();
+      }
+
+      function switchScenario(index) {
+        document.querySelectorAll(".tab-btn").forEach((btn, idx) => {
+          btn.classList.toggle("active", idx === index - 1);
+        });
+        document.querySelectorAll(".scenario-content").forEach((el, idx) => {
+          el.style.display = idx === index - 1 ? "block" : "none";
+        });
+      }
+
+      // Guided Scenario Step Handlers
+      function runStep1_1() {
+        resetState();
+        simulateSpeechChunk("MUSIC_CUE", "combat", null, "tier1", 420);
+      }
+
+      function runStep2_1() {
+        resetState();
+        appState.firestoreStatus = "OFFLINE";
+        renderUI();
+      }
+
+      function runStep2_2() {
+        simulateSpeechChunk("MUSIC_CUE", "tension", null, "tier1", 390);
+      }
+
+      function runStep3_1() {
+        resetState();
+        appState.firestoreStatus = "OFFLINE";
+        appState.webhookStatus = "OFFLINE";
+        renderUI();
+      }
+
+      function runStep3_2() {
+        simulateSpeechChunk("MUSIC_CUE", "combat", null, "tier1", 410);
+        simulateSpeechChunk("RULE_QUERY", null, "srd_grapple", "tier2", 1200);
+      }
+
+      function runStep3_3() {
+        appState.firestoreStatus = "ONLINE";
+        drainSpoolQueue();
+      }
+
+      function runStep4_1() {
+        resetState();
+        simulateSpeechChunk("TABLE_BANTER", null, null, "tier1", 210);
+      }
+
+      // Initial render
+      renderUI();
+    </script>
+  </body>
+</html>

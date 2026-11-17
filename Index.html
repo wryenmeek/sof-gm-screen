@@ -556,6 +556,94 @@
         display: none !important;
       }
 
+      /* Roster claiming & Contested Race Loss Animations */
+      @keyframes sof-shake {
+        0%,
+        100% {
+          transform: translateX(0);
+        }
+        20%,
+        60% {
+          transform: translateX(-6px);
+        }
+        40%,
+        80% {
+          transform: translateX(6px);
+        }
+      }
+
+      .character-card.contested,
+      .id-btn.contested {
+        animation: sof-shake 0.4s ease-in-out;
+        border-color: #ef4444 !important;
+      }
+
+      .character-card.claimed,
+      .id-btn.claimed {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .claimed-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: #475569;
+        color: #f8fafc;
+        margin-left: 6px;
+      }
+
+      /* Non-blocking Toast Container */
+      .toast-container {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 9999;
+        pointer-events: none;
+      }
+
+      .toast-msg {
+        background: rgba(15, 23, 42, 0.95);
+        color: #f1f5f9;
+        border: 1px solid #ef4444;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        pointer-events: auto;
+        animation: toast-fade-in 0.2s ease-out;
+      }
+
+      @keyframes toast-fade-in {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .force-release-btn {
+        background: #dc2626;
+        color: #ffffff;
+        border: none;
+        border-radius: 4px;
+        padding: 3px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      .force-release-btn:hover {
+        background: #b91c1c;
+      }
+
       @media print {
         body {
           background: #ffffff;
@@ -673,6 +761,51 @@
         </div>
 
         <div id="file-list">Loading files...</div>
+
+        <!-- GM Screen Character Roster Panel -->
+        <div
+          id="gm-roster-panel"
+          style="
+            border-top: 1px solid var(--border-color);
+            padding-top: 8px;
+            margin-top: 8px;
+          "
+        >
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 6px;
+            "
+          >
+            <span
+              style="
+                font-family: Cinzel, serif;
+                font-size: 12px;
+                font-weight: 700;
+                color: var(--gold-light);
+              "
+              >👥 Party Roster</span
+            >
+          </div>
+          <div
+            id="gm-roster-list"
+            style="
+              display: flex;
+              flex-direction: column;
+              gap: 6px;
+              font-size: 12px;
+            "
+          >
+            <div
+              class="roster-empty-hint"
+              style="color: #64748b; font-size: 11px"
+            >
+              Loading roster...
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Scratchpad Drawer -->
@@ -816,41 +949,131 @@
             ✕
           </button>
         </div>
-        <button
-          class="id-btn"
-          data-player="Pog"
-          onclick="selectPlayerIdentity('Pog')"
+        <div
+          id="character-picker-cards"
+          style="display: flex; flex-direction: column; gap: 8px; width: 100%"
         >
-          Pog
-        </button>
-        <button
-          class="id-btn"
-          data-player="Vaelor"
-          onclick="selectPlayerIdentity('Vaelor')"
+          <button
+            class="id-btn character-card"
+            data-player="Pog"
+            data-character-id="pog"
+            onclick="handleCharacterCardClick('Pog', 'pog')"
+          >
+            <span>Pog</span
+            ><span class="claimed-badge" style="display: none">Claimed</span>
+          </button>
+          <button
+            class="id-btn character-card"
+            data-player="Vaelor"
+            data-character-id="vaelor"
+            onclick="handleCharacterCardClick('Vaelor', 'vaelor')"
+          >
+            <span>Vaelor</span
+            ><span class="claimed-badge" style="display: none">Claimed</span>
+          </button>
+          <button
+            class="id-btn character-card"
+            data-player="Orca"
+            data-character-id="orca"
+            onclick="handleCharacterCardClick('Orca', 'orca')"
+          >
+            <span>Orca</span
+            ><span class="claimed-badge" style="display: none">Claimed</span>
+          </button>
+          <button
+            class="id-btn character-card"
+            data-player="Fade"
+            data-character-id="fade"
+            onclick="handleCharacterCardClick('Fade', 'fade')"
+          >
+            <span>Fade</span
+            ><span class="claimed-badge" style="display: none">Claimed</span>
+          </button>
+          <button
+            class="id-btn character-card"
+            data-player="Guest"
+            data-character-id="guest"
+            onclick="handleCharacterCardClick('Guest', 'guest')"
+          >
+            <span>Guest</span
+            ><span class="claimed-badge" style="display: none">Claimed</span>
+          </button>
+        </div>
+      </div>
+
+      <div
+        id="switch-character-modal"
+        class="id-modal hidden"
+        role="dialog"
+        aria-labelledby="switch-modal-title"
+        style="
+          display: none;
+          flex-direction: column;
+          gap: 10px;
+          width: 100%;
+          box-sizing: border-box;
+        "
+      >
+        <div
+          style="
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          "
         >
-          Vaelor
-        </button>
-        <button
-          class="id-btn"
-          data-player="Orca"
-          onclick="selectPlayerIdentity('Orca')"
+          <strong
+            id="switch-modal-title"
+            style="color: var(--gold-light); font-size: 13px"
+            >Switch Character</strong
+          >
+          <button
+            type="button"
+            class="companion-close-btn"
+            onclick="cancelSwitchCharacter()"
+            aria-label="Close switch confirmation"
+          >
+            ✕
+          </button>
+        </div>
+        <p
+          id="switch-modal-msg"
+          style="font-size: 12px; color: #cbd5e1; margin: 0"
         >
-          Orca
-        </button>
-        <button
-          class="id-btn"
-          data-player="Fade"
-          onclick="selectPlayerIdentity('Fade')"
+          Switch to Donald? Pog will be released back to the party roster.
+        </p>
+        <div
+          style="
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 4px;
+          "
         >
-          Fade
-        </button>
-        <button
-          class="id-btn"
-          data-player="Guest"
-          onclick="selectPlayerIdentity('Guest')"
-        >
-          Guest
-        </button>
+          <button
+            id="cancel-switch-btn"
+            type="button"
+            class="id-btn"
+            style="width: auto; padding: 6px 12px"
+            onclick="cancelSwitchCharacter()"
+          >
+            Cancel
+          </button>
+          <button
+            id="confirm-switch-btn"
+            type="button"
+            class="id-btn active"
+            style="
+              width: auto;
+              padding: 6px 12px;
+              background: #dc2626;
+              border-color: #ef4444;
+            "
+            onclick="confirmSwitchCharacter()"
+          >
+            Confirm
+          </button>
+        </div>
       </div>
 
       <div
@@ -1011,6 +1234,13 @@
       ></div>
     </div>
 
+    <div
+      id="toast-container"
+      class="toast-container"
+      role="status"
+      aria-live="polite"
+    ></div>
+
     <script>
       let currentSessionDate = "<?= sessionDate ?>";
       const rawViewModeTemplate =
@@ -1041,6 +1271,12 @@
       let currentLeftPayload = null;
       let miniSearch = null;
       let currentPlayerIdentity = "Guest";
+      let liveTabletopClient = null;
+      let currentRosterList = [];
+      let currentClaimedCharacterId = null;
+      let currentAnonymousUid = null;
+      let pendingSwitchCharacter = null;
+      let rosterUnsubscribe = null;
       const NOTES_AUTOSAVE_MS = 60000;
       let notesAutoSaveTimer = null;
 
@@ -1122,6 +1358,7 @@
         startNotesAutoSave_();
         initLiveAudioCueSubscription_(currentSessionDate);
         pollLatestAudioCue_();
+        initGmRoster_();
       };
 
       // Keyboard shortcuts: Ctrl+S / Cmd+S for instant saving, '/' to focus search, 'Escape' to clear search
@@ -2982,6 +3219,392 @@
         highlightActivePlayerIdentity_();
       }
 
+      function getOrCreateLiveTabletopClient_() {
+        if (liveTabletopClient) return liveTabletopClient;
+        if (typeof window !== "undefined" && window.liveTabletopClient) {
+          liveTabletopClient = window.liveTabletopClient;
+          return liveTabletopClient;
+        }
+        if (typeof window !== "undefined" && window.LiveTabletopClient) {
+          try {
+            liveTabletopClient = new window.LiveTabletopClient();
+            return liveTabletopClient;
+          } catch (_e) {
+            console.warn("Could not instantiate LiveTabletopClient:", _e);
+          }
+        }
+        return null;
+      }
+
+      function initGmRoster_() {
+        const client = getOrCreateLiveTabletopClient_();
+        if (client && typeof client.subscribeToRoster === "function") {
+          client.subscribeToRoster(currentSessionDate, function (roster) {
+            currentRosterList = roster || [];
+            updateGmRosterDom_(currentRosterList);
+          });
+        }
+      }
+
+      function bootstrapCompanionRoster_() {
+        const client = getOrCreateLiveTabletopClient_();
+        if (!client) return;
+        if (typeof client.bootstrapPlayerAuth === "function") {
+          client
+            .bootstrapPlayerAuth()
+            .then(function (user) {
+              currentAnonymousUid = user ? user.uid : null;
+            })
+            .catch(function (err) {
+              console.warn("Anonymous auth bootstrap error:", err);
+            });
+        } else if (typeof client.signInAnonymously === "function") {
+          client
+            .signInAnonymously()
+            .then(function (user) {
+              currentAnonymousUid = user ? user.uid : null;
+            })
+            .catch(function (err) {
+              console.warn("Anonymous sign in error:", err);
+            });
+        }
+        if (typeof client.subscribeToRoster === "function") {
+          if (rosterUnsubscribe) {
+            try {
+              rosterUnsubscribe();
+            } catch (_e) {}
+          }
+          rosterUnsubscribe = client.subscribeToRoster(
+            currentSessionDate,
+            onRosterSnapshotUpdate_
+          );
+        }
+      }
+
+      function onRosterSnapshotUpdate_(roster) {
+        currentRosterList = roster || [];
+        updateRosterDom_(currentRosterList);
+        updateGmRosterDom_(currentRosterList);
+
+        // Reconnection logic: check cached character for this session
+        let cachedId = null;
+        try {
+          if (typeof localStorage !== "undefined" && localStorage) {
+            cachedId = localStorage.getItem(
+              "sof_claimed_character_" + currentSessionDate
+            );
+          }
+        } catch (_e) {}
+
+        const client = getOrCreateLiveTabletopClient_();
+        const currentUid =
+          currentAnonymousUid ||
+          (client && client.getCurrentUser() && client.getCurrentUser().uid);
+
+        if (cachedId) {
+          const char = currentRosterList.find(function (c) {
+            return c.characterId === cachedId;
+          });
+          if (char && currentUid && char.claimedBy === currentUid) {
+            // Still claimed by this client: bypass picker modal and mount HUD
+            currentClaimedCharacterId = cachedId;
+            updatePlayerIdentityDom_(char.name);
+            closePlayerIdentityModal();
+          } else if (char && char.claimedBy !== currentUid) {
+            // Lost claim (e.g. GM force release or expired claim): clear cache and show picker modal
+            try {
+              if (typeof localStorage !== "undefined" && localStorage) {
+                localStorage.removeItem(
+                  "sof_claimed_character_" + currentSessionDate
+                );
+              }
+            } catch (_e) {}
+            currentClaimedCharacterId = null;
+            const modal = document.getElementById("identity-modal");
+            if (modal) {
+              modal.classList.remove("hidden");
+              modal.style.display = "flex";
+            }
+          }
+        }
+      }
+
+      function updateRosterDom_(roster) {
+        if (!roster || !Array.isArray(roster)) return;
+        const client = getOrCreateLiveTabletopClient_();
+        const currentUid =
+          currentAnonymousUid ||
+          (client && client.getCurrentUser() && client.getCurrentUser().uid);
+        const container =
+          document.getElementById("character-picker-cards") ||
+          document.getElementById("identity-modal");
+        roster.forEach(function (char) {
+          let btn =
+            document.querySelector(
+              '[data-character-id="' + char.characterId + '"]'
+            ) ||
+            document.querySelector('.id-btn[data-player="' + char.name + '"]');
+          if (!btn && container) {
+            btn = document.createElement("button");
+            btn.className = "id-btn character-card";
+            btn.setAttribute("data-player", char.name);
+            btn.setAttribute("data-character-id", char.characterId);
+            btn.innerHTML =
+              "<span>" +
+              char.name +
+              '</span><span class="claimed-badge" style="display: none;">Claimed</span>';
+            btn.onclick = function () {
+              handleCharacterCardClick(char.name, char.characterId);
+            };
+            container.appendChild(btn);
+          }
+          if (!btn) return;
+          btn.setAttribute("data-character-id", char.characterId);
+          btn.setAttribute("data-player", char.name);
+          const badge = btn.querySelector(".claimed-badge");
+          if (char.claimedBy) {
+            if (char.claimedBy === currentUid) {
+              // Claimed by self
+              btn.classList.add("active");
+              btn.classList.remove("claimed");
+              btn.disabled = false;
+              if (badge) {
+                badge.style.display = "inline";
+                badge.textContent = "You";
+                badge.style.background = "var(--gold-dark, #b45309)";
+              }
+            } else {
+              // Claimed by someone else
+              btn.classList.add("claimed");
+              btn.classList.remove("active");
+              btn.disabled = true;
+              if (badge) {
+                badge.style.display = "inline";
+                badge.textContent = "Claimed";
+                badge.style.background = "#475569";
+              }
+            }
+          } else {
+            // Unclaimed
+            btn.classList.remove("claimed");
+            btn.disabled = false;
+            if (badge) {
+              badge.style.display = "none";
+            }
+          }
+        });
+      }
+
+      function updateGmRosterDom_(roster) {
+        const container = document.getElementById("gm-roster-list");
+        if (!container) return;
+        if (!container._hasRosterClickHandler) {
+          container._hasRosterClickHandler = true;
+          container.addEventListener("click", function (e) {
+            const btn =
+              e.target && e.target.closest
+                ? e.target.closest(".force-release-btn")
+                : null;
+            if (btn) {
+              const charId = btn.getAttribute("data-character-id");
+              if (charId) forceReleaseCharacter_(charId);
+            }
+          });
+        }
+        if (!roster || roster.length === 0) {
+          container.innerHTML =
+            '<div class="roster-empty-hint" style="color: #64748b; font-size: 11px;">No characters in roster.</div>';
+          return;
+        }
+        let html = "";
+        roster.forEach(function (char) {
+          const isClaimed = !!char.claimedBy;
+          const statusText = isClaimed
+            ? "Claimed (" +
+              (char.claimedBy.length > 8
+                ? char.claimedBy.slice(0, 8) + "..."
+                : char.claimedBy) +
+              ")"
+            : "Unclaimed";
+          const statusColor = isClaimed ? "#10b981" : "#94a3b8";
+          const forceBtn = isClaimed
+            ? '<button class="force-release-btn" data-character-id="' +
+              char.characterId +
+              '" onclick="forceReleaseCharacter_(\'' +
+              char.characterId +
+              '\')" title="Force Release Claim">Force Release</button>'
+            : "";
+          html +=
+            '<div class="gm-roster-item" data-character-id="' +
+            char.characterId +
+            '" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; background: rgba(15, 23, 42, 0.4); border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.05);">' +
+            '<span class="gm-roster-char-name" style="font-weight: 600; color: #f8fafc;">' +
+            char.name +
+            "</span>" +
+            '<span class="gm-roster-status" style="font-size: 11px; color: ' +
+            statusColor +
+            ';">' +
+            statusText +
+            "</span>" +
+            forceBtn +
+            "</div>";
+        });
+        container.innerHTML = html;
+      }
+
+      function forceReleaseCharacter_(characterId) {
+        const client = getOrCreateLiveTabletopClient_();
+        if (client && typeof client.forceReleaseCharacter === "function") {
+          client
+            .forceReleaseCharacter(currentSessionDate, characterId)
+            .catch(function (err) {
+              console.error("Force release failed:", err);
+            });
+        }
+      }
+
+      function showToast_(msg) {
+        let container = document.getElementById("toast-container");
+        if (!container) {
+          container = document.createElement("div");
+          container.id = "toast-container";
+          container.className = "toast-container";
+          container.setAttribute("role", "status");
+          container.setAttribute("aria-live", "polite");
+          document.body.appendChild(container);
+        }
+        const toast = document.createElement("div");
+        toast.className = "toast-msg";
+        toast.textContent = msg;
+        container.appendChild(toast);
+        setTimeout(function () {
+          if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+          }
+        }, 3000);
+      }
+
+      function handleCharacterCardClick(charName, charId) {
+        const resolvedId =
+          charId ||
+          (typeof charName === "string"
+            ? charName.toLowerCase().replace(/[^a-z0-9]/g, "")
+            : "");
+        if (
+          currentClaimedCharacterId &&
+          currentClaimedCharacterId !== resolvedId
+        ) {
+          // 1-character limit per anonymous UID: prompt confirmation modal for switching
+          pendingSwitchCharacter = { name: charName, id: resolvedId };
+          const modal = document.getElementById("switch-character-modal");
+          const msg = document.getElementById("switch-modal-msg");
+          if (msg) {
+            msg.textContent =
+              "Switch to " +
+              charName +
+              "? " +
+              (currentPlayerIdentity || currentClaimedCharacterId) +
+              " will be released back to the party roster.";
+          }
+          if (modal) {
+            modal.classList.remove("hidden");
+            modal.style.display = "flex";
+          }
+          return;
+        }
+        executeCharacterClaim_(resolvedId, charName);
+      }
+
+      function cancelSwitchCharacter() {
+        pendingSwitchCharacter = null;
+        const modal = document.getElementById("switch-character-modal");
+        if (modal) {
+          modal.classList.add("hidden");
+          modal.style.display = "none";
+        }
+      }
+
+      function confirmSwitchCharacter() {
+        if (!pendingSwitchCharacter) return;
+        const target = pendingSwitchCharacter;
+        cancelSwitchCharacter();
+        const oldId = currentClaimedCharacterId;
+        const client = getOrCreateLiveTabletopClient_();
+        const currentUid =
+          currentAnonymousUid ||
+          (client && client.getCurrentUser() && client.getCurrentUser().uid) ||
+          "anon_player";
+
+        if (client && typeof client.switchCharacter === "function" && oldId) {
+          client
+            .switchCharacter(currentSessionDate, oldId, target.id, currentUid)
+            .then(function (result) {
+              if (result && result.success) {
+                currentClaimedCharacterId = target.id;
+                selectPlayerIdentity(target.name, target.id);
+              } else if (result && result.code === "ALREADY_CLAIMED") {
+                handleClaimRaceLoss_(target.name, target.id);
+              }
+            })
+            .catch(function (_err) {
+              handleClaimRaceLoss_(target.name, target.id);
+            });
+        } else {
+          executeCharacterClaim_(target.id, target.name);
+        }
+      }
+
+      function executeCharacterClaim_(charId, charName) {
+        const client = getOrCreateLiveTabletopClient_();
+        if (!client) {
+          selectPlayerIdentity(charName, charId);
+          return;
+        }
+        const currentUid =
+          currentAnonymousUid ||
+          (client.getCurrentUser() && client.getCurrentUser().uid) ||
+          "anon_player";
+        client
+          .claimCharacter(currentSessionDate, charId, currentUid)
+          .then(function (result) {
+            if (result && result.success) {
+              currentClaimedCharacterId = charId;
+              selectPlayerIdentity(charName, charId);
+            } else if (result && result.code === "ALREADY_CLAIMED") {
+              handleClaimRaceLoss_(charName, charId);
+            }
+          })
+          .catch(function (_err) {
+            handleClaimRaceLoss_(charName, charId);
+          });
+      }
+
+      function handleClaimRaceLoss_(charName, charId) {
+        // 1. 400ms Card shake animation
+        const card =
+          document.querySelector('[data-character-id="' + charId + '"]') ||
+          document.querySelector('.id-btn[data-player="' + charName + '"]');
+        if (card) {
+          card.classList.add("contested");
+          setTimeout(function () {
+            card.classList.remove("contested");
+          }, 400);
+
+          // 2. Real-time badge sync and disablement
+          card.classList.add("claimed");
+          card.disabled = true;
+          const badge = card.querySelector(".claimed-badge");
+          if (badge) {
+            badge.style.display = "inline";
+            badge.textContent = "Claimed";
+            badge.style.background = "#475569";
+          }
+        }
+
+        // 3. Toast notification
+        showToast_(charName + " has just been claimed by another player.");
+      }
+
       function initCompanionState_() {
         const sessionDateEl = document.getElementById("player-session-date");
         if (sessionDateEl) {
@@ -3009,15 +3632,38 @@
         } else {
           highlightActivePlayerIdentity_();
         }
+        bootstrapCompanionRoster_();
       }
 
-      function selectPlayerIdentity(playerName) {
+      function selectPlayerIdentity(playerName, characterId) {
+        const resolvedId =
+          characterId ||
+          (typeof playerName === "string"
+            ? playerName.toLowerCase().replace(/[^a-z0-9]/g, "")
+            : "");
+        currentClaimedCharacterId = resolvedId;
         try {
           if (typeof localStorage !== "undefined" && localStorage) {
             localStorage.setItem("sof_player_identity", playerName);
+            if (resolvedId) {
+              localStorage.setItem(
+                "sof_claimed_character_" + currentSessionDate,
+                resolvedId
+              );
+            }
           }
         } catch (_e) {}
         updatePlayerIdentityDom_(playerName);
+      }
+
+      if (typeof window !== "undefined") {
+        window.handleCharacterCardClick = handleCharacterCardClick;
+        window.cancelSwitchCharacter = cancelSwitchCharacter;
+        window.confirmSwitchCharacter = confirmSwitchCharacter;
+        window.forceReleaseCharacter_ = forceReleaseCharacter_;
+        window.selectPlayerIdentity = selectPlayerIdentity;
+        window.togglePlayerIdentityModal = togglePlayerIdentityModal;
+        window.closePlayerIdentityModal = closePlayerIdentityModal;
       }
 
       function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {

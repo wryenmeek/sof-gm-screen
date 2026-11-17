@@ -24,11 +24,21 @@ import {
 import {
   getAuth,
   signInAnonymously,
+  setPersistence,
+  browserLocalPersistence,
+  onAuthStateChanged,
   type Auth,
   type User
 } from "firebase/auth";
 
 export const FIRESTORE_CACHE_SIZE_BYTES = 104857600; // 100 MB dedicated LRU cache
+
+export interface ClaimResult {
+  success: boolean;
+  code: "CLAIMED" | "ALREADY_CLAIMED" | "ERROR";
+  claimedByUid?: string;
+  error?: string;
+}
 
 export interface AudioCuePayload {
   trackTitle?: string;
@@ -207,8 +217,56 @@ export class LiveTabletopClient {
   }
 
   public async signInAnonymously(): Promise<User> {
+    if (typeof window !== "undefined" && browserLocalPersistence) {
+      try {
+        await setPersistence(this.auth, browserLocalPersistence);
+      } catch {
+        // Fallback / ignore in test environments if setPersistence is mocked
+      }
+    }
     const cred = await signInAnonymously(this.auth);
     return cred.user;
+  }
+
+  /**
+   * Bootstraps player authentication, restoring existing credentials or signing in anonymously.
+   */
+  public async bootstrapPlayerAuth(): Promise<User> {
+    if (typeof window !== "undefined" && browserLocalPersistence) {
+      try {
+        await setPersistence(this.auth, browserLocalPersistence);
+      } catch {
+        // Fallback / ignore in test environments
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const unsub = onAuthStateChanged(this.auth, async (user) => {
+        if (user) {
+          unsub();
+          resolve(user);
+        } else {
+          try {
+            const anonUser = await this.signInAnonymously();
+            unsub();
+            resolve(anonUser);
+          } catch (err) {
+            unsub();
+            reject(err);
+          }
+        }
+      });
+    });
+  }
+
+  public onAuthStateChanged(
+    callback: (user: User | null) => void
+  ): Unsubscribe {
+    const unsub = onAuthStateChanged(this.auth, callback);
+    this.activeUnsubscribes.add(unsub);
+    return () => {
+      this.activeUnsubscribes.delete(unsub);
+      unsub();
+    };
   }
 
   public getCurrentUser(): User | null {
@@ -372,33 +430,68 @@ export class LiveTabletopClient {
   }
 
   /**
-   * Claims an unclaimed character on the session roster.
+   * Claims an unclaimed character on the session roster using an atomic transaction.
    */
   public async claimCharacter(
     sessionDate: string,
     characterId: string,
     uid: string
-  ): Promise<void> {
+  ): Promise<ClaimResult> {
     const charDocRef = doc(
       this.db,
       `sessions/${sessionDate}/roster/${characterId}`
     );
-    await runTransaction(this.db, async (tx) => {
-      const snap = await tx.get(charDocRef);
-      if (!snap.exists()) {
-        throw new Error(`Character ${characterId} does not exist in roster.`);
-      }
-      const data = snap.data() as CharacterRosterDoc;
-      if (data.claimedBy && data.claimedBy !== uid) {
-        throw new Error(
-          `Character ${characterId} is already claimed by ${data.claimedBy}.`
+    try {
+      const result = await runTransaction(this.db, async (tx) => {
+        const snap = await tx.get(charDocRef);
+        if (!snap.exists()) {
+          throw new Error(`Character ${characterId} does not exist in roster.`);
+        }
+        const data = snap.data() as CharacterRosterDoc;
+        if (data.claimedBy && data.claimedBy !== uid) {
+          return {
+            success: false,
+            code: "ALREADY_CLAIMED" as const,
+            claimedByUid: data.claimedBy
+          };
+        }
+        if (data.claimedBy === uid) {
+          return {
+            success: true,
+            code: "CLAIMED" as const,
+            claimedByUid: uid
+          };
+        }
+        tx.update(charDocRef, {
+          claimedBy: uid,
+          claimedAt: serverTimestamp()
+        });
+        return {
+          success: true,
+          code: "CLAIMED" as const,
+          claimedByUid: uid
+        };
+      });
+
+      if (
+        result.success &&
+        typeof localStorage !== "undefined" &&
+        localStorage
+      ) {
+        localStorage.setItem(
+          `sof_claimed_character_${sessionDate}`,
+          characterId
         );
       }
-      tx.update(charDocRef, {
-        claimedBy: uid,
-        claimedAt: serverTimestamp()
-      });
-    });
+      return result;
+    } catch (err: any) {
+      console.error("Failed to claim character:", err);
+      return {
+        success: false,
+        code: "ERROR",
+        error: err?.message || String(err)
+      };
+    }
   }
 
   /**
@@ -408,27 +501,128 @@ export class LiveTabletopClient {
     sessionDate: string,
     characterId: string,
     uid: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const charDocRef = doc(
+      this.db,
+      `sessions/${sessionDate}/roster/${characterId}`
+    );
+    try {
+      await runTransaction(this.db, async (tx) => {
+        const snap = await tx.get(charDocRef);
+        if (!snap.exists()) {
+          throw new Error(`Character ${characterId} does not exist in roster.`);
+        }
+        const data = snap.data() as CharacterRosterDoc;
+        if (data.claimedBy && data.claimedBy !== uid) {
+          throw new Error(
+            `Cannot release claim for character ${characterId}: claimedBy does not match.`
+          );
+        }
+        tx.update(charDocRef, {
+          claimedBy: null,
+          claimedAt: serverTimestamp()
+        });
+      });
+      if (typeof localStorage !== "undefined" && localStorage) {
+        localStorage.removeItem(`sof_claimed_character_${sessionDate}`);
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Failed to release character:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Force releases a character claim on the session roster (GM only).
+   */
+  public async forceReleaseCharacter(
+    sessionDate: string,
+    characterId: string
   ): Promise<void> {
     const charDocRef = doc(
       this.db,
       `sessions/${sessionDate}/roster/${characterId}`
     );
-    await runTransaction(this.db, async (tx) => {
-      const snap = await tx.get(charDocRef);
-      if (!snap.exists()) {
-        throw new Error(`Character ${characterId} does not exist in roster.`);
-      }
-      const data = snap.data() as CharacterRosterDoc;
-      if (data.claimedBy !== uid) {
-        throw new Error(
-          `Cannot release claim for character ${characterId}: claimedBy does not match.`
+    await updateDoc(charDocRef, {
+      claimedBy: null,
+      claimedAt: serverTimestamp()
+    });
+  }
+
+  /**
+   * Atomically switches from old character to new character in a single transaction.
+   */
+  public async switchCharacter(
+    sessionDate: string,
+    oldCharacterId: string,
+    newCharacterId: string,
+    uid: string
+  ): Promise<ClaimResult> {
+    const oldDocRef = doc(
+      this.db,
+      `sessions/${sessionDate}/roster/${oldCharacterId}`
+    );
+    const newDocRef = doc(
+      this.db,
+      `sessions/${sessionDate}/roster/${newCharacterId}`
+    );
+    try {
+      const result = await runTransaction(this.db, async (tx) => {
+        const newSnap = await tx.get(newDocRef);
+        if (!newSnap.exists()) {
+          throw new Error(
+            `Character ${newCharacterId} does not exist in roster.`
+          );
+        }
+        const newData = newSnap.data() as CharacterRosterDoc;
+        if (newData.claimedBy && newData.claimedBy !== uid) {
+          return {
+            success: false,
+            code: "ALREADY_CLAIMED" as const,
+            claimedByUid: newData.claimedBy
+          };
+        }
+        const oldSnap = await tx.get(oldDocRef);
+        if (oldSnap.exists()) {
+          const oldData = oldSnap.data() as CharacterRosterDoc;
+          if (oldData.claimedBy === uid) {
+            tx.update(oldDocRef, {
+              claimedBy: null,
+              claimedAt: serverTimestamp()
+            });
+          }
+        }
+        tx.update(newDocRef, {
+          claimedBy: uid,
+          claimedAt: serverTimestamp()
+        });
+        return {
+          success: true,
+          code: "CLAIMED" as const,
+          claimedByUid: uid
+        };
+      });
+
+      if (
+        result.success &&
+        typeof localStorage !== "undefined" &&
+        localStorage
+      ) {
+        localStorage.setItem(
+          `sof_claimed_character_${sessionDate}`,
+          newCharacterId
         );
       }
-      tx.update(charDocRef, {
-        claimedBy: null,
-        claimedAt: serverTimestamp()
-      });
-    });
+      return result;
+    } catch (err: any) {
+      console.error("Failed to switch character:", err);
+      return {
+        success: false,
+        code: "ERROR",
+        error: err?.message || String(err)
+      };
+    }
   }
 
   /**

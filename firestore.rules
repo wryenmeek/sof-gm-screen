@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // HELPER FUNCTIONS & AUTHENTICATION PREDICATES
+    // =========================================================================
+
+    /** Returns true if the client is authenticated via any Firebase Auth provider. */
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    /** Returns true if the client holds verified Game Master authority. */
+    function isGm() {
+      return isAuthenticated() && (
+        request.auth.token.gm == true ||
+        (request.auth.token.email == "wryenmeek@gmail.com" &&
+         request.auth.token.email_verified == true)
+      );
+    }
+
+    /** Returns true if the client is an anonymous player at the physical table. */
+    function isAnonymousPlayer() {
+      return isAuthenticated() &&
+        request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    /** Validates that a string is non-empty and within specified length limits. */
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    /** Validates that a timestamp is approximately current (+/- 5 minutes). */
+    function isCurrentTimestamp(ts) {
+      return ts is timestamp &&
+        ts >= request.time - duration.value(5, 'm') &&
+        ts <= request.time + duration.value(1, 'm');
+    }
+
+    // =========================================================================
+    // GLOBAL RULES GLOSSARY & REFERENCE DATA
+    // =========================================================================
+
+    // Rules Glossary entries (5e SRD, conditions, spells) are public reference
+    match /rules_glossary/{termId} {
+      allow read: if true;
+      allow write: if isGm();
+    }
+
+    // Rule Feedback collection: Players submit ratings; GM audits/prunes
+    match /rules_feedback/{feedbackId} {
+      allow read: if isGm();
+      allow create: if isAuthenticated() &&
+        request.resource.data.keys().hasAll(['ruleId', 'isHelpful', 'authorUid', 'timestamp']) &&
+        request.resource.data.keys().hasOnly(['ruleId', 'isHelpful', 'authorUid', 'timestamp', 'notes', 'sessionDate']) &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.isHelpful is bool &&
+        isValidString(request.resource.data.ruleId, 1, 100) &&
+        (!('notes' in request.resource.data) || isValidString(request.resource.data.notes, 0, 500)) &&
+        (!('sessionDate' in request.resource.data) || isValidString(request.resource.data.sessionDate, 10, 10));
+      allow update, delete: if isGm();
+    }
+
+    // =========================================================================
+    // SESSION HIERARCHY: sessions/{sessionDate}/...
+    // =========================================================================
+
+    match /sessions/{sessionDate} {
+      // Top-level session document: Metadata readable by authenticated users
+      allow read: if isAuthenticated();
+      allow write: if isGm();
+
+      // -----------------------------------------------------------------------
+      // SESSION MANIFEST (Session Assets & Media Catalog)
+      // -----------------------------------------------------------------------
+
+      // Player-Safe Manifest: Floor maps, player handouts, public audio cues
+      match /manifest/{assetId} {
+        allow read: if isAuthenticated();
+        allow write: if isGm();
+      }
+
+      // GM Secret Manifest: Encounter Dossiers, Monster Statblocks, Table Notes
+      match /manifest_gm/{assetId} {
+        allow read, write: if isGm();
+      }
+
+      // -----------------------------------------------------------------------
+      // CHARACTER ROSTER & CLAIMING
+      // -----------------------------------------------------------------------
+
+      match /roster/{characterId} {
+        allow read: if isAuthenticated();
+        allow create, delete: if isGm();
+
+        allow update: if isAuthenticated() && (
+          isGm() ||
+          // Case 1: Claiming an unclaimed character
+          (
+            resource.data.claimedBy == null &&
+            request.resource.data.claimedBy == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimedBy', 'claimedAt'])
+          ) ||
+          // Case 2: Releasing an owned claim
+          (
+            resource.data.claimedBy == request.auth.uid &&
+            request.resource.data.claimedBy == null &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimedBy', 'claimedAt'])
+          )
+        );
+      }
+
+      // -----------------------------------------------------------------------
+      // LIVE TABLETOP SYNCHRONIZATION: live/{docId}
+      // -----------------------------------------------------------------------
+
+      // 1. Audio Cue Document (Live Mood Transitions & Sound Effects)
+      match /live/audio_cue {
+        allow read: if isAuthenticated();
+        allow write: if isGm();
+      }
+
+      // 2. Player-Safe Combat Projection (Initiative order, visible monsters)
+      match /live/combat {
+        allow read: if isAuthenticated();
+        allow write: if isGm();
+      }
+
+      // 3. GM-Only Combat Document (Exact monster HP, hidden ambush monsters)
+      match /live/combat_gm {
+        allow read, write: if isGm();
+      }
+
+      // 4. Player Reactions Stream (Sliding FIFO emojis)
+      match /live/reactions {
+        allow read: if isAuthenticated();
+        allow write: if isGm();
+        allow create, update: if isAuthenticated() &&
+          request.resource.data.keys().hasOnly(['recentReactions', 'updatedAt']) &&
+          request.resource.data.recentReactions is list &&
+          request.resource.data.recentReactions.size() <= 20 &&
+          (
+            request.resource.data.recentReactions.size() == 0 ||
+            request.resource.data.recentReactions[request.resource.data.recentReactions.size() - 1].uid == request.auth.uid
+          );
+      }
+    }
+  }
+}

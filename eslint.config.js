@@ -85,7 +85,7 @@ export default [
     }
   },
   {
-    files: ["test/**/*.ts"],
+    files: ["src/**/*.ts", "test/**/*.ts"],
     languageOptions: {
       parser: tseslint.parser,
       ecmaVersion: 2022,

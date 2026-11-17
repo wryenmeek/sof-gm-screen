@@ -2,6 +2,7 @@ import fs from "fs";
 import { vi } from "vitest";
 import { marked } from "marked";
 import MiniSearch from "minisearch";
+import { LiveTabletopClient } from "../../src/live_tabletop_client";
 
 const cachedHtml = fs.readFileSync("Index.html", "utf8");
 const bodyMatch = cachedHtml.match(
@@ -38,6 +39,8 @@ export interface ClientHarnessOptions {
   deferRuleFeedback?: boolean;
   verifyGmKeyResult?: boolean;
   verifyGmKeyError?: string;
+  initLiveTabletopClient?: boolean;
+  liveTabletopClient?: LiveTabletopClient;
 }
 
 export function setupClientHarness(options: ClientHarnessOptions = {}) {
@@ -426,8 +429,15 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     mockLocalStorage
   );
 
+  const liveTabletopClient =
+    options.liveTabletopClient ??
+    (options.initLiveTabletopClient
+      ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
+      : undefined);
+
   return {
     ...exported,
+    liveTabletopClient,
     mockLocalStorage,
     fetchSpy,
     idbStore,

@@ -401,11 +401,19 @@ export class MockFirestoreClient {
       path,
       doc: (id?: string) => {
         const docId =
-          id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          id ||
+          (typeof crypto !== "undefined" &&
+          typeof crypto.randomUUID === "function"
+            ? `doc_${Date.now()}_${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`
+            : `doc_${Date.now()}_${Date.now().toString(36)}`);
         return docFn(`${path}/${docId}`);
       },
       add: async (data: Record<string, any>) => {
-        const docId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const docId =
+          typeof crypto !== "undefined" &&
+          typeof crypto.randomUUID === "function"
+            ? `doc_${Date.now()}_${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`
+            : `doc_${Date.now()}_${Date.now().toString(36)}`;
         const ref = docFn(`${path}/${docId}`);
         await ref.set(data);
         return ref;

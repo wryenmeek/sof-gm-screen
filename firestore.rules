@@ -142,7 +142,11 @@ service cloud.firestore {
           request.resource.data.recentReactions.size() <= 20 &&
           (
             request.resource.data.recentReactions.size() == 0 ||
-            request.resource.data.recentReactions[request.resource.data.recentReactions.size() - 1].uid == request.auth.uid
+            (
+              request.resource.data.recentReactions[request.resource.data.recentReactions.size() - 1].uid == request.auth.uid &&
+              request.resource.data.recentReactions[request.resource.data.recentReactions.size() - 1].emoji is string &&
+              request.resource.data.recentReactions[request.resource.data.recentReactions.size() - 1].emoji.size() <= 10
+            )
           );
       }
     }

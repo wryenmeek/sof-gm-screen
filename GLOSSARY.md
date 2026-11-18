@@ -141,3 +141,13 @@ _Avoid_: Hidden monster, secret NPC, ambush enemy, stealth combatant.
 **Initiative Projection**:
 The real-time, player-safe public broadcast reflecting current turn sequence, active combatant, and Status Bands while strictly filtering out Ambush Combatants and precise monster statistics.
 _Avoid_: Public combat view, player initiative, sanitized feed.
+
+### Player Companion & Ambient Tabletop
+
+**Character Roster Claiming**:
+The atomic concurrency-controlled transaction by which an anonymous or authenticated player claims exclusive operational control of a designated character on the session roster, preventing duplicate selections.
+_Avoid_: Character lock, player binding, seat claiming.
+
+**Table Reaction**:
+An ephemeral, 5-emoji tactile reaction (`⚔️`, `🛡️`, `🎲`, `🍻`, `💀`) dispatched by Player Companions to the live tabletop stream and rendered as transient floating bubbles above the Game Master's initiative tracker.
+_Avoid_: Emoji reaction, chat sticker, ping, floating icon.

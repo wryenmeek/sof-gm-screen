@@ -1058,24 +1058,21 @@ def classify_and_dispatch_chunk(
 
         # Route 1: Direct Cloud Firestore Write (800ms budget)
         effective_fs_fn = firestore_fn
-        if effective_fs_fn is None and firestore_client is not None:
-            effective_fs_fn = lambda payload: dispatch_to_firestore(
-                firestore_client,
-                payload,
-                session_date=session_date,
-                timeout_s=firestore_timeout_ms / 1000.0,
-            )
-        elif effective_fs_fn is None and os.environ.get(
-            "GOOGLE_APPLICATION_CREDENTIALS"
-        ):
-            default_client = get_firestore_client()
-            if default_client is not None:
-                effective_fs_fn = lambda payload: dispatch_to_firestore(
-                    default_client,
-                    payload,
-                    session_date=session_date,
-                    timeout_s=firestore_timeout_ms / 1000.0,
-                )
+        if effective_fs_fn is None:
+            active_client = firestore_client
+            if active_client is None and os.environ.get(
+                "GOOGLE_APPLICATION_CREDENTIALS"
+            ):
+                active_client = get_firestore_client()
+            if active_client is not None:
+                def _dispatch_helper(p: dict[str, Any]) -> Any:
+                    return dispatch_to_firestore(
+                        active_client,
+                        p,
+                        session_date=session_date,
+                        timeout_s=firestore_timeout_ms / 1000.0,
+                    )
+                effective_fs_fn = _dispatch_helper
 
         if effective_fs_fn is not None:
             t0 = time.monotonic()

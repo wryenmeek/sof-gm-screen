@@ -490,4 +490,499 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(document.activeElement).toBe(dictationInput);
     });
   });
+
+  describe("Ticket 05 & 38: Anonymous QR Onboarding & Atomic Character Roster Claiming", () => {
+    it("bootstraps anonymous authentication with browserLocalPersistence and initializes companion roster subscription", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_test_user_1", isAnonymous: true },
+        mockRoster: [
+          { characterId: "pog", name: "Pog", claimedBy: null },
+          { characterId: "vaelor", name: "Vaelor", claimedBy: null }
+        ]
+      });
+
+      // Execute window.onload to trigger boot
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      expect(harness.liveTabletopClient.currentUser).toEqual({
+        uid: "anon_test_user_1",
+        isAnonymous: true
+      });
+      expect(harness.liveTabletopClient.rosterListeners.size).toBeGreaterThan(
+        0
+      );
+    });
+
+    it("claims an unclaimed character atomically via LiveTabletopClient.claimCharacter and persists session cache", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_user_pog", isAnonymous: true },
+        mockRoster: [
+          { characterId: "pog", name: "Pog", claimedBy: null },
+          { characterId: "donald", name: "Donald", claimedBy: null }
+        ]
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      // Tap Pog card
+      harness.handleCharacterCardClick("Pog", "pog");
+      await vi.runAllTimersAsync();
+
+      expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
+        "Pog"
+      );
+      expect(
+        harness.mockLocalStorage.getItem("sof_claimed_character_2026-10-31")
+      ).toBe("pog");
+
+      const pogDoc = harness.liveTabletopClient.rosterStore.get("pog");
+      expect(pogDoc?.claimedBy).toBe("anon_user_pog");
+
+      // Verify DOM reflects claimed state
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Pog"
+      );
+      expect(
+        document.getElementById("identity-modal")!.classList.contains("hidden")
+      ).toBe(true);
+    });
+
+    it("triggers 400ms card shake animation, toast notification, and badge sync on contested claim race loss", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_loser", isAnonymous: true },
+        mockRoster: [
+          { characterId: "donald", name: "Donald", claimedBy: null }
+        ],
+        forceContentionForCharacterId: "donald"
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      const donaldCard = document.querySelector(
+        '[data-character-id="donald"]'
+      ) as HTMLButtonElement;
+      expect(donaldCard).not.toBeNull();
+
+      // Tap contested Donald card
+      harness.handleCharacterCardClick("Donald", "donald");
+      await vi.advanceTimersByTimeAsync(50);
+
+      // 1. 400ms Card shake animation (.contested class)
+      expect(donaldCard.classList.contains("contested")).toBe(true);
+
+      // 2. Real-time badge sync and disablement
+      expect(donaldCard.classList.contains("claimed")).toBe(true);
+      expect(donaldCard.disabled).toBe(true);
+
+      // 3. Toast notification rendered in DOM
+      const toastContainer = document.getElementById("toast-container");
+      expect(toastContainer).not.toBeNull();
+      expect(toastContainer!.textContent).toContain(
+        "Donald has just been claimed by another player."
+      );
+
+      // Advance past 400ms: shake animation class is removed
+      await vi.advanceTimersByTimeAsync(400);
+      expect(donaldCard.classList.contains("contested")).toBe(false);
+      // Card remains disabled with badge
+      expect(donaldCard.disabled).toBe(true);
+    });
+
+    it("enforces 1-character claim limit per anonymous UID with confirmation modal for switching characters", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_switcher", isAnonymous: true },
+        mockRoster: [
+          { characterId: "pog", name: "Pog", claimedBy: null },
+          { characterId: "donald", name: "Donald", claimedBy: null }
+        ]
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      // Claim first character: Pog
+      harness.handleCharacterCardClick("Pog", "pog");
+      await vi.runAllTimersAsync();
+
+      expect(
+        harness.mockLocalStorage.getItem("sof_claimed_character_2026-10-31")
+      ).toBe("pog");
+      expect(harness.liveTabletopClient.rosterStore.get("pog")?.claimedBy).toBe(
+        "anon_switcher"
+      );
+
+      // Attempt to claim second character: Donald without releasing Pog
+      harness.handleCharacterCardClick("Donald", "donald");
+      await vi.runAllTimersAsync();
+
+      // Confirmation modal should appear
+      const switchModal = document.getElementById("switch-character-modal")!;
+      expect(switchModal.style.display).toBe("flex");
+      expect(switchModal.classList.contains("hidden")).toBe(false);
+      expect(
+        document.getElementById("switch-modal-msg")!.textContent
+      ).toContain(
+        "Switch to Donald? Pog will be released back to the party roster."
+      );
+
+      // Cancel switch: stays on Pog
+      harness.cancelSwitchCharacter();
+      expect(switchModal.style.display).toBe("none");
+      expect(harness.liveTabletopClient.rosterStore.get("pog")?.claimedBy).toBe(
+        "anon_switcher"
+      );
+      expect(
+        harness.liveTabletopClient.rosterStore.get("donald")?.claimedBy
+      ).toBe(null);
+
+      // Re-trigger and confirm switch
+      harness.handleCharacterCardClick("Donald", "donald");
+      harness.confirmSwitchCharacter();
+      await vi.runAllTimersAsync();
+
+      // Old character Pog is released, new character Donald is claimed
+      expect(harness.liveTabletopClient.rosterStore.get("pog")?.claimedBy).toBe(
+        null
+      );
+      expect(
+        harness.liveTabletopClient.rosterStore.get("donald")?.claimedBy
+      ).toBe("anon_switcher");
+      expect(
+        harness.mockLocalStorage.getItem("sof_claimed_character_2026-10-31")
+      ).toBe("donald");
+      expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
+        "Donald"
+      );
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Donald"
+      );
+    });
+
+    it("reconnection logic validates cached character on page reload and bypasses the picker modal if still claimed", async () => {
+      // Scenario A: Cached character is still claimed by current user UID -> Bypasses picker modal
+      const reconnectHarness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_returning_user", isAnonymous: true },
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        },
+        mockRoster: [
+          {
+            characterId: "pog",
+            name: "Pog",
+            claimedBy: "anon_returning_user"
+          },
+          { characterId: "donald", name: "Donald", claimedBy: null }
+        ]
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      const modal = document.getElementById("identity-modal")!;
+      expect(modal.classList.contains("hidden")).toBe(true);
+      expect(modal.style.display).toBe("none");
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Pog"
+      );
+      expect(
+        reconnectHarness.mockLocalStorage.getItem(
+          "sof_claimed_character_2026-10-31"
+        )
+      ).toBe("pog");
+    });
+
+    it("reconnection logic clears cached character and shows picker modal if claim was released or lost", async () => {
+      // Scenario B: Cached character was force released or claimed by another user
+      const lostClaimHarness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_returning_user", isAnonymous: true },
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        },
+        mockRoster: [
+          { characterId: "pog", name: "Pog", claimedBy: null }, // GM force released
+          { characterId: "donald", name: "Donald", claimedBy: "other_user" }
+        ]
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      // Cached character should be evicted from localStorage
+      expect(
+        lostClaimHarness.mockLocalStorage.getItem(
+          "sof_claimed_character_2026-10-31"
+        )
+      ).toBeNull();
+
+      // Picker modal is displayed so player can choose a new character
+      const modal = document.getElementById("identity-modal")!;
+      expect(modal.classList.contains("hidden")).toBe(false);
+      expect(modal.style.display).toBe("flex");
+    });
+
+    it("GM Screen Roster panel provides 1-click Force Release button authorized via isGm() rules", async () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm",
+        mockRoster: [
+          { characterId: "pog", name: "Pog", claimedBy: "anon_stuck_battery" },
+          { characterId: "donald", name: "Donald", claimedBy: null }
+        ]
+      });
+
+      (window as any).onload();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Check that GM screen roster panel is rendered
+      const rosterList = document.getElementById("gm-roster-list")!;
+      expect(rosterList).not.toBeNull();
+      expect(rosterList.textContent).toContain("Pog");
+      expect(rosterList.textContent).toContain("Claimed");
+
+      // Find the 1-click Force Release button
+      const forceReleaseBtn = rosterList.querySelector(
+        '.force-release-btn[data-character-id="pog"]'
+      ) as HTMLButtonElement;
+      expect(forceReleaseBtn).not.toBeNull();
+
+      // GM clicks Force Release
+      forceReleaseBtn.click();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Character is now unclaimed in store and roster panel reflects it
+      expect(
+        gmHarness.liveTabletopClient.rosterStore.get("pog")?.claimedBy
+      ).toBeNull();
+      expect(rosterList.textContent).toContain("Unclaimed");
+    });
+  });
+
+  describe("Ticket 06 / #39: Player Companion Ambient HUD: Web Haptics Turn Alerts & Table Reactions Drawer", () => {
+    it("detects when activeCombatantId === myCharacterId, displays illuminated turn banner, and fires navigator.vibrate([100, 50, 100])", () => {
+      const vibrateSpy = vi.fn();
+      (navigator as any).vibrate = vibrateSpy;
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        }
+      });
+      (window as any).onload();
+
+      const banner = document.getElementById("player-turn-banner")!;
+      expect(banner).not.toBeNull();
+      expect(banner.style.display).toBe("none");
+
+      // Combat payload where Pog is active at index 0
+      const combatStatePogActive = {
+        round: 1,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 18,
+            statusBand: "UNINJURED" as const,
+            claimedBy: "anon_test_uid"
+          },
+          {
+            id: "goblin",
+            name: "Goblin",
+            initiative: 12,
+            statusBand: "INJURED" as const,
+            claimedBy: null
+          }
+        ]
+      };
+
+      harness.renderPlayerCombat(combatStatePogActive);
+
+      // Banner illuminated
+      expect(banner.style.display).toBe("flex");
+      // Haptics fired
+      expect(vibrateSpy).toHaveBeenCalledWith([100, 50, 100]);
+
+      // Turn advances to Goblin (not Pog)
+      const combatStateGoblinActive = {
+        round: 1,
+        activeIndex: 1,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 18,
+            statusBand: "UNINJURED" as const,
+            claimedBy: "anon_test_uid"
+          },
+          {
+            id: "goblin",
+            name: "Goblin",
+            initiative: 12,
+            statusBand: "INJURED" as const,
+            claimedBy: null
+          }
+        ]
+      };
+
+      vibrateSpy.mockClear();
+      harness.renderPlayerCombat(combatStateGoblinActive);
+
+      // Banner hides
+      expect(banner.style.display).toBe("none");
+      // No extra vibration
+      expect(vibrateSpy).not.toHaveBeenCalled();
+
+      // Turn returns to Pog in Round 2 -> triggers haptics again
+      const combatStatePogRound2 = {
+        round: 2,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 18,
+            statusBand: "UNINJURED" as const,
+            claimedBy: "anon_test_uid"
+          },
+          {
+            id: "goblin",
+            name: "Goblin",
+            initiative: 12,
+            statusBand: "INJURED" as const,
+            claimedBy: null
+          }
+        ]
+      };
+
+      harness.renderPlayerCombat(combatStatePogRound2);
+      expect(banner.style.display).toBe("flex");
+      expect(vibrateSpy).toHaveBeenCalledWith([100, 50, 100]);
+    });
+
+    it("degrades gracefully without throwing when navigator.vibrate is unavailable or throws (e.g. iOS Safari)", () => {
+      // Delete navigator.vibrate
+      delete (navigator as any).vibrate;
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        }
+      });
+      (window as any).onload();
+
+      const banner = document.getElementById("player-turn-banner")!;
+      expect(() => {
+        harness.renderPlayerCombat({
+          round: 1,
+          activeIndex: 0,
+          isRunning: true,
+          combatants: [
+            {
+              id: "pog",
+              name: "Pog",
+              initiative: 18,
+              statusBand: "UNINJURED" as const,
+              claimedBy: null
+            }
+          ]
+        });
+      }).not.toThrow();
+
+      expect(banner.style.display).toBe("flex");
+
+      // When navigator.vibrate throws
+      (navigator as any).vibrate = vi.fn().mockImplementation(() => {
+        throw new Error("SecurityError: vibrate not allowed in iframe");
+      });
+
+      expect(() => {
+        harness.renderPlayerCombat({
+          round: 1,
+          activeIndex: 0,
+          isRunning: true,
+          combatants: [
+            {
+              id: "pog",
+              name: "Pog",
+              initiative: 18,
+              statusBand: "UNINJURED" as const,
+              claimedBy: null
+            }
+          ]
+        });
+      }).not.toThrow();
+    });
+
+    it("renders persistent 5-emoji bottom reaction drawer with >= 44px hitboxes", () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+      (window as any).onload();
+
+      const drawer = document.getElementById("companion-reaction-drawer")!;
+      expect(drawer).not.toBeNull();
+      expect(drawer.getAttribute("role")).toBe("toolbar");
+
+      const buttons =
+        drawer.querySelectorAll<HTMLButtonElement>(".reaction-btn");
+      expect(buttons.length).toBe(5);
+
+      const expectedEmojis = ["⚔️", "🛡️", "🎲", "🍻", "💀"];
+      const actualEmojis = Array.from(buttons).map((btn) =>
+        btn.getAttribute("data-emoji")
+      );
+      expect(actualEmojis).toEqual(expectedEmojis);
+
+      // Verify touch hitboxes >= 44px class presence
+      for (const btn of Array.from(buttons)) {
+        expect(btn.classList.contains("reaction-btn")).toBe(true);
+      }
+    });
+
+    it("clicking reaction emoji writes to sessions/{date}/live/reactions via sendReaction", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_reactor", isAnonymous: true },
+        initialLocalStorage: {
+          "sof_claimed_character_2026-10-31": "pog",
+          sof_player_identity: "Pog"
+        }
+      });
+      (window as any).onload();
+
+      const drawer = document.getElementById("companion-reaction-drawer")!;
+      const diceBtn = drawer.querySelector<HTMLButtonElement>(
+        '.reaction-btn[data-emoji="🎲"]'
+      )!;
+      expect(diceBtn).not.toBeNull();
+
+      diceBtn.click();
+      await vi.advanceTimersByTimeAsync(50);
+
+      const reactions = harness.liveTabletopClient.reactionsStore;
+      expect(reactions.length).toBe(1);
+      expect(reactions[0].emoji).toBe("🎲");
+      expect(reactions[0].characterName).toBe("Pog");
+      expect(reactions[0].uid).toBe("anon_reactor");
+      expect(typeof reactions[0].timestamp).toBe("number");
+      expect(reactions[0].id).toMatch(/^rx_/);
+    });
+  });
 });

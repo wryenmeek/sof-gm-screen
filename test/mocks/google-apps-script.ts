@@ -107,7 +107,14 @@ export function setupGoogleAppsScriptMocks(files: MockFile[] = []) {
         },
         createFile: (name: string, content: string, mimeType: string) => {
           const newFile: MockFile = {
-            id: "new_file_" + Date.now() + "_" + Math.random(),
+            id:
+              "new_file_" +
+              Date.now() +
+              "_" +
+              (typeof crypto !== "undefined" &&
+              typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID().replace(/-/g, "").slice(0, 8)
+                : Date.now().toString(36)),
             name,
             mimeType,
             size: content.length,

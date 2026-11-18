@@ -19,3 +19,4 @@ __pycache__/
 .gemini/
 act_output.log
 .secrets
+.github/hooks/state/

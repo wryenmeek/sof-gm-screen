@@ -1,6 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupClientHarness } from "./helpers/client-harness";
+import {
+  LiveTabletopClient,
+  projectCombatPublic,
+  calculateStatusBand,
+  type AudioCueDocument,
+  type CombatGmDocument,
+  type CombatantState
+} from "../src/live_tabletop_client";
 
 describe("Client-Side Logic (Index.html)", () => {
   let parseCustomMarkdown: (content: string) => string;
@@ -440,6 +448,562 @@ A resonant construct of bronze and coral.
         document.getElementById("save-status");
       expect(statusEl).not.toBeNull();
       expect(statusEl!.textContent).toContain("3");
+    });
+  });
+
+  describe("Sub-50ms Real-Time Audio Cue & Mood Transition Listener (Ticket 02 / #35)", () => {
+    class MockLiveTabletopClient {
+      public cueListeners: Array<(cue: AudioCueDocument | null) => void> = [];
+      public errorListeners: Array<(err: Error) => void> = [];
+      public unsubscribes: Array<ReturnType<typeof vi.fn>> = [];
+      public sessionDates: string[] = [];
+
+      subscribeToAudioCue(
+        sessionDate: string,
+        callback: (cue: AudioCueDocument | null) => void,
+        onError?: (err: Error) => void
+      ) {
+        this.sessionDates.push(sessionDate);
+        this.cueListeners.push(callback);
+        if (onError) this.errorListeners.push(onError);
+
+        const unsubSpy = vi.fn(() => {
+          const idx = this.cueListeners.indexOf(callback);
+          if (idx !== -1) this.cueListeners.splice(idx, 1);
+        });
+        this.unsubscribes.push(unsubSpy);
+        return unsubSpy;
+      }
+
+      emitCue(cue: AudioCueDocument | null) {
+        for (const listener of [...this.cueListeners]) {
+          listener(cue);
+        }
+      }
+
+      emitError(err: Error) {
+        for (const onError of [...this.errorListeners]) {
+          onError(err);
+        }
+      }
+    }
+
+    const combatScoreId = "combat-score-drive-id";
+    const sampleScoreManifest = [
+      {
+        id: combatScoreId,
+        name: "[Score] combat_theme.mp3",
+        simpleName: "combat_theme.mp3",
+        mimeType: "audio/mpeg"
+      }
+    ];
+
+    it("subscribes to sessions/{date}/live/audio_cue and triggers instant mood crossfades in <50ms without polling", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.renderManifest(sampleScoreManifest);
+      harness.AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(16));
+      harness.TabletopMixer.init();
+
+      // Subscribe to live audio cues
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(mockClient.sessionDates).toContain("2026-10-31");
+      expect(mockClient.cueListeners).toHaveLength(1);
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Verify HTTP polling is suppressed
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+
+      // Simulate incoming live audio cue snapshot
+      const start = performance.now();
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "pi_vad_tier1",
+        triggeredAt: 1730500000100
+      });
+      const elapsedMs = performance.now() - start;
+
+      // Acceptance criterion: instant crossfade executed in <50ms without polling
+      expect(elapsedMs).toBeLessThan(50);
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(
+        harness.TabletopMixer.activeScorePlayback.source.start
+      ).toHaveBeenCalledWith(0);
+
+      const crossfades = harness.TabletopMixer.timeline.filter(
+        (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+      );
+      expect(crossfades).toHaveLength(1);
+
+      // Verify classifier tier label updated in UI
+      const tierEl = document.getElementById("classifier-tier-status");
+      expect(tierEl?.textContent).toBe("Tier: pi_vad_tier1");
+    });
+
+    it("triggers speech ducking instantly when cue payload specifies ducking", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.renderManifest(sampleScoreManifest);
+      harness.AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(16));
+      harness.TabletopMixer.init();
+      harness.initLiveAudioCueSubscription("2026-10-31");
+
+      const duckSpy = vi.spyOn(harness.TabletopMixer, "duckTrackForSpeech");
+
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "gemini_tier2",
+        triggeredAt: 1730500000200,
+        payload: {
+          ducking: true,
+          duckingGain: 0.15,
+          duckingDurationMs: 1200
+        }
+      });
+
+      expect(duckSpy).toHaveBeenCalledWith(1200, 0.15);
+      const duckEvents = harness.TabletopMixer.timeline.filter(
+        (e: any) => e.eventType === "DUCK"
+      );
+      expect(duckEvents).toHaveLength(1);
+      expect(duckEvents[0].gain).toBe(0.15);
+    });
+
+    it("deduplicates audio cues by timestamp and handles Firestore Timestamp objects", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.renderManifest(sampleScoreManifest);
+      harness.AudioCache.memoryStore.set(combatScoreId, new ArrayBuffer(16));
+      harness.TabletopMixer.init();
+      harness.initLiveAudioCueSubscription("2026-10-31");
+
+      const firestoreTimestamp = {
+        toMillis: () => 1730500000300
+      };
+
+      // First emission
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "gm_manual_tier3",
+        triggeredAt: firestoreTimestamp
+      });
+
+      expect(
+        harness.TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
+
+      // Duplicate emission with identical toMillis timestamp is ignored
+      mockClient.emitCue({
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "gm_manual_tier3",
+        triggeredAt: firestoreTimestamp
+      });
+
+      expect(
+        harness.TabletopMixer.timeline.filter(
+          (e: any) => e.eventType === "CROSSFADE" && e.track === "combat"
+        )
+      ).toHaveLength(1);
+    });
+
+    it("resumes HTTP polling fallback on Firestore error and suppresses again on reconnect", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Suppressed while live
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+
+      // Stream error: failover to HTTP polling
+      mockClient.emitError(new Error("Network connection dropped"));
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+
+      // Reconnect: snapshot arrives and restores live state
+      mockClient.emitCue({
+        intent: "RULE_QUERY",
+        mood: null as any,
+        rule: "grappled",
+        source: "pi_vad_tier1",
+        triggeredAt: 1730500000400
+      });
+
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Subsequent polling calls are suppressed again
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("unsubscribes prior listener on session switch to prevent memory leaks and zombie reads", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(mockClient.sessionDates).toEqual(["2026-10-31"]);
+      const initialUnsub = mockClient.unsubscribes[0];
+      expect(initialUnsub).not.toHaveBeenCalled();
+
+      // Switch session to 2026-11-20
+      harness.loadSession("2026-11-20");
+
+      expect(initialUnsub).toHaveBeenCalledTimes(1);
+      expect(mockClient.sessionDates).toEqual(["2026-10-31", "2026-11-20"]);
+      expect(mockClient.cueListeners).toHaveLength(1);
+
+      // Teardown on unmount
+      harness.teardownLiveAudioCueSubscription();
+      const secondUnsub = mockClient.unsubscribes[1];
+      expect(secondUnsub).toHaveBeenCalledTimes(1);
+      expect(harness.isFirestoreLive()).toBe(false);
+    });
+
+    it("subscribes and disposes cleanly using the real LiveTabletopClient modular instance", () => {
+      const realClient = new LiveTabletopClient({
+        appName: `real-client-test-${Date.now()}`
+      });
+      const harness = setupClientHarness({
+        liveTabletopClient: realClient
+      });
+
+      const unsub = harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(unsub).toBeDefined();
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Polling is suppressed
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+
+      // Clean unmount
+      harness.teardownLiveAudioCueSubscription();
+      expect(harness.isFirestoreLive()).toBe(false);
+      realClient.destroy();
+    });
+  });
+
+  describe("Ticket 04 / #37: Real-Time Combat Synchronization & DevTools Leak Prevention", () => {
+    const sampleCombatants: CombatantState[] = [
+      {
+        id: "c_assassin",
+        name: "Deep Assassin",
+        hp: 80,
+        maxHp: 80,
+        ac: 16,
+        initiative: 22,
+        status: "active",
+        claimedBy: null,
+        isPlayerVisible: false
+      },
+      {
+        id: "c_pog",
+        name: "Pog",
+        hp: 45,
+        maxHp: 45,
+        ac: 17,
+        initiative: 18,
+        status: "active",
+        claimedBy: "player_pog",
+        isPlayerVisible: true
+      },
+      {
+        id: "c_sahuagin",
+        name: "Sahuagin Raider",
+        hp: 20,
+        maxHp: 45,
+        ac: 14,
+        initiative: 12,
+        status: "active",
+        claimedBy: null,
+        isPlayerVisible: true
+      },
+      {
+        id: "c_lurker",
+        name: "Coral Lurker",
+        hp: 35,
+        maxHp: 35,
+        ac: 15,
+        initiative: 8,
+        status: "active",
+        claimedBy: null,
+        isPlayerVisible: false
+      }
+    ];
+
+    it("projectCombatPublic filters out hidden ambush monsters and maps status bands without secret stats", () => {
+      const gmState: CombatGmDocument = {
+        round: 1,
+        activeIndex: 1, // Pog
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      const publicProjection = projectCombatPublic(gmState);
+
+      expect(publicProjection.round).toBe(1);
+      expect(publicProjection.isRunning).toBe(true);
+      expect(publicProjection.combatants).toBeDefined();
+      expect(publicProjection.combatants!.length).toBe(2);
+
+      // DevTools Inspection Leak Prevention: Verify hidden ambush monsters are strictly absent
+      const hiddenMonsterNames = publicProjection.combatants!.map(
+        (c) => c.name
+      );
+      expect(hiddenMonsterNames).not.toContain("Deep Assassin");
+      expect(hiddenMonsterNames).not.toContain("Coral Lurker");
+      expect(hiddenMonsterNames).toEqual(["Pog", "Sahuagin Raider"]);
+
+      // Verify status bands and complete absence of secret monster stats
+      const publicPog = publicProjection.combatants![0];
+      const publicSahuagin = publicProjection.combatants![1];
+
+      expect(publicPog.statusBand).toBe("UNINJURED");
+      expect(publicSahuagin.statusBand).toBe("BLOODIED");
+
+      // Verify secret numbers (ac, raw hp, maxHp) are not leaked on public combatants
+      expect((publicSahuagin as any).ac).toBeUndefined();
+      expect((publicSahuagin as any).hp).toBeUndefined();
+      expect((publicSahuagin as any).maxHp).toBeUndefined();
+      expect((publicSahuagin as any).notes).toBeUndefined();
+    });
+
+    it("masks activeIndex to -1 when current turn belongs to a hidden ambush monster", () => {
+      const gmStateAmbushActive: CombatGmDocument = {
+        round: 1,
+        activeIndex: 0, // Deep Assassin (isPlayerVisible: false)
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      const publicProjection = projectCombatPublic(gmStateAmbushActive);
+
+      // Active index masked so curious players inspecting DevTools cannot infer a hidden turn
+      expect(publicProjection.activeIndex).toBe(-1);
+
+      // When turn switches to a visible combatant, activeIndex correctly maps to the visible list index
+      const gmStateVisibleActive: CombatGmDocument = {
+        round: 1,
+        activeIndex: 2, // Sahuagin Raider (index 1 in visible list)
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      const visibleProjection = projectCombatPublic(gmStateVisibleActive);
+      expect(visibleProjection.activeIndex).toBe(1);
+    });
+
+    it("calculates 5e Status Bands aligned strictly with GLOSSARY.md thresholds", () => {
+      expect(calculateStatusBand(45, 45)).toBe("UNINJURED"); // 100%
+      expect(calculateStatusBand(50, 45)).toBe("UNINJURED"); // Over max
+      expect(calculateStatusBand(35, 45)).toBe("INJURED"); // 77.8% (50-99%)
+      expect(calculateStatusBand(23, 45)).toBe("INJURED"); // 51.1%
+      expect(calculateStatusBand(20, 45)).toBe("BLOODIED"); // 44.4% (25-49%)
+      expect(calculateStatusBand(12, 45)).toBe("BLOODIED"); // 26.7%
+      expect(calculateStatusBand(10, 45)).toBe("CRITICAL"); // 22.2% (1-24%)
+      expect(calculateStatusBand(1, 45)).toBe("CRITICAL"); // 2.2%
+      expect(calculateStatusBand(0, 45)).toBe("DOWN"); // 0 HP
+      expect(calculateStatusBand(-10, 45)).toBe("DOWN"); // Negative HP
+    });
+
+    it("prevents DevTools DOM inspection by stripping GM Combat Tracker in Companion Mode (ADR-0008)", () => {
+      const companionHarness = setupClientHarness({
+        viewMode: "companion"
+      });
+
+      expect(companionHarness.initCompanionState).toBeDefined();
+      (window as any).onload();
+
+      // In Companion mode, GM combat tracker and stat table are removed from the DOM
+      expect(document.getElementById("gm-combat-tracker")).toBeNull();
+      expect(document.getElementById("gm-combat-table")).toBeNull();
+
+      // Player combat tracker exists in Companion HUD
+      expect(document.getElementById("player-combat-tracker")).not.toBeNull();
+    });
+
+    it("renders GM combat tracker with ambush indicators and advances turns in desktop mode", () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm"
+      });
+
+      expect(gmHarness.renderGmCombat).toBeDefined();
+      expect(gmHarness.advanceCombatTurn).toBeDefined();
+
+      const gmState: CombatGmDocument = {
+        round: 1,
+        activeIndex: 0,
+        combatants: sampleCombatants,
+        isRunning: true
+      };
+
+      gmHarness.renderGmCombat(gmState);
+
+      const tableEl = document.getElementById("gm-combat-table");
+      const listEl = document.getElementById("gm-combat-list");
+      const roundEl = document.getElementById("gm-combat-round");
+
+      expect(tableEl).not.toBeNull();
+      expect(listEl).not.toBeNull();
+      expect(roundEl?.textContent).toBe("Round 1");
+      expect(listEl!.children.length).toBe(4);
+
+      // Verify ambush badges rendered in GM view
+      expect(listEl!.innerHTML).toContain("👁️ Hidden");
+      expect(listEl!.innerHTML).toContain("👁️ Public");
+
+      // Advance turn
+      gmHarness.advanceCombatTurn(1);
+      const activeState = gmHarness.getActiveCombatGmState();
+      expect(activeState.activeIndex).toBe(1);
+
+      // Advance across all combatants to wrap round
+      gmHarness.advanceCombatTurn(1); // 2
+      gmHarness.advanceCombatTurn(1); // 3
+      gmHarness.advanceCombatTurn(1); // Wraps to 0, Round 2
+      const wrappedState = gmHarness.getActiveCombatGmState();
+      expect(wrappedState.activeIndex).toBe(0);
+      expect(wrappedState.round).toBe(2);
+      expect(roundEl?.textContent).toBe("Round 2");
+    });
+
+    it("renders player combat projection with status bands and no ambush monsters", () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+
+      expect(harness.renderPlayerCombat).toBeDefined();
+
+      const projected = projectCombatPublic({
+        round: 2,
+        activeIndex: 1,
+        combatants: sampleCombatants,
+        isRunning: true
+      });
+
+      harness.renderPlayerCombat(projected);
+
+      const trackerEl = document.getElementById("player-combat-tracker");
+      const listEl = document.getElementById("player-combat-list");
+      const roundEl = document.getElementById("player-combat-round");
+
+      expect(trackerEl?.style.display).toBe("block");
+      expect(roundEl?.textContent).toBe("Round 2");
+      expect(listEl!.children.length).toBe(2);
+
+      // Verify DOM does not contain hidden monsters
+      expect(listEl!.textContent).not.toContain("Deep Assassin");
+      expect(listEl!.textContent).not.toContain("Coral Lurker");
+
+      // Verify status bands rendered
+      expect(listEl!.innerHTML).toContain("UNINJURED");
+      expect(listEl!.innerHTML).toContain("BLOODIED");
+      expect(listEl!.innerHTML).toContain("active-combatant");
+    });
+
+    it("Ticket 06 / #39: GM Screen subscribes to live/reactions and renders transient floating reaction bubbles above initiative tracker", async () => {
+      vi.useFakeTimers();
+      try {
+        const gmHarness = setupClientHarness({
+          viewMode: "gm"
+        });
+        (window as any).onload();
+
+        const reactionsContainer = document.getElementById(
+          "gm-reactions-container"
+        );
+        expect(reactionsContainer).not.toBeNull();
+
+        // Emit reaction on liveTabletopClient
+        await gmHarness.liveTabletopClient.sendReaction("2026-10-31", {
+          id: "rx_test_1",
+          uid: "player_pog",
+          characterName: "Pog",
+          emoji: "⚔️",
+          timestamp: Date.now()
+        });
+
+        // Advance timer for reaction listener callback
+        await vi.advanceTimersByTimeAsync(50);
+
+        // Verify bubble rendered inside #gm-reactions-container
+        const bubbles = reactionsContainer!.querySelectorAll(
+          ".floating-reaction-bubble"
+        );
+        expect(bubbles.length).toBe(1);
+        expect(bubbles[0].textContent).toContain("⚔️");
+        expect(bubbles[0].textContent).toContain("Pog");
+        expect(bubbles[0].getAttribute("data-reaction-id")).toBe("rx_test_1");
+
+        // Verify transient cleanup after timeout (2400ms)
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(
+          reactionsContainer!.querySelectorAll(".floating-reaction-bubble")
+            .length
+        ).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("Ticket 06 / #39: FIFO bounds logic in sendReaction ensures reactions array never exceeds 20 items", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+      const client = harness.liveTabletopClient;
+
+      // Seed 20 reactions
+      for (let i = 1; i <= 20; i++) {
+        await client.sendReaction("2026-10-31", {
+          id: `rx_${i}`,
+          uid: "player_1",
+          characterName: "Pog",
+          emoji: "⚔️",
+          timestamp: 1000 + i
+        });
+      }
+
+      expect(client.reactionsStore.length).toBe(20);
+      expect(client.reactionsStore[0].id).toBe("rx_1");
+      expect(client.reactionsStore[19].id).toBe("rx_20");
+
+      // Send 21st reaction
+      await client.sendReaction("2026-10-31", {
+        id: "rx_21_overflow",
+        uid: "player_1",
+        characterName: "Pog",
+        emoji: "💀",
+        timestamp: 2000
+      });
+
+      // Still capped at 20 items, oldest reaction rx_1 evicted, newest is rx_21_overflow
+      expect(client.reactionsStore.length).toBe(20);
+      expect(client.reactionsStore[0].id).toBe("rx_2");
+      expect(client.reactionsStore[19].id).toBe("rx_21_overflow");
+      expect(client.reactionsStore[19].emoji).toBe("💀");
     });
   });
 });

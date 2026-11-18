@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["Code.gs", "test/**/*.ts"],
-  "project": ["Code.gs", "test/**/*.ts"],
+  "entry": ["Code.gs", "src/**/*.ts", "test/**/*.ts"],
+  "project": ["Code.gs", "src/**/*.ts", "test/**/*.ts"],
   "ignoreDependencies": [
     "@google/clasp",
     "eslint",

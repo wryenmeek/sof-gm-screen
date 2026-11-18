@@ -20,13 +20,16 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.request
 import wave
 from typing import Any, Callable, Iterable, Optional
 
 TIER_1_LATENCY_BUDGET_MS = 1500
+FIRESTORE_TIMEOUT_MS = 800
 ACTIONABLE_INTENTS = ("MUSIC_CUE", "RULE_QUERY")
+BANTER_INTENTS = ("BANTER", "TABLE_BANTER")
 
 
 class Stage1VadChunker:
@@ -223,8 +226,12 @@ class Stage1VadChunker:
             "duration_ms": max(0, end_ms - start_ms),
         }
         self.manifest.append(entry)
-        with open(self.manifest_path, "w", encoding="utf-8") as mf:
+        tmp_path = self.manifest_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as mf:
             json.dump(self.manifest, mf, indent=2)
+            mf.flush()
+            os.fsync(mf.fileno())
+        os.replace(tmp_path, self.manifest_path)
 
         return entry
 
@@ -321,7 +328,7 @@ def _has_required_action_data(cue: Any) -> bool:
         return isinstance(cue.get("mood"), str) and bool(cue["mood"].strip())
     if intent == "RULE_QUERY":
         return isinstance(cue.get("rule"), str) and bool(cue["rule"].strip())
-    return intent == "BANTER"
+    return intent in BANTER_INTENTS
 
 
 def resolve_classifier_tier(
@@ -430,7 +437,7 @@ def default_tier2_gemini_classify(
                 "properties": {
                     "intent": {
                         "type": "STRING",
-                        "enum": ["MUSIC_CUE", "RULE_QUERY", "BANTER"],
+                        "enum": ["MUSIC_CUE", "RULE_QUERY", "BANTER", "TABLE_BANTER"],
                     },
                     "mood": {"type": "STRING", "nullable": True},
                     "rule": {"type": "STRING", "nullable": True},
@@ -468,6 +475,7 @@ def default_tier2_gemini_classify(
         "MUSIC_CUE",
         "RULE_QUERY",
         "BANTER",
+        "TABLE_BANTER",
     ):
         raise RuntimeError("Gemini returned an invalid audio intent")
     return {
@@ -649,6 +657,252 @@ def default_tier1_onnx_classify(wav_path: str) -> dict[str, Any]:
     return cue
 
 
+def _run_with_timeout(
+    callable_fn: Callable[[Any], Any],
+    arg: Any,
+    timeout_s: float = 0.8,
+) -> Any:
+    """Executes a callable with strict wall-clock timeout enforcement via daemon thread."""
+    results: list[Any] = []
+    errors: list[BaseException] = []
+
+    def target() -> None:
+        try:
+            results.append(callable_fn(arg))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout=max(timeout_s, 0.0))
+    if worker.is_alive():
+        raise TimeoutError(
+            f"Operation exceeded {int(timeout_s * 1000)}ms timeout budget"
+        )
+    if errors:
+        raise errors[0]
+    return results[0] if results else None
+
+
+def get_firestore_client() -> Optional[Any]:
+    """Returns an initialized Firestore client if firebase-admin and credentials are available."""
+    try:
+        import firebase_admin  # type: ignore
+        from firebase_admin import firestore  # type: ignore
+
+        if not firebase_admin._apps:
+            cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            if cred_path and os.path.isfile(cred_path):
+                from firebase_admin import credentials  # type: ignore
+
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+            elif os.environ.get("FIREBASE_CONFIG"):
+                firebase_admin.initialize_app()
+            else:
+                return None
+        return firestore.client()
+    except Exception:
+        return None
+
+
+def dispatch_to_firestore(
+    client: Any,
+    payload: dict[str, Any],
+    session_date: Optional[str] = None,
+    timeout_s: float = 0.8,
+) -> dict[str, Any]:
+    """Writes an AudioCueDoc to Cloud Firestore sessions/{session_date}/live/audio_cue."""
+    session_date = session_date or os.environ.get(
+        "SOF_SESSION_DATE", time.strftime("%Y-%m-%d")
+    )
+    t0 = time.monotonic()
+    doc_ref = (
+        client.collection("sessions")
+        .document(session_date)
+        .collection("live")
+        .document("audio_cue")
+    )
+    doc_data = {
+        "intent": payload.get("intent"),
+        "mood": payload.get("mood"),
+        "rule": payload.get("rule"),
+        "source": payload.get("source", "RPI_EDGE_TIER1"),
+        "confidence": float(payload.get("confidence", 1.0)),
+        "triggeredAt": payload.get(
+            "timestamp", payload.get("triggeredAt", int(time.time() * 1000))
+        ),
+    }
+    try:
+        doc_ref.set(doc_data)
+    except TypeError:
+        doc_ref.set(doc_data)
+    latency_ms = (time.monotonic() - t0) * 1000.0
+    return {
+        "status": "OK",
+        "latency_ms": latency_ms,
+        "doc_path": f"sessions/{session_date}/live/audio_cue",
+        "data": doc_data,
+    }
+
+
+def spool_offline_cue(
+    manifest_path: str,
+    chunk_name: str,
+    cue: dict[str, Any],
+) -> dict[str, Any]:
+    """Records an unacknowledged cue into the write-ahead manifest queue safely and atomically."""
+    manifest: list[dict[str, Any]] = []
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    manifest = data
+        except Exception:
+            try:
+                shutil.copy2(manifest_path, manifest_path + ".bak")
+            except Exception:
+                pass
+            manifest = []
+
+    matched = False
+    for entry in manifest:
+        if isinstance(entry, dict) and entry.get("chunk") == chunk_name:
+            entry["cue"] = cue
+            entry["unacknowledged_cue"] = cue
+            entry["acknowledged"] = False
+            entry["status"] = "UNACKNOWLEDGED"
+            matched = True
+            break
+
+    if not matched:
+        manifest.append(
+            {
+                "chunk": chunk_name,
+                "cue": cue,
+                "unacknowledged_cue": cue,
+                "timestamp": cue.get("timestamp", int(time.time() * 1000)),
+                "acknowledged": False,
+                "status": "UNACKNOWLEDGED",
+            }
+        )
+
+    dir_name = os.path.dirname(manifest_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    tmp_path = manifest_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, manifest_path)
+    return {
+        "manifest_path": manifest_path,
+        "spooled_count": len(
+            [e for e in manifest if e.get("acknowledged") is False]
+        ),
+    }
+
+
+def mark_cue_acknowledged(manifest_path: str, chunk_name: str) -> bool:
+    """Marks a cue as acknowledged in the session manifest."""
+    if not manifest_path or not os.path.isfile(manifest_path):
+        return False
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        if not isinstance(manifest, list):
+            return False
+        updated = False
+        for entry in manifest:
+            if isinstance(entry, dict) and entry.get("chunk") == chunk_name:
+                entry["acknowledged"] = True
+                entry["status"] = "ACKNOWLEDGED"
+                updated = True
+                break
+        if updated:
+            tmp_path = manifest_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, manifest_path)
+        return updated
+    except Exception:
+        return False
+
+
+def drain_offline_queue(
+    manifest_path: str,
+    firestore_fn: Optional[Callable[[dict[str, Any]], Any]] = None,
+    webhook_fn: Optional[Callable[[dict[str, Any]], Any]] = None,
+    timeout_s: float = 0.8,
+) -> dict[str, Any]:
+    """Flushes unacknowledged cues from the offline write-ahead queue."""
+    if not manifest_path or not os.path.isfile(manifest_path):
+        return {"drained": 0, "remaining": 0, "status": "NO_MANIFEST"}
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception as exc:
+        return {"drained": 0, "remaining": 0, "status": "ERROR", "error": str(exc)}
+
+    if not isinstance(manifest, list):
+        return {"drained": 0, "remaining": 0, "status": "INVALID_MANIFEST"}
+
+    drained_count = 0
+    for entry in manifest:
+        if (
+            isinstance(entry, dict)
+            and entry.get("acknowledged") is False
+            and entry.get("unacknowledged_cue")
+        ):
+            cue = entry["unacknowledged_cue"]
+            dispatched = False
+            if firestore_fn is not None:
+                try:
+                    res = _run_with_timeout(firestore_fn, cue, timeout_s=timeout_s)
+                    if isinstance(res, dict) and res.get("status") == "OK":
+                        dispatched = True
+                except Exception:
+                    dispatched = False
+            if not dispatched and webhook_fn is not None:
+                try:
+                    res = _run_with_timeout(webhook_fn, cue, timeout_s=0.5)
+                    if (
+                        isinstance(res, dict)
+                        and res.get("status") == "OK"
+                        and not res.get("simulated")
+                    ):
+                        dispatched = True
+                except Exception:
+                    dispatched = False
+            if dispatched:
+                entry["acknowledged"] = True
+                entry["status"] = "ACKNOWLEDGED"
+                drained_count += 1
+
+    if drained_count > 0:
+        tmp_path = manifest_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, manifest_path)
+
+    remaining = len(
+        [
+            e
+            for e in manifest
+            if isinstance(e, dict)
+            and e.get("acknowledged") is False
+            and e.get("unacknowledged_cue")
+        ]
+    )
+    return {"drained": drained_count, "remaining": remaining, "status": "OK"}
+
+
 def post_cue_webhook(
     webhook_url: str, payload: dict[str, Any], timeout_s: float = 5.0
 ) -> dict[str, Any]:
@@ -675,10 +929,19 @@ def classify_and_dispatch_chunk(
     gm_key: Optional[str] = None,
     pi_online: bool = True,
     timeout_ms: int = TIER_1_LATENCY_BUDGET_MS,
+    firestore_client: Optional[Any] = None,
+    firestore_fn: Optional[Callable[[dict[str, Any]], Any]] = None,
+    manifest_path: Optional[str] = None,
+    session_date: Optional[str] = None,
+    firestore_timeout_ms: int = FIRESTORE_TIMEOUT_MS,
 ) -> dict[str, Any]:
     """
     Executes Stage 2 3-tier intent classification on a Speech Chunk WAV and
-    dispatches actionable cues (MUSIC_CUE, RULE_QUERY) to the Apps Script webhook.
+    dispatches actionable cues (MUSIC_CUE, RULE_QUERY) via a tiered ladder:
+    Route 1: Cloud Firestore direct write (<800ms)
+    Route 2: Local GM Screen HTTP webhook fallback
+    Route 3: Offline write-ahead queue in session_audio_manifest.json
+    Suppresses all outbound network requests on table banter (TABLE_BANTER, BANTER).
     """
     tier1_result: Optional[dict[str, Any]] = None
     tier2_result: Optional[dict[str, Any]] = None
@@ -743,30 +1006,150 @@ def classify_and_dispatch_chunk(
     webhook_response: Any = None
     webhook_error: Optional[str] = None
 
+    firestore_dispatched = False
+    firestore_latency_ms: Optional[float] = None
+    firestore_error: Optional[str] = None
+    offline_spooled = False
+    dispatch_route = "NONE"
+
+    # Intent suppression: Banter suppresses all outbound network requests
+    if isinstance(cue, dict) and cue.get("intent") in BANTER_INTENTS:
+        return {
+            "activeTier": resolution["activeTier"],
+            "cue": cue,
+            "reason": resolution["reason"],
+            "tier2_invoked": tier2_invoked,
+            "webhook_dispatched": False,
+            "webhook_payload": None,
+            "webhook_response": None,
+            "webhook_error": None,
+            "dispatch_route": "SUPPRESSED",
+            "firestore_dispatched": False,
+            "firestore_latency_ms": None,
+            "firestore_error": None,
+            "offline_spooled": False,
+        }
+
     if isinstance(cue, dict) and cue.get("intent") in ACTIONABLE_INTENTS:
+        timestamp_ms = cue.get("timestamp", int(time.time() * 1000))
+        tier_source = (
+            "RPI_EDGE_TIER1"
+            if resolution["activeTier"] == "TIER_1_PI_LOCAL"
+            else "RPI_EDGE_TIER2"
+        )
+        firestore_payload = {
+            "intent": cue.get("intent"),
+            "mood": cue.get("mood"),
+            "rule": cue.get("rule"),
+            "source": tier_source,
+            "confidence": float(cue.get("confidence", 1.0)),
+            "triggeredAt": timestamp_ms,
+            "latencyMs": float(resolution.get("latency_ms", 0.0)),
+        }
         webhook_payload = {
             "intent": cue.get("intent"),
             "mood": cue.get("mood"),
             "rule": cue.get("rule"),
             "tier": resolution["activeTier"],
-            "timestamp": cue.get("timestamp", int(time.time() * 1000)),
+            "timestamp": timestamp_ms,
         }
         if gm_key is not None:
             webhook_payload["gmKey"] = gm_key
 
-        if webhook_fn is not None:
+        # Route 1: Direct Cloud Firestore Write (800ms budget)
+        effective_fs_fn = firestore_fn
+        if effective_fs_fn is None:
+            active_client = firestore_client
+            if active_client is None and os.environ.get(
+                "GOOGLE_APPLICATION_CREDENTIALS"
+            ):
+                active_client = get_firestore_client()
+            if active_client is not None:
+                def _dispatch_helper(p: dict[str, Any]) -> Any:
+                    return dispatch_to_firestore(
+                        active_client,
+                        p,
+                        session_date=session_date,
+                        timeout_s=firestore_timeout_ms / 1000.0,
+                    )
+                effective_fs_fn = _dispatch_helper
+
+        if effective_fs_fn is not None:
+            t0 = time.monotonic()
             try:
-                webhook_response = webhook_fn(webhook_payload)
+                fs_timeout_s = max(firestore_timeout_ms, 0) / 1000.0
+                fs_res = _run_with_timeout(
+                    effective_fs_fn, firestore_payload, timeout_s=fs_timeout_s
+                )
+                firestore_latency_ms = (time.monotonic() - t0) * 1000.0
+                if isinstance(fs_res, dict) and fs_res.get("status") == "ERROR":
+                    firestore_error = fs_res.get("error", "Firestore write failed")
+                else:
+                    firestore_dispatched = True
+                    dispatch_route = "FIRESTORE"
+                    if manifest_path:
+                        mark_cue_acknowledged(
+                            manifest_path, os.path.basename(wav_path)
+                        )
+            except Exception as exc:
+                firestore_latency_ms = (time.monotonic() - t0) * 1000.0
+                firestore_error = str(exc)
+
+        # Route 2: Fallback to Local GM Screen Webhook
+        if not firestore_dispatched and webhook_fn is not None:
+            try:
+                webhook_response = _run_with_timeout(
+                    webhook_fn, webhook_payload, timeout_s=5.0
+                )
                 webhook_dispatched = (
                     isinstance(webhook_response, dict)
                     and webhook_response.get("status") == "OK"
                     and webhook_response.get("cached") is not False
                     and not webhook_response.get("simulated")
                 )
-                if not webhook_dispatched:
+                if webhook_dispatched:
+                    dispatch_route = "WEBHOOK"
+                    if manifest_path:
+                        mark_cue_acknowledged(
+                            manifest_path, os.path.basename(wav_path)
+                        )
+                else:
                     webhook_error = "Webhook did not confirm successful delivery"
             except Exception as exc:
                 webhook_error = str(exc)
+
+        # Route 3: Fallback to Offline Spooling in session_audio_manifest.json
+        if not firestore_dispatched and not webhook_dispatched:
+            effective_manifest = manifest_path
+            if (
+                effective_manifest is None
+                and wav_path
+                and wav_path != "<test-only-simulation>"
+            ):
+                parent_dir = os.path.dirname(wav_path)
+                if parent_dir:
+                    if os.path.basename(parent_dir) == "audio_chunks":
+                        effective_manifest = os.path.join(
+                            os.path.dirname(parent_dir),
+                            "session_audio_manifest.json",
+                        )
+                    else:
+                        effective_manifest = os.path.join(
+                            parent_dir, "session_audio_manifest.json"
+                        )
+            if effective_manifest is not None:
+                try:
+                    spool_offline_cue(
+                        effective_manifest,
+                        os.path.basename(wav_path),
+                        firestore_payload,
+                    )
+                    offline_spooled = True
+                    dispatch_route = "OFFLINE_SPOOL"
+                except Exception:
+                    dispatch_route = "FAILED"
+            else:
+                dispatch_route = "OFFLINE_SPOOL"
 
     return {
         "activeTier": resolution["activeTier"],
@@ -777,6 +1160,11 @@ def classify_and_dispatch_chunk(
         "webhook_payload": webhook_payload,
         "webhook_response": webhook_response,
         "webhook_error": webhook_error,
+        "dispatch_route": dispatch_route,
+        "firestore_dispatched": firestore_dispatched,
+        "firestore_latency_ms": firestore_latency_ms,
+        "firestore_error": firestore_error,
+        "offline_spooled": offline_spooled,
     }
 
 
@@ -861,8 +1249,31 @@ def _run_cli() -> None:
     parser.add_argument(
         "--intent",
         default="MUSIC_CUE",
-        choices=["MUSIC_CUE", "RULE_QUERY", "BANTER"],
+        choices=["MUSIC_CUE", "RULE_QUERY", "BANTER", "TABLE_BANTER"],
         help="Simulated intent (test mode only)",
+    )
+    parser.add_argument(
+        "--firestore-status",
+        default=None,
+        choices=["OK", "TIMEOUT", "ERROR", "DISABLED"],
+        help="Simulated Firestore status (test mode only)",
+    )
+    parser.add_argument(
+        "--firestore-latency-ms",
+        type=float,
+        default=25.0,
+        help="Simulated Firestore latency (test mode only)",
+    )
+    parser.add_argument(
+        "--webhook-status",
+        default="DEFAULT",
+        choices=["DEFAULT", "OK", "ERROR", "DISABLED"],
+        help="Simulated Webhook status (test mode only)",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Path to session_audio_manifest.json for offline write-ahead queue",
     )
     parser.add_argument("--mood", default=None, help="Simulated mood cue (test mode only)")
     parser.add_argument("--rule", default=None, help="Simulated rule query (test mode only)")
@@ -905,14 +1316,36 @@ def _run_cli() -> None:
                 "cue": simulated_cue,
             }
 
-        def mock_webhook(payload: dict[str, Any]) -> dict[str, str]:
-            return {"status": "OK", "simulated": "true"}
+        mock_firestore_fn = None
+        if args.firestore_status == "OK":
+            def mock_firestore_fn(payload: dict[str, Any]) -> dict[str, Any]:
+                time.sleep(max(float(args.firestore_latency_ms), 0.0) / 1000.0)
+                return {"status": "OK", "latency_ms": args.firestore_latency_ms}
+        elif args.firestore_status == "TIMEOUT":
+            def mock_firestore_fn(payload: dict[str, Any]) -> dict[str, Any]:
+                time.sleep(1.5)
+                return {"status": "OK"}
+        elif args.firestore_status == "ERROR":
+            def mock_firestore_fn(payload: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("Cloud Firestore write failed (UNAVAILABLE)")
+
+        mock_webhook: Optional[Callable[[dict[str, Any]], Any]] = None
+        if args.webhook_status == "DEFAULT":
+            mock_webhook = lambda payload: {"status": "OK", "simulated": "true"}
+        elif args.webhook_status == "OK":
+            mock_webhook = lambda payload: {"status": "OK"}
+        elif args.webhook_status == "ERROR":
+            def failing_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("Local webhook connection refused")
+            mock_webhook = failing_webhook
 
         result = classify_and_dispatch_chunk(
             wav_path=args.wav_path or "<test-only-simulation>",
             tier1_fn=mock_tier1,
             tier2_fn=mock_tier2,
             webhook_fn=mock_webhook,
+            firestore_fn=mock_firestore_fn,
+            manifest_path=args.manifest_path,
             gm_key=os.environ.get("SOF_GM_KEY", "").strip() or None,
             pi_online=not args.pi_offline,
         )
@@ -975,6 +1408,10 @@ def _run_cli() -> None:
             else None
         )
         tier1_fn = default_tier1_onnx_classify if intent_model else None
+        firestore_client = get_firestore_client()
+        manifest_path = args.manifest_path or os.path.join(
+            args.output_dir, "session_audio_manifest.json"
+        )
         results = []
         for chunk in chunks:
             chunk_path = os.path.join(args.output_dir, "audio_chunks", chunk["chunk"])
@@ -982,6 +1419,8 @@ def _run_cli() -> None:
                 wav_path=chunk_path,
                 tier1_fn=tier1_fn,
                 webhook_fn=webhook_fn,
+                firestore_client=firestore_client,
+                manifest_path=manifest_path,
                 gm_key=gm_key,
             )
             results.append({"chunk": chunk["chunk"], **result})

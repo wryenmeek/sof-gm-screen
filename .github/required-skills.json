@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "pattern": "src/**",
+      "required_skills": ["code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "Code.gs",
+      "required_skills": ["code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "firestore.rules",
+      "required_skills": ["code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "scripts/**",
+      "required_skills": ["code-review"],
+      "enforcement": "advisory"
+    }
+  ]
+}

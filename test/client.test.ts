@@ -515,11 +515,11 @@ A resonant construct of bronze and coral.
       harness.initLiveAudioCueSubscription("2026-10-31");
       expect(mockClient.sessionDates).toContain("2026-10-31");
       expect(mockClient.cueListeners).toHaveLength(1);
-      expect(harness.isFirestoreLive()).toBe(true);
-
-      // Verify HTTP polling is suppressed
+      // Polling remains active until the first valid snapshot arrives
+      expect(harness.isFirestoreLive()).toBe(false);
       harness.pollLatestAudioCue();
-      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      harness.getLatestAudioCueSpy.mockClear();
 
       // Simulate incoming live audio cue snapshot
       const start = performance.now();
@@ -533,6 +533,8 @@ A resonant construct of bronze and coral.
 
       // Acceptance criterion: instant crossfade executed in <50ms without polling
       expect(elapsedMs).toBeLessThan(50);
+      expect(harness.isFirestoreLive()).toBe(true);
+      harness.pollLatestAudioCue();
       expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
       expect(
         harness.TabletopMixer.activeScorePlayback.source.start
@@ -632,9 +634,15 @@ A resonant construct of bronze and coral.
       });
 
       harness.initLiveAudioCueSubscription("2026-10-31");
-      expect(harness.isFirestoreLive()).toBe(true);
+      // Initially false before first snapshot
+      expect(harness.isFirestoreLive()).toBe(false);
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      harness.getLatestAudioCueSpy.mockClear();
 
-      // Suppressed while live
+      // First snapshot arrives: live state is established and polling is suppressed
+      mockClient.emitCue(null);
+      expect(harness.isFirestoreLive()).toBe(true);
       harness.pollLatestAudioCue();
       expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
 
@@ -696,11 +704,11 @@ A resonant construct of bronze and coral.
 
       const unsub = harness.initLiveAudioCueSubscription("2026-10-31");
       expect(unsub).toBeDefined();
-      expect(harness.isFirestoreLive()).toBe(true);
+      expect(harness.isFirestoreLive()).toBe(false);
 
-      // Polling is suppressed
+      // Polling is active while waiting for live snapshot
       harness.pollLatestAudioCue();
-      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
 
       // Clean unmount
       harness.teardownLiveAudioCueSubscription();
@@ -1563,6 +1571,50 @@ A resonant construct of bronze and coral.
         expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
         expect(mockLiveClient.subscribeToRoster).toHaveBeenCalledTimes(2);
       });
+    });
+  });
+
+  describe("Deferred Audio Cue Polling Suppression & Snapshot Confirmation (Ticket #56)", () => {
+    it("defers setting isFirestoreLive to true until the first snapshot arrives from Firestore", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      // Pre-condition: listener attached but no snapshot delivered yet
+      expect(mockClient.cueListeners).toHaveLength(1);
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      // 4-second HTTP polling continues
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      harness.getLatestAudioCueSpy.mockClear();
+
+      // First snapshot arrives (even if null / empty doc)
+      mockClient.emitCue(null);
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Polling is now suppressed
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps polling active if subscription immediately reports an error or disconnects", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      // Error occurs before any snapshot
+      mockClient.emitError(new Error("Permission denied or offline"));
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

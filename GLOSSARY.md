@@ -121,7 +121,7 @@ The player or GM rating (`+1` helpful, `-1` irrelevant) recorded either in Fires
 _Avoid_: Rule vote, like/dislike, review, rating.
 
 **Rules Lookup Ladder**:
-The 3-tier lookup progression governing table rules inquiries: Tier 1 (local RAM MiniSearch index, <5ms, zero token), Tier 2 (cloud Firebase AI Logic / Gemini 2.5 Flash, ~400–800ms), and Tier 3 (offline keyword fallback and manual search).
+The 3-tier lookup progression governing table rules inquiries: Tier 1 (local RAM MiniSearch index, <5ms, zero token), Tier 2 (cloud Firebase AI Logic / Gemini 2.5 Flash, ~400–800ms), and Tier 3 (universal local keyword and canonical glossary fallback invoked on offline state, quota exhaustion, network timeouts, API rejections, or unconfigured cloud services).
 _Avoid_: Rule hierarchy, fallback chain, search ladder.
 
 **Weather Hexflower**:

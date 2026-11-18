@@ -40,6 +40,7 @@ export class MockLiveTabletopClient {
   public rosterListeners: Set<(roster: CharacterRosterDoc[]) => void> =
     new Set();
   public audioCueListeners: Set<(cue: any) => void> = new Set();
+  public audioCueErrorListeners: Set<(err: any) => void> = new Set();
   public combatListeners: Set<(combat: any) => void> = new Set();
   public reactionsListeners: Set<(reactions: any) => void> = new Set();
   public sessionDate: string = "2026-10-31";
@@ -254,15 +255,37 @@ export class MockLiveTabletopClient {
     return { success: true, code: "CLAIMED", claimedByUid: uid };
   }
 
-  public subscribeToAudioCue(_sessionDate: string, cb: any): () => void {
+  public get cueListeners(): Array<(cue: any) => void> {
+    return Array.from(this.audioCueListeners);
+  }
+
+  public subscribeToAudioCue(
+    _sessionDate: string,
+    cb: any,
+    onError?: (err: Error) => void
+  ): () => void {
     this.audioCueListeners.add(cb);
-    return () => this.audioCueListeners.delete(cb);
+    if (onError) this.audioCueErrorListeners.add(onError);
+    return () => {
+      this.audioCueListeners.delete(cb);
+      if (onError) this.audioCueErrorListeners.delete(onError);
+    };
   }
 
   public emitCue(cue: any): void {
     for (const listener of this.audioCueListeners) {
       listener(cue);
     }
+  }
+
+  public emitError(err: any): void {
+    for (const listener of this.audioCueErrorListeners) {
+      listener(err);
+    }
+  }
+
+  public emitAudioCueError(err: any): void {
+    this.emitError(err);
   }
 
   public subscribeToCombat(_sessionDate: string, cb: any): () => void {
@@ -696,14 +719,22 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
               getLatestAudioCueSpy(...args);
               if (cb && options.deferLatestAudioCue) {
                 latestAudioCueResponses.push(cb);
-              } else if (cb && options.latestAudioCue !== undefined) {
-                cb(options.latestAudioCue);
+              } else if (cb) {
+                cb(
+                  options.latestAudioCue !== undefined
+                    ? options.latestAudioCue
+                    : null
+                );
               }
             },
             getLatestRuleQueryCueForCompanion: (...args: any[]) => {
               getLatestCompanionRuleQueryCueSpy(...args);
-              if (cb && options.companionRuleQueryCue !== undefined) {
-                cb(options.companionRuleQueryCue);
+              if (cb) {
+                cb(
+                  options.companionRuleQueryCue !== undefined
+                    ? options.companionRuleQueryCue
+                    : null
+                );
               }
             },
             verifyGmKey: (candidateKey: string) => {

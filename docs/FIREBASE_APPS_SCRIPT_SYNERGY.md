@@ -56,6 +56,9 @@ Using `infigraph` to inspect symbol dependencies, cyclomatic complexity, call gr
   - Live audio cues and companion rule queries are delivered via `doPost(e)` into Apps Script `CacheService.getScriptCache().put(..., 60)` ([ADR-0009](adr/0009-edge-pi-classifier-tiered-fallback.md)).
   - In `Index.html` (lines 3420–3480), `pollLatestAudioCue_()` runs an infinite client-side polling timer every `AUDIO_CUE_POLL_INTERVAL_MS = 3000ms`.
   - With 1 GM Screen and 5 Player Companion phones connected, the table generates **120 HTTP roundtrips/minute** against Apps Script Web App endpoints, consuming script execution quotas and introducing up to **3000ms of lag** before the **Tabletop Mixer** reacts to a spoken combat cue.
+- **Snapshot-Confirmed Polling Suppression Pattern:**
+  - Synchronous suppression upon listener registration is prohibited because attaching a Firestore listener does not guarantee immediate document availability or network connectivity.
+  - In `Index.html` (`initLiveAudioCueSubscription_`), the 4-second Apps Script polling loop (`pollLatestAudioCue_()`) remains active during the initial connection handshake. It is suppressed (`setFirestoreLiveState_(true)`) strictly upon arrival of the first confirmed document snapshot via the `subscribeToAudioCue` callback, and automatically reactivated (`setFirestoreLiveState_(false)`) if the listener reports an error or disconnects.
 
 ### 2.2. Rate Limiting & Storage Complexity
 

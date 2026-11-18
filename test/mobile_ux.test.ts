@@ -1603,4 +1603,99 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       );
     });
   });
+
+  describe("Universal Tier 2-to-3 Rules Lookup Ladder Fallback (Ticket #56)", () => {
+    it("falls back to Tier 3 local glossary and renders rule card when Tier 2 arbiter returns quota/API error", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi.fn().mockResolvedValue({
+        success: false,
+        isOffline: false,
+        error: "Resource exhausted (quota limit exceeded)"
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      const card = document.getElementById("rule-card")!;
+
+      dictationInput.value = "How does grappling work?";
+      harness.handleDictationInput("How does grappling work?");
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Grappling"
+      );
+      expect(statusMsg.textContent).toContain("Rule found: Grappling");
+    });
+
+    it("falls back to Tier 3 local glossary and renders rule card when Tier 2 arbiter promise rejects", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi
+        .fn()
+        .mockRejectedValue(new Error("Gateway Timeout 504"));
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      const card = document.getElementById("rule-card")!;
+
+      dictationInput.value = "How does grappling work?";
+      harness.handleDictationInput("How does grappling work?");
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Grappling"
+      );
+      expect(statusMsg.textContent).toContain("Rule found: Grappling");
+    });
+
+    it("surfaces error toast when Tier 2 arbiter fails and query has no Tier 3 local match", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi.fn().mockResolvedValue({
+        success: false,
+        isOffline: false,
+        error: "Custom ruleset model error"
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      const card = document.getElementById("rule-card")!;
+
+      dictationInput.value = "What is the secret homebrew spell Xyloblaster?";
+      harness.handleDictationInput(
+        "What is the secret homebrew spell Xyloblaster?"
+      );
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(card.classList.contains("visible")).toBe(false);
+      expect(statusMsg.textContent).toContain("Custom ruleset model error");
+    });
+  });
 });

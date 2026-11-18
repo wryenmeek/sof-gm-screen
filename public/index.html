@@ -5151,31 +5151,46 @@
                 if (broadcast) {
                   broadcastRuleRuling_(result.data);
                 }
-              } else if (result && result.isOffline) {
-                // Tier 3: Offline fallback to keyword search if available
+              } else {
+                // Tier 3: Universal local glossary fallback on any Tier 2 failure (offline, quota, timeout, network error)
                 const fallbackMatch = matchSpokenRuleQuery_(cleaned);
                 if (fallbackMatch && fallbackMatch.entry) {
                   showRuleCard_(fallbackMatch.entry, cleaned);
+                  if (result && result.isOffline) {
+                    showPttStatus_(
+                      `⚠️ Device is offline. Showing local glossary keywords for "${cleaned}".`,
+                      true
+                    );
+                  } else {
+                    showPttStatus_(
+                      `✓ Rule found: ${fallbackMatch.entry.title || cleaned}`
+                    );
+                  }
+                } else {
+                  const errMsg =
+                    (result && result.error) ||
+                    `No rule found for "${cleaned}". Try searching keywords above.`;
+                  showPttStatus_(errMsg, true);
                 }
-                showPttStatus_(
-                  `⚠️ Device is offline. Showing local glossary keywords for "${cleaned}".`,
-                  true
-                );
-              } else {
-                const errMsg =
-                  (result && result.error) ||
-                  `No rule found for "${cleaned}". Try searching keywords above.`;
-                showPttStatus_(errMsg, true);
               }
               return result;
             })
             .catch(function (err) {
               if (seq !== activeDictationSeq_) return;
               console.warn("Rules Arbiter query error:", err);
-              showPttStatus_(
-                `No rule found for "${cleaned}". Try searching keywords above.`,
-                true
-              );
+              // Tier 3: Universal local glossary fallback on promise rejection
+              const fallbackMatch = matchSpokenRuleQuery_(cleaned);
+              if (fallbackMatch && fallbackMatch.entry) {
+                showRuleCard_(fallbackMatch.entry, cleaned);
+                showPttStatus_(
+                  `✓ Rule found: ${fallbackMatch.entry.title || cleaned}`
+                );
+              } else {
+                showPttStatus_(
+                  `No rule found for "${cleaned}". Try searching keywords above.`,
+                  true
+                );
+              }
             });
         } else {
           // Tier 3: Local glossary fallback if arbiter unavailable
@@ -5939,7 +5954,6 @@
               setFirestoreLiveState_(false);
             }
           );
-          setFirestoreLiveState_(true);
         } catch (err) {
           console.warn(
             "[LiveTabletop] Failed to subscribe to real-time audio cue:",

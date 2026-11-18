@@ -37,7 +37,7 @@
     },
     {
       "pattern": "src/rules_arbiter_client.ts",
-      "required_skills": ["firebase-ai-logic-basics", "code-review", "tdd"],
+      "required_skills": ["firebase_ai_logic_basics", "code-review", "tdd"],
       "enforcement": "gate"
     },
     {
@@ -47,7 +47,7 @@
     },
     {
       "pattern": "firestore.rules",
-      "required_skills": ["code-review", "firebase-security-rules-auditor"],
+      "required_skills": ["code-review", "firebase_security_rules_auditor"],
       "enforcement": "gate"
     },
     {

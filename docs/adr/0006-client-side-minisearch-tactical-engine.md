@@ -18,3 +18,7 @@ We adopt client-side in-memory **MiniSearch** directly in `Index.html`:
 3. **Prefix & Fuzzy Search:** Supports instant prefix completion and Levenshtein distance fuzzy matching in a ~7KB minified bundle with zero WebAssembly or external binary dependencies.
 4. **Separation of Concerns:** Live tactical lookups are handled by in-memory MiniSearch in the browser, while deep multi-year campaign analytics and embedding pipelines remain assigned to offline DuckDB scripts.
 5. **Dual-Index Architecture:** Manifest Session Assets are indexed in `miniSearch`, while Rules Glossary mechanics and campaign lore lookups are isolated into a dedicated `rulesMiniSearch` instance.
+
+## Amendments
+
+- **2026-11-17 (ADR-0012):** Integrated `rulesMiniSearch` as **Tier 1** (<5ms in-memory fast-path, zero token cost) in the 3-Tier Rules Lookup Ladder, routing non-conversational keyword queries instantly while allowing natural-language rules questions to fall through to Tier 2 (Firebase AI Logic / Gemini 2.5 Flash). See [ADR-0012](0012-client-side-rules-arbiter-firebase-ai-logic.md).

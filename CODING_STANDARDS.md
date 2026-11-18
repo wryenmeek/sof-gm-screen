@@ -4,7 +4,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 ## Domain & Architecture Pointers
 
-- **Ubiquitous language:** [`GLOSSARY.md`](GLOSSARY.md). Name new functions, UI labels, test descriptions, and issue titles using the canonical terms (`Session`, `Session Asset`, `Shortcut Folder`, `GM Screen`, `Pinned Pane`, `Table Notes`, `Session Manifest`, `Encounter Dossier`, `Monster Statblock`, `Floor Map`, `Handout`, `Tabletop Mixer`, `Mood Cue`, `Audio Timeline Sidecar`, `Player Companion`, `Push-to-Talk Rules Sniffer`, `Rules Glossary`, `Rule Card`, `Speech Chunk`, `Audio Cue`, `Attendance Quorum`, `Storyline Lock`, `Weather Hexflower`, `Narrative Promise`, `Table Reaction`, `Character Roster Claiming`).
+- **Ubiquitous language:** [`GLOSSARY.md`](GLOSSARY.md). Name new functions, UI labels, test descriptions, and issue titles using the canonical terms (`Session`, `Session Asset`, `Shortcut Folder`, `GM Screen`, `Pinned Pane`, `Table Notes`, `Session Manifest`, `Encounter Dossier`, `Monster Statblock`, `Floor Map`, `Handout`, `Tabletop Mixer`, `Mood Cue`, `Audio Timeline Sidecar`, `Player Companion`, `Push-to-Talk Rules Sniffer`, `Rules Glossary`, `Rule Card`, `Speech Chunk`, `Audio Cue`, `Attendance Quorum`, `Storyline Lock`, `Weather Hexflower`, `Narrative Promise`, `Table Reaction`, `Character Roster Claiming`, `Rules Arbiter`, `Rule Confidence`, `Rule Citation`, `Rules Broadcast`, `Rule Feedback`, `Rules Lookup Ladder`).
 - **Architectural constraints (`docs/adr/`):**
   - [`0001-google-apps-script-architecture.md`](docs/adr/0001-google-apps-script-architecture.md) — Apps Script `HtmlService` + Google Drive backend.
   - [`0002-base64-asset-inlining.md`](docs/adr/0002-base64-asset-inlining.md) — _(Superseded by ADR-0004)_.
@@ -17,6 +17,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
   - [`0009-edge-pi-classifier-tiered-fallback.md`](docs/adr/0009-edge-pi-classifier-tiered-fallback.md) — Edge Raspberry Pi Silero VAD chunking and 3-tier classifier failover (`Tier 1 Pi Local <= 1500ms` → `Tier 2 Gemini 2.5 Flash` → `Tier 3 Manual UI`) via `doPost(e)` + `CacheService`.
   - [`0010-workspace-governance-quorum-and-on-demand-promises.md`](docs/adr/0010-workspace-governance-quorum-and-on-demand-promises.md) — Zero-token Wednesday Attendance Quorum audit (0-guest guard, 2d8 Weather Hexflower, managed Calendar markers) and on-demand Narrative Promise extraction with paginated Google Tasks deduplication.
   - [`0011-dual-engine-real-time-tabletop-fabric.md`](docs/adr/0011-dual-engine-real-time-tabletop-fabric.md) — Dual-Engine Real-Time Tabletop Fabric combining Cloud Firestore (Modular SDK v11, sub-50ms mood cue and combat pub/sub, anonymous roster claiming, 20-reaction FIFO queue) with Google Apps Script campaign governance.
+  - [`0012-client-side-rules-arbiter-firebase-ai-logic.md`](docs/adr/0012-client-side-rules-arbiter-firebase-ai-logic.md) — Client-side conversational 5e rules adjudication via Firebase AI Logic (Gemini 2.5 Flash), 3-tier rules lookup ladder, real-time tabletop rules broadcast, and safe confidence rating.
 
 ## Cross-Boundary Rules
 
@@ -55,3 +56,9 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 10. **Port Allocation Discipline (`firebase.json`, `scripts/`):**
     Maintain dedicated, non-overlapping ports across local testing environments: Firebase Cloud Firestore Emulator operates on port `8088`, while the local Raspberry Pi webhook mock server listens on port `8080`.
+
+11. **Audio Cue Write Boundary & Ducking Guard (`firestore.rules`, `Index.html`):**
+    Writes to `live/audio_cue` must enforce `source in ['companion_ptt', 'gemini_tier2']` and require `request.auth.uid == authorUid`. `RULE_QUERY` intents must reject ducking injection, payload keys outside the allowlist (`ruleTitle`, `ruleId`, `summary`, `ruling`, `citations`, `ruleConfidence`, `confidence`), and bounded string lengths. Client audio mixer must duck tracks exclusively on `MUSIC_CUE` and `SFX` intents, never on `RULE_QUERY`.
+
+12. **Rules Arbiter Client Boundary & Normalization (`src/rules_arbiter_client.ts`, `Index.html`):**
+    Direct calls to Gemini 2.5 Flash via Firebase AI Logic must sanitize input queries ($\le 500$ chars, strip control characters) and frame them within delimiters to prevent prompt injection. All responses must be validated against `ARBITER_RULE_RESPONSE_SCHEMA` and normalized via `normalizeRuling_` with safe confidence clamping (`exact`, `interpretation`, `unsupported`) and bounded lengths before rendering or broadcasting to `live/audio_cue`.

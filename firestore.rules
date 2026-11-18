@@ -115,10 +115,37 @@ service cloud.firestore {
       // LIVE TABLETOP SYNCHRONIZATION: live/{docId}
       // -----------------------------------------------------------------------
 
-      // 1. Audio Cue Document (Live Mood Transitions & Sound Effects)
+      // 1. Audio Cue Document (Live Mood Transitions, Sound Effects & Rules Arbiter Tabletop Broadcast)
       match /live/audio_cue {
         allow read: if isAuthenticated();
         allow write: if isGm();
+        allow create, update: if isAuthenticated() &&
+          request.resource.data.intent == 'RULE_QUERY' &&
+          request.resource.data.keys().hasAll(['intent', 'source']) &&
+          request.resource.data.keys().hasOnly(['intent', 'source', 'authorUid', 'triggeredAt', 'rule', 'mood', 'confidence', 'payload']) &&
+          request.resource.data.source in ['companion_ptt', 'gemini_tier2'] &&
+          (!('authorUid' in request.resource.data) || request.resource.data.authorUid == request.auth.uid) &&
+          (!('confidence' in request.resource.data) || request.resource.data.confidence == null || request.resource.data.confidence is number) &&
+          (!('rule' in request.resource.data) || request.resource.data.rule == null || isValidString(request.resource.data.rule, 1, 120)) &&
+          (!('mood' in request.resource.data) || request.resource.data.mood == null || isValidString(request.resource.data.mood, 1, 32)) &&
+          (!('payload' in request.resource.data) || request.resource.data.payload == null || (
+            request.resource.data.payload is map &&
+            request.resource.data.payload.keys().hasOnly(['ruleTitle', 'ruleId', 'summary', 'ruling', 'citations', 'ruleConfidence', 'confidence']) &&
+            (!('ruleTitle' in request.resource.data.payload) || isValidString(request.resource.data.payload.ruleTitle, 1, 120)) &&
+            (!('ruleId' in request.resource.data.payload) || request.resource.data.payload.ruleId == null || isValidString(request.resource.data.payload.ruleId, 1, 100)) &&
+            (!('summary' in request.resource.data.payload) || isValidString(request.resource.data.payload.summary, 0, 500)) &&
+            (!('ruling' in request.resource.data.payload) || isValidString(request.resource.data.payload.ruling, 0, 2000)) &&
+            (!('citations' in request.resource.data.payload) || (
+              request.resource.data.payload.citations is list &&
+              request.resource.data.payload.citations.size() <= 10
+            )) &&
+            (!('ruleConfidence' in request.resource.data.payload) || request.resource.data.payload.ruleConfidence in ['exact', 'interpretation', 'unsupported']) &&
+            (!('confidence' in request.resource.data.payload) || (
+              request.resource.data.payload.confidence is number &&
+              request.resource.data.payload.confidence >= 0 &&
+              request.resource.data.payload.confidence <= 1
+            ))
+          ));
       }
 
       // 2. Player-Safe Combat Projection (Initiative order, visible monsters)

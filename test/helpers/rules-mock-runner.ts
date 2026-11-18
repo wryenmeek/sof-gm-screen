@@ -257,7 +257,139 @@ export class MockFirestoreDatabase {
 
         if (liveDocId === "audio_cue") {
           if (op === "get") return this.isAuthenticated(auth);
-          return this.isGm(auth);
+          if (this.isGm(auth)) return true;
+          if (op === "create" || op === "update") {
+            if (!this.isAuthenticated(auth)) return false;
+            if (!incomingData) return false;
+            if (incomingData.intent !== "RULE_QUERY") return false;
+            const keys = Object.keys(incomingData);
+            const allowed = [
+              "intent",
+              "source",
+              "authorUid",
+              "triggeredAt",
+              "rule",
+              "mood",
+              "confidence",
+              "payload"
+            ];
+            if (!keys.every((k) => allowed.includes(k))) return false;
+            if (
+              !["companion_ptt", "gemini_tier2"].includes(incomingData.source)
+            )
+              return false;
+            if (
+              incomingData.authorUid !== undefined &&
+              incomingData.authorUid !== auth?.uid
+            ) {
+              return false;
+            }
+            if (
+              incomingData.confidence !== undefined &&
+              incomingData.confidence !== null &&
+              typeof incomingData.confidence !== "number"
+            ) {
+              return false;
+            }
+            if (
+              incomingData.rule !== undefined &&
+              incomingData.rule !== null &&
+              (typeof incomingData.rule !== "string" ||
+                incomingData.rule.length < 1 ||
+                incomingData.rule.length > 120)
+            ) {
+              return false;
+            }
+            if (
+              incomingData.mood !== undefined &&
+              incomingData.mood !== null &&
+              (typeof incomingData.mood !== "string" ||
+                incomingData.mood.length < 1 ||
+                incomingData.mood.length > 32)
+            ) {
+              return false;
+            }
+            if (
+              incomingData.payload !== undefined &&
+              incomingData.payload !== null
+            ) {
+              if (
+                typeof incomingData.payload !== "object" ||
+                Array.isArray(incomingData.payload)
+              ) {
+                return false;
+              }
+              const pKeys = Object.keys(incomingData.payload);
+              const allowedPayloadKeys = [
+                "ruleTitle",
+                "ruleId",
+                "summary",
+                "ruling",
+                "citations",
+                "ruleConfidence",
+                "confidence"
+              ];
+              if (!pKeys.every((k) => allowedPayloadKeys.includes(k)))
+                return false;
+              if (
+                incomingData.payload.ruleTitle !== undefined &&
+                (typeof incomingData.payload.ruleTitle !== "string" ||
+                  incomingData.payload.ruleTitle.length < 1 ||
+                  incomingData.payload.ruleTitle.length > 120)
+              ) {
+                return false;
+              }
+              if (
+                incomingData.payload.ruleId !== undefined &&
+                incomingData.payload.ruleId !== null &&
+                (typeof incomingData.payload.ruleId !== "string" ||
+                  incomingData.payload.ruleId.length < 1 ||
+                  incomingData.payload.ruleId.length > 100)
+              ) {
+                return false;
+              }
+              if (
+                incomingData.payload.summary !== undefined &&
+                (typeof incomingData.payload.summary !== "string" ||
+                  incomingData.payload.summary.length > 500)
+              ) {
+                return false;
+              }
+              if (
+                incomingData.payload.ruling !== undefined &&
+                (typeof incomingData.payload.ruling !== "string" ||
+                  incomingData.payload.ruling.length > 2000)
+              ) {
+                return false;
+              }
+              if (incomingData.payload.citations !== undefined) {
+                if (
+                  !Array.isArray(incomingData.payload.citations) ||
+                  incomingData.payload.citations.length > 10
+                ) {
+                  return false;
+                }
+              }
+              if (
+                incomingData.payload.ruleConfidence !== undefined &&
+                !["exact", "interpretation", "unsupported"].includes(
+                  incomingData.payload.ruleConfidence
+                )
+              ) {
+                return false;
+              }
+              if (
+                incomingData.payload.confidence !== undefined &&
+                (typeof incomingData.payload.confidence !== "number" ||
+                  incomingData.payload.confidence < 0 ||
+                  incomingData.payload.confidence > 1)
+              ) {
+                return false;
+              }
+            }
+            return true;
+          }
+          return false;
         }
 
         if (liveDocId === "combat") {

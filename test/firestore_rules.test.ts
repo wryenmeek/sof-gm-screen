@@ -595,4 +595,133 @@ describe("Cloud Firestore Security Rules & Access Boundary Suite (SEC-01 - SEC-1
       client.destroy();
     });
   });
+
+  describe("SEC-13: Real-Time Audio Cue & Rules Arbiter Tabletop Broadcast Boundary", () => {
+    it("allows authenticated tabletop clients to publish valid RULE_QUERY cues while restricting MUSIC_CUE and SFX to the GM", async () => {
+      const player = testEnv.authenticatedContext("player_alice");
+      const playerDb = player.firestore();
+      const gm = testEnv.authenticatedContext("gm_user", { gm: true });
+      const gmDb = gm.firestore();
+      const unauth = testEnv.unauthenticatedContext();
+      const unauthDb = unauth.firestore();
+
+      const cuePath = `sessions/${SESSION_DATE}/live/audio_cue`;
+
+      // 1. Authenticated player publishing valid RULE_QUERY cue -> SUCCESS
+      const validRuleCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        rule: "Flanking",
+        mood: "exploration",
+        payload: {
+          ruleTitle: "Flanking",
+          ruleId: "flanking",
+          summary:
+            "Grants advantage when an ally is on the opposite side of target.",
+          ruling:
+            "When making a melee attack against a creature flanked by an ally, attack with advantage.",
+          citations: ["DMG p. 251"],
+          ruleConfidence: "exact",
+          confidence: 1.0
+        }
+      };
+      await assertSucceeds(playerDb.doc(cuePath).set(validRuleCue));
+
+      // 2. Authenticated player publishing MUSIC_CUE -> FAILS (GM only)
+      const musicCue = {
+        intent: "MUSIC_CUE",
+        mood: "combat",
+        source: "companion_ptt"
+      };
+      await assertFails(playerDb.doc(cuePath).set(musicCue));
+
+      // 3. Authenticated player publishing SFX -> FAILS (GM only)
+      const sfxCue = {
+        intent: "SFX",
+        mood: "combat",
+        source: "companion_ptt"
+      };
+      await assertFails(playerDb.doc(cuePath).set(sfxCue));
+
+      // 4. Unauthenticated client publishing RULE_QUERY -> FAILS
+      await assertFails(unauthDb.doc(cuePath).set(validRuleCue));
+
+      // 5. Authenticated player publishing RULE_QUERY with invalid/unauthorized keys -> FAILS
+      const invalidRuleCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        unauthorizedField: "hacked",
+        rule: "Sneak Attack"
+      };
+      await assertFails(playerDb.doc(cuePath).set(invalidRuleCue));
+
+      // 6. Authenticated player publishing RULE_QUERY with malformed payload type -> FAILS
+      const malformedPayloadCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        rule: "Cover",
+        payload: "not-a-map"
+      };
+      await assertFails(playerDb.doc(cuePath).set(malformedPayloadCue));
+
+      // 7. Authenticated player publishing RULE_QUERY with malformed confidence type -> FAILS
+      const malformedConfidenceCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        rule: "Cover",
+        confidence: false
+      };
+      await assertFails(playerDb.doc(cuePath).set(malformedConfidenceCue));
+
+      // 8. Authenticated player attempting to inject ducking controls in payload -> FAILS
+      const duckingExploitCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        rule: "Stealth",
+        payload: {
+          ruleTitle: "Stealth",
+          summary: "Hidden check.",
+          ruling: "Contested Stealth vs Perception.",
+          citations: ["PHB p. 177"],
+          ducking: true,
+          duckingGain: 0,
+          duckingDurationMs: 999999
+        }
+      };
+      await assertFails(playerDb.doc(cuePath).set(duckingExploitCue));
+
+      // 9. Authenticated player claiming GM source tier -> FAILS
+      const spoofedSourceCue = {
+        intent: "RULE_QUERY",
+        source: "gm_manual_tier3",
+        rule: "Stealth",
+        payload: {
+          ruleTitle: "Stealth",
+          summary: "Hidden check.",
+          ruling: "Contested Stealth vs Perception.",
+          citations: ["PHB p. 177"]
+        }
+      };
+      await assertFails(playerDb.doc(cuePath).set(spoofedSourceCue));
+
+      // 10. Authenticated player claiming another player's authorUid -> FAILS
+      const spoofedAuthorCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        authorUid: "another_player_uid",
+        rule: "Stealth",
+        payload: {
+          ruleTitle: "Stealth",
+          summary: "Hidden check.",
+          ruling: "Contested Stealth vs Perception.",
+          citations: ["PHB p. 177"]
+        }
+      };
+      await assertFails(playerDb.doc(cuePath).set(spoofedAuthorCue));
+
+      // 11. GM publishing MUSIC_CUE and SFX -> SUCCEEDS
+      await assertSucceeds(gmDb.doc(cuePath).set(musicCue));
+      await assertSucceeds(gmDb.doc(cuePath).set(sfxCue));
+    });
+  });
 });

@@ -552,6 +552,61 @@
         display: block;
       }
 
+      .confidence-badge {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 700;
+        vertical-align: middle;
+      }
+
+      .confidence-badge[data-confidence="exact"] {
+        background: rgba(46, 204, 113, 0.15);
+        color: #2ecc71;
+        border: 1px solid rgba(46, 204, 113, 0.6);
+      }
+
+      .confidence-badge[data-confidence="interpretation"] {
+        background: rgba(241, 196, 15, 0.15);
+        color: #f1c40f;
+        border: 1px solid rgba(241, 196, 15, 0.6);
+      }
+
+      .confidence-badge[data-confidence="unsupported"] {
+        background: rgba(231, 76, 60, 0.15);
+        color: #e74c3c;
+        border: 1px solid rgba(231, 76, 60, 0.6);
+      }
+
+      .citation-pill {
+        display: inline-block;
+        background: rgba(88, 166, 255, 0.12);
+        color: var(--cyan);
+        border: 1px solid rgba(88, 166, 255, 0.35);
+        border-radius: 12px;
+        padding: 2px 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .rule-summary {
+        margin: 8px 0 6px;
+        font-size: 0.95rem;
+        line-height: 1.45;
+        color: #e6edf3;
+      }
+
+      .rule-ruling {
+        margin: 6px 0 8px;
+        font-size: 0.88rem;
+        line-height: 1.4;
+        color: #8b949e;
+        border-left: 2px solid var(--gold);
+        padding-left: 8px;
+      }
+
       .hidden {
         display: none !important;
       }
@@ -1755,17 +1810,50 @@
       aria-live="polite"
       aria-labelledby="card-title"
     >
-      <h2 id="card-title">Rule Title</h2>
-      <div id="card-type">Mechanic</div>
-      <p id="card-text">Rule description...</p>
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 8px;
+        "
+      >
+        <h2
+          id="card-title"
+          style="margin: 0; font-size: 1.15rem; color: var(--gold-light)"
+        >
+          Rule Title
+        </h2>
+        <span
+          id="card-confidence"
+          class="confidence-badge"
+          style="display: none"
+        ></span>
+      </div>
+      <div
+        id="card-type"
+        style="color: var(--cyan); font-size: 0.85rem; margin-top: 4px"
+      >
+        Mechanic
+      </div>
+      <p id="card-summary" class="rule-summary" style="display: none"></p>
+      <div id="card-ruling" class="rule-ruling" style="display: none"></div>
+      <p id="card-text" style="display: none"></p>
+      <div
+        id="card-citations"
+        class="rule-citations"
+        style="display: none; margin: 8px 0; flex-wrap: wrap; gap: 6px"
+      ></div>
       <div style="display: flex; gap: 8px; margin-top: 12px">
-        <button id="btn-up" class="primary" onclick="submitRuleFeedback('+1')">
-          👍 Helpful
+        <button id="btn-up" class="primary" aria-label="Mark rule as helpful">
+          <span aria-hidden="true">👍</span> Helpful
         </button>
-        <button id="btn-down" onclick="submitRuleFeedback('-1')">
-          👎 Irrelevant
+        <button id="btn-down" aria-label="Mark rule as irrelevant">
+          <span aria-hidden="true">👎</span> Irrelevant
         </button>
-        <button id="btn-dismiss" onclick="dismissRuleCard()">✕ Dismiss</button>
+        <button id="btn-dismiss" aria-label="Dismiss rule card">
+          <span aria-hidden="true">✕</span> Dismiss
+        </button>
       </div>
       <div
         id="feedback-status"
@@ -4628,6 +4716,8 @@
         window.renderFloatingReactionBubble = renderFloatingReactionBubble_;
         window.initGmReactionsSubscription = initGmReactionsSubscription_;
         window.initCombatTracker = initCombatTracker;
+        window.executeDictationQuery = executeDictationQuery_;
+        window.broadcastRuleRuling = broadcastRuleRuling_;
       }
 
       function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {
@@ -4662,30 +4752,43 @@
             });
             if (hits && hits.length > 0) {
               const top = hits[0];
-              return {
-                key: top.id || top.title.toLowerCase(),
-                id: top.id,
-                title: top.title,
-                source: top.source || "Core Mechanic",
-                summary: top.summary,
-                text: top.summary,
-                entry: {
+              const cleanTitle = (top.title || "").toLowerCase();
+              const cleanQuery = query.toLowerCase();
+              const isDirectTitleMatch =
+                cleanQuery === cleanTitle ||
+                cleanTitle.includes(cleanQuery) ||
+                cleanQuery.includes(cleanTitle);
+              const isConversational = isConversationalQuery_(query);
+              if (
+                isDirectTitleMatch ||
+                (!isConversational && top.score >= 3.0)
+              ) {
+                return {
+                  key: top.id || top.title.toLowerCase(),
                   id: top.id,
                   title: top.title,
-                  type: top.source || "Core Mechanic",
                   source: top.source || "Core Mechanic",
                   summary: top.summary,
-                  text: top.summary
-                }
-              };
+                  text: top.summary,
+                  entry: {
+                    id: top.id,
+                    title: top.title,
+                    type: top.source || "Core Mechanic",
+                    source: top.source || "Core Mechanic",
+                    summary: top.summary,
+                    text: top.summary
+                  }
+                };
+              }
             }
           } catch (_e) {}
         }
-        const lower = query.toLowerCase();
+        const lower = query.toLowerCase().trim();
         const keys = Object.keys(DEFAULT_GLOSSARY);
         for (let i = 0; i < keys.length; i++) {
           const key = keys[i];
-          if (lower.includes(key.replace(/_/g, " ")) || lower.includes(key)) {
+          const readableKey = key.replace(/_/g, " ");
+          if (lower === readableKey || lower === key) {
             return {
               key: key,
               entry: DEFAULT_GLOSSARY[key]
@@ -4717,17 +4820,152 @@
         }
       }
 
-      function executeDictationQuery_(rawQuery) {
+      let activeRulesArbiterClient_ = null;
+
+      function getOrCreateRulesArbiterClient_() {
+        if (typeof window !== "undefined" && window.rulesArbiterClient) {
+          activeRulesArbiterClient_ = window.rulesArbiterClient;
+          return activeRulesArbiterClient_;
+        }
+        if (activeRulesArbiterClient_) return activeRulesArbiterClient_;
+        if (typeof window !== "undefined" && window.RulesArbiterClient) {
+          try {
+            activeRulesArbiterClient_ = new window.RulesArbiterClient();
+            return activeRulesArbiterClient_;
+          } catch (_e) {
+            console.warn("Could not instantiate RulesArbiterClient:", _e);
+          }
+        }
+        return null;
+      }
+
+      function isConversationalQuery_(query) {
+        const q = String(query || "")
+          .trim()
+          .toLowerCase();
+        if (q.includes("?")) return true;
+        if (
+          /^(can|could|how|what|when|where|why|does|do|is|are|if)\b/i.test(q)
+        ) {
+          return true;
+        }
+        const words = q.split(/\s+/).filter(Boolean);
+        return words.length >= 5;
+      }
+
+      function resolveSessionDate_() {
+        if (
+          typeof currentSessionDate === "string" &&
+          !currentSessionDate.startsWith("<" + "?") &&
+          /^\d{4}-\d{2}-\d{2}$/.test(currentSessionDate)
+        ) {
+          return currentSessionDate;
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.__sessionDate === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(window.__sessionDate)
+        ) {
+          return window.__sessionDate;
+        }
+        return "";
+      }
+
+      function broadcastRuleRuling_(ruling) {
+        if (!ruling) return;
+        const date = resolveSessionDate_();
+        if (!date) {
+          console.warn(
+            "[LiveTabletop] Cannot broadcast rule query: missing valid sessionDate"
+          );
+          return;
+        }
+        const client = getLiveTabletopClient_();
+        if (client && typeof client.broadcastRuleQuery === "function") {
+          client
+            .broadcastRuleQuery(
+              date,
+              ruling,
+              isCompanionMode_() ? "companion_ptt" : "gemini_tier2"
+            )
+            .catch(function (err) {
+              console.warn("Failed to broadcast ruling to tabletop:", err);
+            });
+        }
+      }
+
+      let activeDictationSeq_ = 0;
+
+      function executeDictationQuery_(rawQuery, broadcast = true) {
         const cleaned = String(rawQuery || "").trim();
         if (!cleaned) return;
-        const matched = matchSpokenRuleQuery_(cleaned);
-        if (matched && matched.entry) {
-          showRuleCard_(matched.entry, cleaned);
-          showPttStatus_(`✓ Rule found: ${matched.entry.title || cleaned}`);
+        const seq = ++activeDictationSeq_;
+
+        const isConversational = isConversationalQuery_(cleaned);
+
+        // Tier 1: Local RAM rulesMiniSearch fast-path (<5ms, zero token) for direct keyword searches
+        if (!isConversational) {
+          const matched = matchSpokenRuleQuery_(cleaned);
+          if (matched && matched.entry) {
+            showRuleCard_(matched.entry, cleaned);
+            showPttStatus_(`✓ Rule found: ${matched.entry.title || cleaned}`);
+            return;
+          }
+        }
+
+        // Tier 2: Cloud 5e Rules Arbiter (Firebase AI Logic / Gemini 2.5 Flash)
+        const arbiter = getOrCreateRulesArbiterClient_();
+        if (arbiter && typeof arbiter.queryRulesArbiter === "function") {
+          showPttStatus_("Consulting 5e Rules Arbiter (Gemini 2.5 Flash)...");
+          return arbiter
+            .queryRulesArbiter(cleaned)
+            .then(function (result) {
+              if (seq !== activeDictationSeq_) return;
+              if (result && result.success && result.data) {
+                showRuleCard_(result.data, cleaned);
+                showPttStatus_(`✓ Rule resolved: ${result.data.ruleTitle}`);
+                if (broadcast) {
+                  broadcastRuleRuling_(result.data);
+                }
+              } else if (result && result.isOffline) {
+                // Tier 3: Offline fallback to keyword search if available
+                const fallbackMatch = matchSpokenRuleQuery_(cleaned);
+                if (fallbackMatch && fallbackMatch.entry) {
+                  showRuleCard_(fallbackMatch.entry, cleaned);
+                }
+                showPttStatus_(
+                  `⚠️ Device is offline. Showing local glossary keywords for "${cleaned}".`,
+                  true
+                );
+              } else {
+                const errMsg =
+                  (result && result.error) ||
+                  `No rule found for "${cleaned}". Try searching keywords above.`;
+                showPttStatus_(errMsg, true);
+              }
+              return result;
+            })
+            .catch(function (err) {
+              if (seq !== activeDictationSeq_) return;
+              console.warn("Rules Arbiter query error:", err);
+              showPttStatus_(
+                `No rule found for "${cleaned}". Try searching keywords above.`,
+                true
+              );
+            });
         } else {
-          showPttStatus_(
-            `No exact rule found for "${cleaned}". Try searching keywords above.`
-          );
+          // Tier 3: Local glossary fallback if arbiter unavailable
+          const fallbackMatch = matchSpokenRuleQuery_(cleaned);
+          if (fallbackMatch && fallbackMatch.entry) {
+            showRuleCard_(fallbackMatch.entry, cleaned);
+            showPttStatus_(
+              `✓ Rule found: ${fallbackMatch.entry.title || cleaned}`
+            );
+          } else {
+            showPttStatus_(
+              `No exact rule found for "${cleaned}". Try searching keywords above.`
+            );
+          }
         }
       }
 
@@ -4822,6 +5060,8 @@
             if (matched) {
               showRuleCard_(matched.entry, transcript.toLowerCase());
               showPttStatus_(`🎙️ Heard: "${transcript}"`);
+            } else if (isConversationalQuery_(transcript)) {
+              executeDictationQuery_(transcript);
             } else if (transcript) {
               showPttStatus_(
                 `🎙️ Heard: "${transcript}" (no exact rule match found in glossary)`
@@ -4894,54 +5134,209 @@
         });
       }
 
+      let ruleCardDecayRemaining_ = 30000;
+      let ruleCardDecayStart_ = 0;
+      let ruleCardIsPaused_ = false;
+      let lastHandledRuleTitle_ = "";
+      let lastHandledRuleTimestamp_ = 0;
+
+      function startRuleCardDecay_(durationMs = 30000) {
+        if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        ruleCardDecayRemaining_ = durationMs;
+        ruleCardDecayStart_ = Date.now();
+        ruleCardIsPaused_ = false;
+        ruleCardTimer = setTimeout(() => {
+          dismissRuleCard();
+        }, ruleCardDecayRemaining_);
+      }
+
+      function pauseRuleCardDecay_() {
+        if (ruleCardTimer && !ruleCardIsPaused_) {
+          clearTimeout(ruleCardTimer);
+          ruleCardTimer = null;
+          ruleCardDecayRemaining_ = Math.max(
+            1000,
+            ruleCardDecayRemaining_ - (Date.now() - ruleCardDecayStart_)
+          );
+          ruleCardIsPaused_ = true;
+        }
+      }
+
+      function resumeRuleCardDecay_() {
+        if (ruleCardIsPaused_) {
+          ruleCardIsPaused_ = false;
+          ruleCardDecayStart_ = Date.now();
+          ruleCardTimer = setTimeout(() => {
+            dismissRuleCard();
+          }, ruleCardDecayRemaining_);
+        }
+      }
+
+      function normalizeRuling_(raw, phrase = "", fallbackSummary = "") {
+        if (!raw || typeof raw !== "object") {
+          const title = String(raw || "Rule");
+          return {
+            ruleTitle: title,
+            ruleId: "",
+            summary: String(fallbackSummary || phrase || ""),
+            ruling: "",
+            citations: [],
+            confidence: "",
+            source: "Mechanic",
+            phrase: phrase || title.toLowerCase()
+          };
+        }
+        const ruleTitle = String(
+          raw.ruleTitle || raw.title || raw.name || raw.rule || "Ruling"
+        ).slice(0, 120);
+        const rawId = raw.ruleId || raw.id || "";
+        const ruleId = rawId
+          ? String(rawId)
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "_")
+              .replace(/^_+|_+$/g, "")
+              .slice(0, 100)
+          : "";
+        const summary = String(
+          raw.summary ||
+            (typeof fallbackSummary === "string" && fallbackSummary
+              ? fallbackSummary
+              : "") ||
+            (typeof phrase === "string" ? phrase : "") ||
+            raw.text ||
+            ""
+        ).slice(0, 500);
+        const ruling = String(raw.ruling || "");
+        const citations = Array.isArray(raw.citations)
+          ? raw.citations.slice(0, 10).map((c) => String(c).slice(0, 200))
+          : [];
+        const rawConf = raw.confidence || raw.ruleConfidence;
+        let confidence = "";
+        if (rawConf) {
+          const validConfidences = ["exact", "interpretation", "unsupported"];
+          const confStr = String(rawConf).toLowerCase();
+          confidence = validConfidences.includes(confStr)
+            ? confStr
+            : "interpretation";
+        }
+        const source = confidence
+          ? `Rules Arbiter (${confidence})`
+          : raw.source || raw.type || "Mechanic";
+
+        return {
+          ruleTitle: ruleTitle,
+          ruleId: ruleId,
+          summary: summary,
+          ruling: ruling,
+          citations: citations,
+          confidence: confidence,
+          source: source,
+          phrase: phrase || String(raw.phrase || ruleTitle.toLowerCase())
+        };
+      }
+
       function showRuleCard_(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
         const card = document.getElementById("rule-card");
         const titleEl = document.getElementById("card-title");
+        const confidenceEl = document.getElementById("card-confidence");
         const typeEl = document.getElementById("card-type");
+        const summaryEl = document.getElementById("card-summary");
+        const rulingEl = document.getElementById("card-ruling");
         const textEl = document.getElementById("card-text");
+        const citationsEl = document.getElementById("card-citations");
         if (!card || !titleEl) return;
 
-        let ruleTitle = "";
-        let ruleText = "";
-        let ruleSource = "Mechanic";
-        let heardPhrase = "";
+        const isObj = typeof ruleOrTitle === "object" && ruleOrTitle !== null;
+        const phraseArg = isObj
+          ? typeof textOrPhrase === "string"
+            ? textOrPhrase
+            : ""
+          : String(
+              maybePhrase ||
+                (typeof textOrPhrase === "string" ? textOrPhrase : "")
+            );
+        const summaryArg = isObj
+          ? ""
+          : String(typeof textOrPhrase === "string" ? textOrPhrase : "");
 
-        if (ruleOrTitle && typeof ruleOrTitle === "object") {
-          ruleTitle = ruleOrTitle.title || ruleOrTitle.name || "";
-          ruleText = ruleOrTitle.summary || ruleOrTitle.text || "";
-          ruleSource = ruleOrTitle.source || ruleOrTitle.type || "Mechanic";
-          heardPhrase = String(textOrPhrase || ruleTitle.toLowerCase());
-        } else {
-          ruleTitle = String(ruleOrTitle || "");
-          ruleText = String(textOrPhrase || "");
-          heardPhrase = String(maybePhrase || ruleTitle.toLowerCase());
-        }
+        const normalized = normalizeRuling_(ruleOrTitle, phraseArg, summaryArg);
 
         activeRuleCard = {
-          cardTitle: ruleTitle,
-          source: ruleSource,
-          text: ruleText,
-          phrase: heardPhrase
+          ruleId: normalized.ruleId,
+          cardTitle: normalized.ruleTitle,
+          source: normalized.source,
+          summary: normalized.summary,
+          ruling: normalized.ruling,
+          confidence: normalized.confidence,
+          citations: normalized.citations,
+          text: normalized.ruling || normalized.summary || "",
+          phrase: normalized.phrase
         };
-        titleEl.textContent = ruleTitle;
-        if (typeEl) typeEl.textContent = ruleSource;
-        if (textEl) textEl.textContent = ruleText;
+
+        lastHandledRuleTitle_ = normalized.ruleTitle;
+        lastHandledRuleTimestamp_ = Date.now();
+
+        titleEl.textContent = normalized.ruleTitle;
+        if (typeEl) typeEl.textContent = normalized.source;
+
+        if (confidenceEl) {
+          if (normalized.confidence) {
+            confidenceEl.textContent = normalized.confidence;
+            confidenceEl.setAttribute("data-confidence", normalized.confidence);
+            confidenceEl.style.display = "inline-block";
+          } else {
+            confidenceEl.textContent = "";
+            confidenceEl.removeAttribute("data-confidence");
+            confidenceEl.style.display = "none";
+          }
+        }
+
+        if (summaryEl) {
+          summaryEl.textContent = normalized.summary;
+          summaryEl.style.display = normalized.summary ? "block" : "none";
+        }
+
+        if (rulingEl) {
+          rulingEl.textContent = normalized.ruling;
+          rulingEl.style.display = normalized.ruling ? "block" : "none";
+        }
+
+        if (textEl) {
+          textEl.textContent = normalized.ruling || normalized.summary || "";
+        }
+
+        if (citationsEl) {
+          citationsEl.innerHTML = "";
+          if (normalized.citations && normalized.citations.length > 0) {
+            citationsEl.style.display = "flex";
+            normalized.citations.forEach((cit) => {
+              const pill = document.createElement("span");
+              pill.className = "citation-pill";
+              pill.textContent = cit;
+              citationsEl.appendChild(pill);
+            });
+          } else {
+            citationsEl.style.display = "none";
+          }
+        }
+
         const feedbackStatus = document.getElementById("feedback-status");
         if (feedbackStatus) {
           feedbackStatus.textContent = "";
           feedbackStatus.classList.add("hidden");
         }
+
         card.classList.add("visible");
         card.style.display = "block";
-        setRuleFeedbackPending_(ruleFeedbackPending);
-        if (ruleCardTimer) clearTimeout(ruleCardTimer);
-        ruleCardTimer = setTimeout(() => {
-          dismissRuleCard();
-        }, 30000);
+        setRuleFeedbackPending_(false);
+
+        startRuleCardDecay_(30000);
       }
 
       function dismissRuleCard() {
         if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        ruleCardTimer = null;
+        ruleCardIsPaused_ = false;
         const card = document.getElementById("rule-card");
         if (card) {
           card.classList.remove("visible");
@@ -4961,12 +5356,80 @@
         const submittedCard = activeRuleCard;
         setRuleFeedbackPending_(true);
 
+        const isHelpful = vote === "+1" || vote === true || vote === 1;
+        const rawRuleId =
+          submittedCard.ruleId ||
+          submittedCard.id ||
+          (submittedCard.cardTitle || "rule")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "") ||
+          "rule_generic";
+        const ruleId = rawRuleId.slice(0, 100);
+
         let player = currentPlayerIdentity || "Guest";
         try {
           if (typeof localStorage !== "undefined" && localStorage) {
             player = localStorage.getItem("sof_player_identity") || player;
           }
         } catch (_e) {}
+
+        const handleSuccess = () => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          dismissRuleCard();
+        };
+
+        const handleFailure = (msg) => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          setRuleFeedbackStatus_(
+            msg || "Feedback could not be saved. Please try again."
+          );
+        };
+
+        // If card originates from Rules Arbiter (or preferFirestoreFeedback set), write to Firestore rules_feedback
+        const client = getOrCreateLiveTabletopClient_();
+        const prefersFirestore =
+          client &&
+          typeof client.submitRuleFeedback === "function" &&
+          (Boolean(submittedCard.confidence || submittedCard.ruleId) ||
+            typeof google === "undefined" ||
+            !google.script ||
+            !google.script.run ||
+            (typeof window !== "undefined" &&
+              window.__preferFirestoreFeedback));
+
+        if (prefersFirestore) {
+          const authorUid =
+            currentAnonymousUid ||
+            (client.getCurrentUser &&
+              client.getCurrentUser() &&
+              client.getCurrentUser().uid) ||
+            "anon_player";
+          const firestorePayload = {
+            ruleId: ruleId,
+            isHelpful: isHelpful,
+            authorUid: authorUid,
+            timestamp: Date.now(),
+            ...(typeof currentSessionDate === "string" &&
+            currentSessionDate.length === 10
+              ? { sessionDate: currentSessionDate }
+              : {})
+          };
+          client
+            .submitRuleFeedback(firestorePayload)
+            .then(function () {
+              handleSuccess();
+            })
+            .catch(function (err) {
+              console.warn("Firestore rule feedback error:", err);
+              handleFailure();
+            });
+          return;
+        }
+
+        // Fallback to Apps Script logRuleFeedback
         const payload = {
           sessionDate: currentSessionDate,
           player: player,
@@ -4975,33 +5438,6 @@
           source: submittedCard.source || "D&D 5e Glossary",
           vote: vote
         };
-        const handleFailure = () => {
-          setRuleFeedbackPending_(false);
-          if (activeRuleCard !== submittedCard) return;
-          setRuleFeedbackStatus_(
-            "Feedback could not be saved. Please try again."
-          );
-        };
-        const handleResult = (result) => {
-          setRuleFeedbackPending_(false);
-          if (activeRuleCard !== submittedCard) return;
-          if (result && result.status === "logged") {
-            dismissRuleCard();
-            return;
-          }
-          if (result && result.status === "rate_limited") {
-            setRuleFeedbackStatus_(
-              "Feedback limit reached. Please try again later."
-            );
-          } else if (result && result.status === "unavailable") {
-            setRuleFeedbackStatus_(
-              "Feedback logging is unavailable. Please try again later."
-            );
-          } else {
-            handleFailure();
-          }
-        };
-
         if (
           typeof google !== "undefined" &&
           google.script &&
@@ -5009,8 +5445,26 @@
         ) {
           try {
             const runner = google.script.run
-              .withSuccessHandler(handleResult)
-              .withFailureHandler(handleFailure);
+              .withSuccessHandler(function (result) {
+                setRuleFeedbackPending_(false);
+                if (activeRuleCard !== submittedCard) return;
+                if (result && result.status === "logged") {
+                  dismissRuleCard();
+                } else if (result && result.status === "rate_limited") {
+                  setRuleFeedbackStatus_(
+                    "Feedback limit reached. Please try again later."
+                  );
+                } else if (result && result.status === "unavailable") {
+                  setRuleFeedbackStatus_(
+                    "Feedback logging is unavailable. Please try again later."
+                  );
+                } else {
+                  handleFailure();
+                }
+              })
+              .withFailureHandler(function () {
+                handleFailure();
+              });
             if (runner && typeof runner.logRuleFeedback === "function") {
               runner.logRuleFeedback(payload);
               return;
@@ -5019,6 +5473,46 @@
         }
         handleFailure();
       }
+
+      const btnUpEl = document.getElementById("btn-up");
+      if (btnUpEl) {
+        btnUpEl.addEventListener("click", function () {
+          submitRuleFeedback("+1");
+        });
+      }
+      const btnDownEl = document.getElementById("btn-down");
+      if (btnDownEl) {
+        btnDownEl.addEventListener("click", function () {
+          submitRuleFeedback("-1");
+        });
+      }
+      const btnDismissEl = document.getElementById("btn-dismiss");
+      if (btnDismissEl) {
+        btnDismissEl.addEventListener("click", function () {
+          dismissRuleCard();
+        });
+      }
+
+      const ruleCardEl = document.getElementById("rule-card");
+      if (ruleCardEl) {
+        ruleCardEl.addEventListener("pointerenter", pauseRuleCardDecay_);
+        ruleCardEl.addEventListener("pointerleave", resumeRuleCardDecay_);
+        ruleCardEl.addEventListener("focusin", pauseRuleCardDecay_);
+        ruleCardEl.addEventListener("focusout", resumeRuleCardDecay_);
+      }
+
+      window.addEventListener("keydown", function (e) {
+        if (e && e.key === "Escape") {
+          const card = document.getElementById("rule-card");
+          if (
+            card &&
+            (card.classList.contains("visible") ||
+              card.style.display !== "none")
+          ) {
+            dismissRuleCard();
+          }
+        }
+      });
 
       let lastHandledCueTimestamp_ = null;
 
@@ -5065,7 +5559,12 @@
         }
         const payload = intentPayload.payload || {};
         const shouldDuck = Boolean(intentPayload.ducking || payload.ducking);
-        if (shouldDuck && !isCompanionMode_()) {
+        if (
+          shouldDuck &&
+          !isCompanionMode_() &&
+          (intentPayload.intent === "MUSIC_CUE" ||
+            intentPayload.intent === "SFX")
+        ) {
           const duckDuration =
             payload.duckingDurationMs ||
             intentPayload.duckingDurationMs ||
@@ -5093,21 +5592,61 @@
           if (!isCompanionMode_()) {
             activeMixer.triggerSfx(intentPayload.trackId || payload.trackTitle);
           }
-        } else if (
-          intentPayload.intent === "RULE_QUERY" &&
-          intentPayload.rule
-        ) {
-          const key = intentPayload.rule.toLowerCase();
-          const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
-          const matched = (matchedFromSearch && matchedFromSearch.entry) ||
-            DEFAULT_GLOSSARY[key] || {
-              id: "rule_" + key,
-              title: intentPayload.rule,
-              source: "Rule",
-              summary: "Matched table query: " + intentPayload.rule,
-              tags: key
-            };
-          showRuleCard_(matched, key);
+        } else if (intentPayload.intent === "RULE_QUERY") {
+          // Ignore pending local write snapshot with unresolved server timestamp or hasPendingWrites flag
+          if (
+            intentPayload.hasPendingWrites === true ||
+            intentPayload.triggeredAt === null
+          ) {
+            return;
+          }
+          const payload = intentPayload.payload || {};
+          const candidateTitle = payload.ruleTitle || intentPayload.rule || "";
+          const client = getLiveTabletopClient_();
+          const currentUid =
+            client && client.getCurrentUser && client.getCurrentUser()?.uid;
+          if (
+            (intentPayload.authorUid &&
+              currentUid &&
+              intentPayload.authorUid === currentUid &&
+              Date.now() - lastHandledRuleTimestamp_ < 5000) ||
+            (candidateTitle &&
+              candidateTitle === lastHandledRuleTitle_ &&
+              Date.now() - lastHandledRuleTimestamp_ < 5000)
+          ) {
+            return;
+          }
+
+          let rulingData = null;
+          if (payload.ruling || payload.ruleTitle) {
+            rulingData = normalizeRuling_({
+              ruleTitle: payload.ruleTitle || intentPayload.rule || "Ruling",
+              ruleId: payload.ruleId || intentPayload.rule || "rule_ruling",
+              summary: payload.summary || "",
+              ruling: payload.ruling || "",
+              citations: payload.citations || [],
+              confidence:
+                payload.ruleConfidence || payload.confidence || "exact"
+            });
+          } else if (intentPayload.rule) {
+            const key = intentPayload.rule.toLowerCase();
+            const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
+            const entry = (matchedFromSearch && matchedFromSearch.entry) ||
+              DEFAULT_GLOSSARY[key] || {
+                id: "rule_" + key,
+                title: intentPayload.rule,
+                source: "Rule",
+                summary: "Matched table query: " + intentPayload.rule,
+                tags: key
+              };
+            rulingData = normalizeRuling_(entry, intentPayload.rule);
+          }
+          if (rulingData) {
+            showRuleCard_(
+              rulingData,
+              intentPayload.rule || rulingData.ruleTitle || ""
+            );
+          }
         }
       }
 
@@ -5164,11 +5703,26 @@
         }
 
         try {
+          let isInitialSnap = true;
           audioCueUnsubscribe_ = client.subscribeToAudioCue(
             sessionDate,
             (cue) => {
               setFirestoreLiveState_(true);
               if (cue) {
+                if (isInitialSnap) {
+                  isInitialSnap = false;
+                  // If late-joining or reconnecting, ignore stale RULE_QUERY older than 60s
+                  if (cue.intent === "RULE_QUERY") {
+                    const ts = extractCueTimestamp_(cue);
+                    if (
+                      typeof ts === "number" &&
+                      ts > 1000000000000 &&
+                      Date.now() - ts > 60000
+                    ) {
+                      return;
+                    }
+                  }
+                }
                 handleAudioIntent_(cue);
               }
             },

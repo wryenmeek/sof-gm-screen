@@ -1,6 +1,6 @@
 # Sea of Fortune GM Screen (Dual-Engine Real-Time Tabletop)
 
-A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mixer**, server-isolated **Player Companion**, Google Workspace governance engine, edge Raspberry Pi 3-tier **Speech Chunk** classifier, and Cloud Firestore real-time tabletop engine built across Google Apps Script `HtmlService` and Firebase Hosting (`ADR-0001` through `ADR-0011`).
+A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mixer**, server-isolated **Player Companion**, Google Workspace governance engine, edge Raspberry Pi 3-tier **Speech Chunk** classifier, and Cloud Firestore real-time tabletop engine built across Google Apps Script `HtmlService` and Firebase Hosting (`ADR-0001` through `ADR-0012`).
 
 ---
 
@@ -28,9 +28,9 @@ A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mix
    - Pre-caches audio **Session Assets** into `IndexedDB` (`sof_audio_cache_v1`, 30-day LRU eviction) via direct Google Drive v3 `alt=media` bearer fetches.
    - Routes tracks across 3 Web Audio channels—Channel 1 (Ambience `0.18`), Channel 2 (Score `0.50` with 4-second linear **Mood Cue** crossfades), and Channel 3 (One-Shot SFX `0.85` with `-8dB` score ducking)—through a master `DynamicsCompressorNode`.
    - Persists mixer transitions to a `localStorage` write-ahead log (`sof_audio_timeline_<sessionDate>`) and co-flushes deduplicated events to `session_audio_timeline.json` on **Table Notes** saves.
-3. **Server-Isolated Player Companion & Push-to-Talk Rules Sniffer ([ADR-0008](docs/adr/0008-companion-isolation-and-os-dictation-fallback.md)):**
+3. **Server-Isolated Player Companion & Push-to-Talk Rules Sniffer ([ADR-0008](docs/adr/0008-companion-isolation-and-os-dictation-fallback.md), [ADR-0012](docs/adr/0012-client-side-rules-arbiter-firebase-ai-logic.md)):**
    - Serves `?view=companion` from `doGet(e)` with server-side scriptlet isolation so GM-only `#sidebar` and `#workspace` markup never ships to player smartphones, while guarding GM RPCs with `assertGmAccess_`.
-   - Loads the unified **Rules Glossary** into `rulesMiniSearch`, supporting native iOS/Android OS keyboard voice dictation (`#ptt-dictation-input`, 900ms debounce), 30-second auto-dismissing **Rule Cards**, and rate-limited crowdsourced feedback logging (`logRuleFeedback`) to `Rules_Helper_Feedback`.
+   - Executes voice and dictation queries across the **3-Tier Rules Lookup Ladder** (Tier 1 `rulesMiniSearch` <5ms fast-path → Tier 2 Gemini 2.5 Flash Conversational Rules Arbiter → Tier 3 offline glossary fallback), rendering interactive **Rule Cards** with citation pills, confidence badges, hover/focus-pausable 30-second decay, and dual feedback submission (Firestore `rules_feedback` and Google Sheets).
 4. **Zero-Token Google Workspace Governance ([ADR-0010](docs/adr/0010-workspace-governance-quorum-and-on-demand-promises.md)):**
    - **72-Hour Attendance Quorum (`auditCalendarQuorum`):** Runs Wednesdays at 12:00 PM against Saturday `"Dnd"` / `"Sea of Fortune"` Calendar events with a `0`-guest safeguard (`SKIPPED_NO_GUESTS`), `+14d` rescheduling when `< 3` confirm `YES` or a **Storyline Lock** player responds `NO`, and a `2d8` **Weather Hexflower** forecast injected inside managed `<!-- SOF_QUORUM_AUTOMATION:START/END -->` description markers.
    - **On-Demand Narrative Promise Extractor (`extractNarrativePromises`):** Triggered explicitly from the **Table Notes** header (`#extract-promises-btn`), parsing `table_notes.md` via `gemini-2.5-flash` (`responseSchema`) and deduplicating against open and completed Google Tasks across all pages.
@@ -44,6 +44,12 @@ A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mix
    - Supports 5-emoji live table reactions with Web Haptics (`navigator.vibrate`) and a 20-item sliding FIFO queue on `live/reactions`.
    - Edge Raspberry Pi classifier routes audio cues through a sub-35ms direct Firestore write with an automatic 800ms fallback ladder to the Apps Script HTTPS `doPost(e)` webhook.
    - Ensures zero-downtime offline play with a 100MB LRU `persistentLocalCache` and multi-tab synchronization.
+7. **Conversational Rules Arbiter & Multi-Device Broadcast ([ADR-0012](docs/adr/0012-client-side-rules-arbiter-firebase-ai-logic.md)):**
+   - Implements the **Rules Lookup Ladder**: Tier 1 (local RAM MiniSearch <5ms, zero token cost) → Tier 2 (cloud Firebase AI Logic / Gemini 2.5 Flash with 5e SRD system prompt and 5000ms timeout budget) → Tier 3 (offline keyword fallback).
+   - Resolves natural-language rules inquiries into structured rulings containing Rule Title, summary, detailed ruling, Rule Citations (e.g. `PHB p. 195`), and a Rule Confidence rating (`exact`, `interpretation`, `unsupported`).
+   - Disseminates resolved rulings across all active devices via real-time **Rules Broadcast** over Firestore `sessions/{sessionDate}/live/audio_cue`.
+   - Displays rulings on `#rule-card` featuring hover/focus-pausable 30-second decay timer, Escape key dismissal, and dual feedback submission (Firestore `rules_feedback` collection and Google Sheets).
+   - Strictly enforces ducking boundaries in `firestore.rules` and `Index.html` to prevent audio muting exploits during rules lookups.
 
 ---
 

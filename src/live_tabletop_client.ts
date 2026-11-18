@@ -30,6 +30,10 @@ import {
   type Auth,
   type User
 } from "firebase/auth";
+import {
+  ARBITER_CONFIDENCE_SCORE,
+  type ArbiterConfidence
+} from "./rules_arbiter_client";
 
 export const FIRESTORE_CACHE_SIZE_BYTES = 104857600; // 100 MB dedicated LRU cache
 
@@ -40,6 +44,15 @@ export interface ClaimResult {
   error?: string;
 }
 
+export interface RuleRulingBroadcast {
+  ruleTitle: string;
+  ruleId?: string;
+  summary: string;
+  ruling: string;
+  citations: string[];
+  confidence: ArbiterConfidence;
+}
+
 export interface AudioCuePayload {
   trackTitle?: string;
   ducking?: boolean;
@@ -47,6 +60,12 @@ export interface AudioCuePayload {
   duckingDurationMs?: number;
   confidence?: number;
   speechChunkId?: string;
+  ruleTitle?: string;
+  ruleId?: string;
+  summary?: string;
+  ruling?: string;
+  citations?: string[];
+  ruleConfidence?: ArbiterConfidence;
 }
 
 export interface AudioCueDocument {
@@ -61,6 +80,7 @@ export interface AudioCueDocument {
     | "seafaring";
   rule?: string | null;
   triggeredAt?: any;
+  authorUid?: string;
   source: "pi_vad_tier1" | "gemini_tier2" | "gm_manual_tier3" | "companion_ptt";
   payload?: AudioCuePayload;
 }
@@ -573,6 +593,35 @@ export class LiveTabletopClient {
       ...cue,
       triggeredAt: cue.triggeredAt ?? serverTimestamp()
     });
+  }
+
+  /**
+   * Broadcasts a resolved 5e Rules Arbiter ruling across the tabletop synchronization fabric.
+   * Dispatches a structured RULE_QUERY audio cue document to sessions/{sessionDate}/live/audio_cue.
+   */
+  public async broadcastRuleQuery(
+    sessionDate: string,
+    ruling: RuleRulingBroadcast,
+    source:
+      "companion_ptt" | "gm_manual_tier3" | "gemini_tier2" = "companion_ptt"
+  ): Promise<void> {
+    const cue: AudioCueDocument = {
+      intent: "RULE_QUERY",
+      mood: "exploration",
+      rule: ruling.ruleTitle,
+      source: source,
+      authorUid: this.getCurrentUser()?.uid || undefined,
+      payload: {
+        ruleTitle: ruling.ruleTitle,
+        ...(ruling.ruleId ? { ruleId: ruling.ruleId } : {}),
+        summary: ruling.summary,
+        ruling: ruling.ruling,
+        citations: ruling.citations,
+        ruleConfidence: ruling.confidence,
+        confidence: ARBITER_CONFIDENCE_SCORE[ruling.confidence] ?? 0.75
+      }
+    };
+    await this.publishAudioCue(sessionDate, cue);
   }
 
   /**

@@ -7,6 +7,11 @@ import {
   type CharacterRosterDoc,
   type ClaimResult
 } from "../../src/live_tabletop_client";
+import {
+  RulesArbiterClient,
+  type ArbiterRuleResponse,
+  type RulesArbiterResult
+} from "../../src/rules_arbiter_client";
 
 const cachedHtml = fs.readFileSync("Index.html", "utf8");
 const bodyMatch = cachedHtml.match(
@@ -254,6 +259,12 @@ export class MockLiveTabletopClient {
     return () => this.audioCueListeners.delete(cb);
   }
 
+  public emitCue(cue: any): void {
+    for (const listener of this.audioCueListeners) {
+      listener(cue);
+    }
+  }
+
   public subscribeToCombat(_sessionDate: string, cb: any): () => void {
     this.combatListeners.add(cb);
     return () => this.combatListeners.delete(cb);
@@ -278,6 +289,20 @@ export class MockLiveTabletopClient {
     return () => this.reactionsListeners.delete(cb);
   }
 
+  public broadcastRuleQueryCalls: Array<{
+    sessionDate: string;
+    ruling: any;
+    source?: string;
+  }> = [];
+
+  public async broadcastRuleQuery(
+    sessionDate: string,
+    ruling: any,
+    source: string = "companion_ptt"
+  ): Promise<void> {
+    this.broadcastRuleQueryCalls.push({ sessionDate, ruling, source });
+  }
+
   public async publishAudioCue(): Promise<void> {}
   public async updateCombat(): Promise<void> {}
   public async sendReaction(
@@ -297,8 +322,10 @@ export class MockLiveTabletopClient {
       cb(snap);
     }
   }
-  public async submitRuleFeedback(): Promise<string> {
-    return "mock_fb_id";
+  public feedbackHistory: any[] = [];
+  public async submitRuleFeedback(feedback: any): Promise<string> {
+    this.feedbackHistory.push(feedback);
+    return "mock_fb_" + Date.now();
   }
   public unsubscribeAll(): void {
     this.rosterListeners.clear();
@@ -308,6 +335,45 @@ export class MockLiveTabletopClient {
   }
   public destroy(): void {
     this.unsubscribeAll();
+  }
+}
+
+export class MockRulesArbiterClient {
+  public queryHistory: string[] = [];
+  public mockResponse?: ArbiterRuleResponse;
+  public mockResult?: RulesArbiterResult;
+  public delayMs: number = 0;
+
+  constructor(options?: {
+    mockResponse?: ArbiterRuleResponse;
+    mockResult?: RulesArbiterResult;
+    delayMs?: number;
+  }) {
+    if (options?.mockResponse) this.mockResponse = options.mockResponse;
+    if (options?.mockResult) this.mockResult = options.mockResult;
+    this.delayMs = options?.delayMs || 0;
+  }
+
+  public async queryRulesArbiter(query: string): Promise<RulesArbiterResult> {
+    this.queryHistory.push(query);
+    if (this.delayMs > 0) {
+      await new Promise((r) => setTimeout(r, this.delayMs));
+    }
+    if (this.mockResult) return this.mockResult;
+    if (this.mockResponse) {
+      return { success: true, data: this.mockResponse };
+    }
+    return {
+      success: true,
+      data: {
+        ruleTitle: query,
+        ruleId: query.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+        summary: `Ruling summary for ${query}`,
+        ruling: `Tactical mechanics ruling for ${query}`,
+        citations: ["PHB p. 195"],
+        confidence: "exact"
+      }
+    };
   }
 }
 
@@ -335,6 +401,8 @@ export interface ClientHarnessOptions {
   verifyGmKeyError?: string;
   initLiveTabletopClient?: boolean;
   liveTabletopClient?: LiveTabletopClient | MockLiveTabletopClient;
+  initRulesArbiterClient?: boolean;
+  rulesArbiterClient?: RulesArbiterClient | MockRulesArbiterClient;
   mockRoster?: CharacterRosterDoc[];
   mockUser?: { uid: string; isAnonymous?: boolean } | null;
   forceContentionForCharacterId?: string | null;
@@ -739,7 +807,10 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         renderFloatingReactionBubble: typeof renderFloatingReactionBubble_ !== "undefined" ? renderFloatingReactionBubble_ : undefined,
         initGmReactionsSubscription: typeof initGmReactionsSubscription_ !== "undefined" ? initGmReactionsSubscription_ : undefined,
         checkTurnAlert: typeof checkTurnAlert_ !== "undefined" ? checkTurnAlert_ : undefined,
-        triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined
+        triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined,
+        executeDictationQuery: typeof executeDictationQuery_ !== "undefined" ? executeDictationQuery_ : undefined,
+        broadcastRuleRuling: typeof broadcastRuleRuling_ !== "undefined" ? broadcastRuleRuling_ : undefined,
+        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined
       };
     `
   );
@@ -762,6 +833,19 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     ? LiveTabletopClient
     : MockLiveTabletopClient;
 
+  const rulesArbiterClient =
+    options.rulesArbiterClient ??
+    (options.initRulesArbiterClient
+      ? new RulesArbiterClient({ timeoutMs: 2000 })
+      : new MockRulesArbiterClient());
+
+  if (rulesArbiterClient) {
+    (window as any).rulesArbiterClient = rulesArbiterClient;
+  }
+  (window as any).RulesArbiterClient = options.initRulesArbiterClient
+    ? RulesArbiterClient
+    : MockRulesArbiterClient;
+
   const exported = fn(
     window,
     document,
@@ -775,6 +859,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   return {
     ...exported,
     liveTabletopClient,
+    rulesArbiterClient,
     mockLocalStorage,
     fetchSpy,
     idbStore,

@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { setupClientHarness } from "./helpers/client-harness";
+import {
+  setupClientHarness,
+  MockLiveTabletopClient
+} from "./helpers/client-harness";
 import {
   LiveTabletopClient,
   projectCombatPublic,
@@ -1004,6 +1007,206 @@ A resonant construct of bronze and coral.
       expect(client.reactionsStore[0].id).toBe("rx_2");
       expect(client.reactionsStore[19].id).toBe("rx_21_overflow");
       expect(client.reactionsStore[19].emoji).toBe("💀");
+    });
+
+    it("Ticket 03 / #48: #rule-card renders canonical Arbiter rulings with confidence and formatted citations", () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+
+      harness.showRuleCard({
+        ruleTitle: "Concentration in Water",
+        ruleId: "concentration_water",
+        summary: "Taking damage while swimming requires standard Con save.",
+        ruling:
+          "Environmental pressure or suffocation does not inherently break concentration unless damage is dealt, triggering the DC 10 / half damage save.",
+        citations: ["PHB p. 203", "SRD p. 101"],
+        confidence: "exact"
+      });
+
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Concentration in Water"
+      );
+      expect(document.getElementById("card-summary")!.textContent).toBe(
+        "Taking damage while swimming requires standard Con save."
+      );
+      expect(document.getElementById("card-ruling")!.textContent).toContain(
+        "DC 10 / half damage save"
+      );
+
+      const confidenceEl = document.getElementById("card-confidence")!;
+      expect(confidenceEl.textContent).toBe("exact");
+      expect(confidenceEl.getAttribute("data-confidence")).toBe("exact");
+
+      const citationsEl = document.getElementById("card-citations")!;
+      expect(citationsEl.children.length).toBe(2);
+      expect(citationsEl.children[0].textContent).toBe("PHB p. 203");
+      expect(citationsEl.children[1].textContent).toBe("SRD p. 101");
+    });
+
+    it("Ticket 03 / #48: submits player feedback with rule ID to Firestore rules_feedback collection", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "companion_user_42" }
+      });
+
+      harness.showRuleCard({
+        ruleTitle: "Opportunity Attacks with Reach",
+        ruleId: "reach_opportunity_attack",
+        summary: "Leaving reach triggers reaction attack.",
+        confidence: "exact"
+      });
+
+      const btnUp = document.getElementById("btn-up") as HTMLButtonElement;
+      btnUp.click();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const client = harness.liveTabletopClient as any;
+      expect(client.feedbackHistory.length).toBe(1);
+      expect(client.feedbackHistory[0]).toMatchObject({
+        ruleId: "reach_opportunity_attack",
+        isHelpful: true,
+        authorUid: "companion_user_42",
+        timestamp: expect.any(Number)
+      });
+      expect(
+        document.getElementById("rule-card")!.classList.contains("visible")
+      ).toBe(false);
+    });
+
+    it("Ticket 04 / #49: expands #rule-card modal with broadcast ruling details upon receiving incoming RULE_QUERY intent", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any,
+        viewMode: "companion"
+      });
+      harness.initLiveAudioCueSubscription("2026-10-31");
+
+      // Emit incoming RULE_QUERY cue with structured ruling payload
+      mockClient.emitCue({
+        intent: "RULE_QUERY",
+        mood: "exploration",
+        rule: "Underwater Concentration",
+        source: "companion_ptt",
+        payload: {
+          ruleTitle: "Underwater Concentration",
+          ruleId: "underwater_concentration",
+          summary: "Taking damage while swimming requires standard Con save.",
+          ruling: "DC 10 or half damage save required when submerged.",
+          confidence: 1.0,
+          ruleConfidence: "exact",
+          citations: ["PHB p. 203", "DMG p. 116"]
+        }
+      });
+
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Underwater Concentration"
+      );
+      expect(document.getElementById("card-summary")!.textContent).toBe(
+        "Taking damage while swimming requires standard Con save."
+      );
+      expect(document.getElementById("card-ruling")!.textContent).toBe(
+        "DC 10 or half damage save required when submerged."
+      );
+      const confEl = document.getElementById("card-confidence")!;
+      expect(confEl.textContent).toBe("exact");
+      expect(confEl.getAttribute("data-confidence")).toBe("exact");
+      const citationsEl = document.getElementById("card-citations")!;
+      expect(citationsEl.children.length).toBe(2);
+      expect(citationsEl.children[0].textContent).toBe("PHB p. 203");
+      expect(citationsEl.children[1].textContent).toBe("DMG p. 116");
+    });
+
+    it("Ticket 04 / #49: broadcasts resolved rules ruling to live/audio_cue when arbiter query resolves", async () => {
+      const mockClient = new MockLiveTabletopClient();
+      const mockArbiter = {
+        queryRulesArbiter: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            ruleTitle: "Cover and Reach",
+            ruleId: "cover_reach",
+            summary: "Cover bonus applies against reach melee attacks.",
+            ruling: "Creature with half cover gets +2 to AC.",
+            confidence: "interpretation",
+            citations: ["PHB p. 196"]
+          }
+        })
+      };
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any,
+        rulesArbiterClient: mockArbiter as any,
+        sessionDate: "2026-10-31"
+      });
+
+      // Query with broadcast enabled (default)
+      await harness.executeDictationQuery(
+        "Can I attack with reach through cover?",
+        true
+      );
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockClient.broadcastRuleQueryCalls.length).toBe(1);
+      expect(mockClient.broadcastRuleQueryCalls[0].sessionDate).toBe(
+        "2026-10-31"
+      );
+      expect(mockClient.broadcastRuleQueryCalls[0].ruling.ruleTitle).toBe(
+        "Cover and Reach"
+      );
+
+      // Query with broadcast disabled
+      mockClient.broadcastRuleQueryCalls = [];
+      await harness.executeDictationQuery(
+        "Can I attack with reach through cover?",
+        false
+      );
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockClient.broadcastRuleQueryCalls.length).toBe(0);
+    });
+
+    it("Ticket 04 / #49: LiveTabletopClient.broadcastRuleQuery formats and publishes RULE_QUERY cue document", async () => {
+      const mockPublish = vi.fn().mockResolvedValue(undefined);
+      const client = new LiveTabletopClient({
+        appName: `test-arbiter-${Date.now()}`
+      });
+      client.publishAudioCue = mockPublish;
+
+      await client.broadcastRuleQuery(
+        "2026-11-20",
+        {
+          ruleTitle: "Grappling Escape",
+          ruleId: "grapple_escape",
+          summary: "Contested Athletics vs Athletics or Acrobatics.",
+          ruling: "Target uses an action to break free with contest check.",
+          confidence: "exact",
+          citations: ["PHB p. 195"]
+        },
+        "companion_ptt"
+      );
+
+      expect(mockPublish).toHaveBeenCalledTimes(1);
+      expect(mockPublish).toHaveBeenCalledWith("2026-11-20", {
+        intent: "RULE_QUERY",
+        mood: "exploration",
+        rule: "Grappling Escape",
+        source: "companion_ptt",
+        payload: {
+          ruleTitle: "Grappling Escape",
+          ruleId: "grapple_escape",
+          summary: "Contested Athletics vs Athletics or Acrobatics.",
+          ruling: "Target uses an action to break free with contest check.",
+          citations: ["PHB p. 195"],
+          ruleConfidence: "exact",
+          confidence: 1.0
+        }
+      });
+
+      client.destroy();
     });
   });
 });

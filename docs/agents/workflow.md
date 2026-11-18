@@ -36,7 +36,7 @@ Read [`.agents/skills/grill-with-docs/SKILL.md`](../../.agents/skills/grill-with
 
 Read [`.agents/skills/to-spec/SKILL.md`](../../.agents/skills/to-spec/SKILL.md).
 
-- Propose the highest-level testing seams (`test/client.test.ts`, `test/server.test.ts`, and `test/firestore_rules.test.ts` for dual-engine Firestore rules) and confirm them with the user.
+- Propose the highest-level testing seams (`test/client.test.ts`, `test/server.test.ts`, `test/firestore_rules.test.ts` for dual-engine Firestore rules, and `test/rules_arbiter.test.ts` for Firebase AI Logic) and confirm them with the user.
 - Write the spec using the template in `to-spec/SKILL.md` (`Problem Statement`, `Solution`, `User Stories`, `Implementation Decisions`, `Testing Decisions`, `Out of Scope`), using `GLOSSARY.md` terms and omitting file paths or code snippets.
 - Publish the spec as a GitHub issue via `gh issue create --label "ready-for-agent"`.
 - **Completion criterion:** User confirms the testing seams, and the spec is published as a GitHub issue with its issue number recorded.

@@ -1208,5 +1208,21 @@ A resonant construct of bronze and coral.
 
       client.destroy();
     });
+
+    it("hydrates #gm-roster-list with default party characters when LiveTabletopClient is unavailable", () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm",
+        disableLiveTabletopClient: true
+      });
+
+      gmHarness.initGmRoster();
+
+      const rosterList = document.getElementById("gm-roster-list")!;
+      expect(rosterList.textContent).not.toContain("Loading roster...");
+      ["Pog", "Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+        expect(rosterList.textContent).toContain(name);
+      });
+      expect(rosterList.textContent).toContain("Unclaimed");
+    });
   });
 });

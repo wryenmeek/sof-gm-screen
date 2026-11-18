@@ -1,6 +1,7 @@
 <!doctype html>
 <html>
   <head>
+    <meta charset="utf-8" />
     <base target="_top" />
     <meta
       name="viewport"
@@ -114,6 +115,7 @@
       /* File List */
       #file-list {
         flex: 1;
+        min-height: 90px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
@@ -156,7 +158,7 @@
         padding: 10px 12px;
         display: flex;
         flex-direction: column;
-        height: 40%;
+        height: 25%;
         background: #0d131f;
       }
 
@@ -699,6 +701,13 @@
         background: #b91c1c;
       }
 
+      #gm-combat-tracker {
+        flex: 0 0 auto;
+        max-height: 210px;
+        overflow: visible;
+        border-top: 1px solid var(--border);
+      }
+
       .combat-tracker-header {
         display: flex;
         justify-content: space-between;
@@ -789,6 +798,7 @@
         border-radius: 3px;
         padding: 1px 4px;
         display: inline-block;
+        white-space: nowrap;
       }
 
       .visible-badge {
@@ -799,6 +809,7 @@
         border-radius: 3px;
         padding: 1px 4px;
         display: inline-block;
+        white-space: nowrap;
       }
 
       .player-combat-section {
@@ -1319,7 +1330,7 @@
                 <th>Combatant</th>
                 <th style="width: 52px">HP</th>
                 <th style="width: 32px">AC</th>
-                <th style="width: 44px">Vis</th>
+                <th style="width: 58px">Vis</th>
               </tr>
             </thead>
             <tbody id="gm-combat-list">
@@ -2338,6 +2349,9 @@
             window.location &&
             window.location.search) ||
           "";
+        if (search.includes("view=gm")) {
+          return false;
+        }
         return (
           (typeof window !== "undefined" &&
             window.INITIAL_VIEW_MODE === "companion") ||
@@ -4104,7 +4118,7 @@
           if (typeof window !== "undefined" && window.location) {
             const currentUrl = new URL(window.location.href);
             currentUrl.searchParams.set("gmKey", key);
-            currentUrl.searchParams.delete("view");
+            currentUrl.searchParams.set("view", "gm");
             destUrl = currentUrl.toString();
           }
         } catch (_e) {}
@@ -4115,6 +4129,7 @@
           try {
             const u = new URL(webAppBase);
             u.searchParams.set("gmKey", key);
+            u.searchParams.set("view", "gm");
             if (currentSessionDate) {
               u.searchParams.set("session", currentSessionDate);
             }
@@ -4138,6 +4153,11 @@
           inputKey.name = "gmKey";
           inputKey.value = key;
           form.appendChild(inputKey);
+          const inputView = document.createElement("input");
+          inputView.type = "hidden";
+          inputView.name = "view";
+          inputView.value = "gm";
+          form.appendChild(inputView);
           if (currentSessionDate) {
             const inputSession = document.createElement("input");
             inputSession.type = "hidden";
@@ -4262,7 +4282,16 @@
             currentRosterList = roster || [];
             updateGmRosterDom_(currentRosterList);
           });
+          return;
         }
+        currentRosterList = [
+          { characterId: "pog", name: "Pog", claimedBy: null },
+          { characterId: "vaelor", name: "Vaelor", claimedBy: null },
+          { characterId: "orca", name: "Orca", claimedBy: null },
+          { characterId: "fade", name: "Fade", claimedBy: null },
+          { characterId: "guest", name: "Guest", claimedBy: null }
+        ];
+        updateGmRosterDom_(currentRosterList);
       }
 
       function bootstrapCompanionRoster_() {
@@ -4649,6 +4678,8 @@
           if (gmTrackerEl && typeof gmTrackerEl.remove === "function") {
             gmTrackerEl.remove();
           }
+        } else {
+          document.body.classList.remove("companion-only-mode");
         }
         let savedIdentity = null;
         try {

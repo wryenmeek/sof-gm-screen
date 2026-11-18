@@ -142,7 +142,7 @@ content = content.replace(
 
 content = content.replace(
   /"<\?= typeof viewMode !== 'undefined' \? viewMode : 'gm' \?>";/,
-  'new URLSearchParams(window.location.search).get("view") || "companion";'
+  'new URLSearchParams(window.location.search).get("view") || (new URLSearchParams(window.location.search).get("gmKey") || sessionStorage.getItem("sof_gm_key") ? "gm" : "companion");'
 );
 
 content = content.replace(

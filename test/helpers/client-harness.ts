@@ -403,6 +403,7 @@ export interface ClientHarnessOptions {
   liveTabletopClient?: LiveTabletopClient | MockLiveTabletopClient;
   initRulesArbiterClient?: boolean;
   rulesArbiterClient?: RulesArbiterClient | MockRulesArbiterClient;
+  disableLiveTabletopClient?: boolean;
   mockRoster?: CharacterRosterDoc[];
   mockUser?: { uid: string; isAnonymous?: boolean } | null;
   forceContentionForCharacterId?: string | null;
@@ -766,6 +767,9 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         handleManualSave_: typeof handleManualSave_ !== "undefined" ? handleManualSave_ : undefined,
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
         initCompanionState: typeof initCompanionState_ !== "undefined" ? initCompanionState_ : undefined,
+        isCompanionMode: typeof isCompanionMode_ !== "undefined" ? isCompanionMode_ : undefined,
+        initGmRoster: typeof initGmRoster_ !== "undefined" ? initGmRoster_ : undefined,
+        navigateWithGmKey: typeof navigateWithGmKey_ !== "undefined" ? navigateWithGmKey_ : undefined,
         selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,
         togglePlayerIdentityModal: typeof togglePlayerIdentityModal !== "undefined" ? togglePlayerIdentityModal : undefined,
         closePlayerIdentityModal: typeof closePlayerIdentityModal !== "undefined" ? closePlayerIdentityModal : undefined,
@@ -815,23 +819,30 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     `
   );
 
-  const liveTabletopClient =
-    options.liveTabletopClient ??
-    (options.initLiveTabletopClient
-      ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
-      : new MockLiveTabletopClient({
-          sessionDate: options.sessionDate || "2026-10-31",
-          initialRoster: options.mockRoster,
-          currentUser: options.mockUser,
-          forceContentionForCharacterId: options.forceContentionForCharacterId
-        }));
+  const liveTabletopClient = options.disableLiveTabletopClient
+    ? null
+    : (options.liveTabletopClient ??
+      (options.initLiveTabletopClient
+        ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
+        : new MockLiveTabletopClient({
+            sessionDate: options.sessionDate || "2026-10-31",
+            initialRoster: options.mockRoster,
+            currentUser: options.mockUser,
+            forceContentionForCharacterId: options.forceContentionForCharacterId
+          })));
 
   if (liveTabletopClient) {
     (window as any).liveTabletopClient = liveTabletopClient;
+  } else {
+    delete (window as any).liveTabletopClient;
   }
-  (window as any).LiveTabletopClient = options.initLiveTabletopClient
-    ? LiveTabletopClient
-    : MockLiveTabletopClient;
+  if (options.disableLiveTabletopClient) {
+    delete (window as any).LiveTabletopClient;
+  } else {
+    (window as any).LiveTabletopClient = options.initLiveTabletopClient
+      ? LiveTabletopClient
+      : MockLiveTabletopClient;
+  }
 
   const rulesArbiterClient =
     options.rulesArbiterClient ??

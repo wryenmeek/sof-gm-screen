@@ -192,6 +192,35 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(gmError.style.display).toBe("block");
       expect(gmError.textContent).toContain("Invalid GM key");
     });
+
+    it("clears preset companion-only-mode when booting in GM mode and propagates view=gm on GM login redirect", () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm",
+        gmKey: "test-gm-key"
+      });
+
+      // Simulate static host markup presetting companion-only-mode on <body>
+      document.body.classList.add("companion-only-mode");
+      gmHarness.initCompanionState();
+
+      expect(document.body.classList.contains("companion-only-mode")).toBe(
+        false
+      );
+      expect(document.getElementById("sidebar")).not.toBeNull();
+      expect(document.getElementById("workspace")).not.toBeNull();
+
+      // Simulate unlocking GM screen from Companion via navigateWithGmKey
+      gmHarness.navigateWithGmKey("secret-gm-key");
+      const form = document.getElementById(
+        "gm-navigation-form"
+      ) as HTMLFormElement | null;
+      expect(form).not.toBeNull();
+      const viewInput = form!.querySelector(
+        'input[name="view"]'
+      ) as HTMLInputElement | null;
+      expect(viewInput).not.toBeNull();
+      expect(viewInput!.value).toBe("gm");
+    });
   });
 
   describe("Ticket 08: Mobile Push-to-Talk (PTT) Rules Sniffer & Feedback Logger", () => {

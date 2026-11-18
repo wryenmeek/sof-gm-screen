@@ -1,17 +1,19 @@
-# Sea of Fortune GM Screen (Google Apps Script Web App)
+# Sea of Fortune GM Screen (Dual-Engine Real-Time Tabletop)
 
-A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mixer**, server-isolated **Player Companion**, Google Workspace governance engine, and Raspberry Pi 3-tier **Speech Chunk** classifier built on Google Apps Script `HtmlService` (`ADR-0001` through `ADR-0010`).
+A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mixer**, server-isolated **Player Companion**, Google Workspace governance engine, edge Raspberry Pi 3-tier **Speech Chunk** classifier, and Cloud Firestore real-time tabletop engine built across Google Apps Script `HtmlService` and Firebase Hosting (`ADR-0001` through `ADR-0011`).
 
 ---
 
 ## Live Web App URLs
 
-- **Active Production URL (v3):**
+- **Firebase Hosting Production URL (Top-Level Origin):**
+  [https://sea-of-fortune-gm.web.app](https://sea-of-fortune-gm.web.app)
+- **Active Apps Script Production URL (v3):**
   [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec)
 - **GM Screen Session URL (with GM Key):**
-  [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?session=2026-10-31](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?session=2026-10-31) _(append `&gmKey=<URL-encoded secret>` when `SOF_GM_KEY` is set)_
+  [https://sea-of-fortune-gm.web.app?session=2026-10-31](https://sea-of-fortune-gm.web.app?session=2026-10-31) _(or append `&gmKey=<secret>` to Apps Script URL)_
 - **Player Companion URL (Mobile BYOD):**
-  [https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?view=companion&session=2026-10-31](https://script.google.com/macros/s/AKfycbwj8LTo82ezIm21xIfEi3mKwXKDoNMQgkif9w-raC3cRtF3Dtoy6863i-FLSAuxpe6Akw/exec?view=companion&session=2026-10-31)
+  [https://sea-of-fortune-gm.web.app?view=companion&session=2026-10-31](https://sea-of-fortune-gm.web.app?view=companion&session=2026-10-31)
 - **Script Editor:**
   [https://script.google.com/d/1WzexkauxHjTuUjkucL_EyxKjnqddDkdwvlPg7aqk2cZRLiEK3HjEXOad/edit](https://script.google.com/d/1WzexkauxHjTuUjkucL_EyxKjnqddDkdwvlPg7aqk2cZRLiEK3HjEXOad/edit)
 
@@ -35,6 +37,13 @@ A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mix
 5. **Edge Raspberry Pi Silero VAD Chunker & 3-Tier Classifier ([ADR-0009](docs/adr/0009-edge-pi-classifier-tiered-fallback.md)):**
    - Slices 16kHz mono PCM speech into `audio_chunks/chunk_<NNNN>_<start_ms>_<end_ms>.wav` and `session_audio_manifest.json` using Silero VAD (`scripts/rpi_vad_chunker.py`).
    - Classifies each **Speech Chunk** into an **Audio Cue** (`MUSIC_CUE`, `RULE_QUERY`, `BANTER`) via **Tier 1** (Pi local model `<= 1500ms` worker deadline) → **Tier 2** (Gemini 2.5 Flash HTTPS failover) → **Tier 3** (Manual **GM Screen** controls), delivering cues via Apps Script `doPost(e)` and `CacheService` (`sof_latest_audio_cue`).
+6. **Real-Time Tabletop Engine & Frictionless Companion ([ADR-0011](docs/adr/0011-dual-engine-real-time-tabletop-fabric.md)):**
+   - Integrates the Cloud Firestore Modular SDK v11 (`src/live_tabletop_client.ts`) over top-level Firebase Hosting (`sea-of-fortune-gm.web.app`), replacing 3-second polling with real-time `onSnapshot` listeners for sub-50ms mood cue changes and bi-directional combat tracking.
+   - Partitions private GM state (`combat_gm`) from public player projections (`combat`), enabling players to track initiative and health without exposing hidden monster statblocks or secret notes.
+   - Provides frictionless player onboarding via Anonymous Authentication (`signInAnonymously`) and single-owner character roster claiming (`characters/<id>`).
+   - Supports 5-emoji live table reactions with Web Haptics (`navigator.vibrate`) and a 20-item sliding FIFO queue on `live/reactions`.
+   - Edge Raspberry Pi classifier routes audio cues through a sub-35ms direct Firestore write with an automatic 800ms fallback ladder to the Apps Script HTTPS `doPost(e)` webhook.
+   - Ensures zero-downtime offline play with a 100MB LRU `persistentLocalCache` and multi-tab synchronization.
 
 ---
 
@@ -53,18 +62,22 @@ Configure these in **Project Settings → Script properties** inside the Google 
 | `SOF_CALENDAR_QUERY`                           | Optional       | Custom regex/substring for matching campaign events in `auditCalendarQuorum` (defaults to `/dnd\|sea of fortune/i`).                              |
 | `SOF_LOCKED_PLAYERS`                           | Optional       | Comma-separated emails or names of **Storyline Lock** players whose `NO` RSVP triggers a `+14d` reschedule.                                       |
 | `SOF_INGAME_DATE`                              | Optional       | Current in-game maritime calendar date injected alongside the `2d8` **Weather Hexflower** forecast.                                               |
+| `SOF_FIREBASE_CONFIG`                          | Optional       | JSON string override for frontend Firebase configuration (defaults to `robotic-casing-443602-g2`).                                                |
 | `SESSION_<YYYY-MM-DD>` / `SOF_RULE_FEEDBACK_*` | Auto-managed   | Cached session folder IDs and rolling rate-limit counters managed automatically by `Code.gs` and pruned by `pruneRuleFeedbackRateLimitsTrigger_`. |
 
 ### Raspberry Pi Environment Variables (`scripts/rpi_vad_chunker.py`)
 
-| Environment Variable   | CLI Flag Equivalency | Purpose                                                                                            |
-| ---------------------- | -------------------- | -------------------------------------------------------------------------------------------------- |
-| `SOF_SILERO_VAD_MODEL` | `--vad-model`        | Filesystem path to the Silero VAD `.onnx` model used for Stage 1 speech gating.                    |
-| `SOF_INTENT_MODEL`     | `--intent-model`     | Tier 1 local classifier command template (executed with a strict 1,500ms deadline).                |
-| `GEMINI_API_KEY`       | —                    | Tier 2 cloud fallback API key (`gemini-2.5-flash`) used when Tier 1 times out, fails, or is unset. |
-| `SOF_WEBHOOK_URL`      | `--webhook-url`      | Apps Script anonymous web app `/exec` URL receiving non-`BANTER` **Audio Cues** via HTTPS `POST`.  |
-| `SOF_GM_KEY`           | —                    | Shared secret sent with outbound webhook posts to authenticate against `doPost(e)`.                |
-| `SOF_ALSA_DEVICE`      | `--capture-device`   | ALSA capture interface name for live 16kHz mono PCM capture (defaults to `default`).               |
+| Environment Variable        | CLI Flag Equivalency      | Purpose                                                                                            |
+| --------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------- |
+| `SOF_SILERO_VAD_MODEL`      | `--vad-model`             | Filesystem path to the Silero VAD `.onnx` model used for Stage 1 speech gating.                    |
+| `SOF_INTENT_MODEL`          | `--intent-model`          | Tier 1 local classifier command template (executed with a strict 1,500ms deadline).                |
+| `GEMINI_API_KEY`            | —                         | Tier 2 cloud fallback API key (`gemini-2.5-flash`) used when Tier 1 times out, fails, or is unset. |
+| `SOF_WEBHOOK_URL`           | `--webhook-url`           | Apps Script anonymous web app `/exec` URL receiving non-`BANTER` **Audio Cues** via HTTPS `POST`.  |
+| `SOF_GM_KEY`                | —                         | Shared secret sent with outbound webhook posts to authenticate against `doPost(e)`.                |
+| `SOF_ALSA_DEVICE`           | `--capture-device`        | ALSA capture interface name for live 16kHz mono PCM capture (defaults to `default`).               |
+| `SOF_FIRESTORE_PROJECT_ID`  | `--firestore-project-id`  | Google Cloud Project ID for direct Firestore audio cue writes (`<35ms` fast-path delivery).        |
+| `SOF_FIRESTORE_CREDENTIALS` | `--firestore-credentials` | Path to service account credentials JSON for direct Firestore writes.                              |
+| `SOF_FIRESTORE_TIMEOUT_MS`  | `--firestore-timeout-ms`  | Timeout before falling back to Apps Script webhook ladder (defaults to `800ms`).                   |
 
 ---
 
@@ -76,6 +89,12 @@ npm run check
 
 # Run unit tests:
 npm test
+
+# Run Firestore security rules mock tests:
+npx vitest run test/firestore_rules.test.ts
+
+# Start local Firestore emulator (port 8088):
+firebase emulators:start --only firestore
 
 # Format all project files:
 npm run format

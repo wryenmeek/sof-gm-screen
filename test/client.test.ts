@@ -1225,4 +1225,152 @@ A resonant construct of bronze and coral.
       expect(rosterList.textContent).toContain("Unclaimed");
     });
   });
+
+  describe("Capability-Gated Browser Bundle & Runtime Firebase Config Guard (Ticket #54)", () => {
+    it("isFirebaseConfigured returns false when SOF_FIREBASE_CONFIG is absent, empty, or placeholder", () => {
+      const harness = setupClientHarness();
+      const isFirebaseConfigured = harness.isFirebaseConfigured;
+      expect(isFirebaseConfigured).toBeDefined();
+
+      delete (window as any).SOF_FIREBASE_CONFIG;
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = null;
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {};
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "",
+        projectId: "sof-test"
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "   ",
+        projectId: "sof-test"
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "demo-api-key",
+        projectId: "sof-test"
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyValidKey123",
+        projectId: ""
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyValidKey123",
+        projectId: "   "
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+    });
+
+    it("isFirebaseConfigured returns true when SOF_FIREBASE_CONFIG has valid apiKey and projectId", () => {
+      const harness = setupClientHarness();
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyValidKey123",
+        projectId: "sof-gm-screen",
+        authDomain: "sof-gm-screen.firebaseapp.com",
+        appId: "1:1234567890:web:abcdef"
+      };
+
+      expect(harness.isFirebaseConfigured()).toBe(true);
+    });
+
+    it("returns injected test doubles directly when available on window", () => {
+      const mockLive = { testLiveDouble: true };
+      const mockArbiter = { testArbiterDouble: true };
+
+      const harness = setupClientHarness();
+      (window as any).liveTabletopClient = mockLive;
+      (window as any).rulesArbiterClient = mockArbiter;
+
+      expect(harness.getOrCreateLiveTabletopClient()).toBe(mockLive);
+      expect(harness.getLiveTabletopClient()).toBe(mockLive);
+      expect(harness.getOrCreateRulesArbiterClient()).toBe(mockArbiter);
+    });
+
+    it("does not instantiate live clients and returns null when unconfigured without test doubles", () => {
+      const harness = setupClientHarness();
+      delete (window as any).liveTabletopClient;
+      delete (window as any).rulesArbiterClient;
+      delete (window as any).SOF_FIREBASE_CONFIG;
+
+      const liveConstructorSpy = vi.fn();
+      const arbiterConstructorSpy = vi.fn();
+      (window as any).LiveTabletopClient = liveConstructorSpy;
+      (window as any).RulesArbiterClient = arbiterConstructorSpy;
+
+      expect(harness.getOrCreateLiveTabletopClient()).toBeNull();
+      expect(harness.getLiveTabletopClient()).toBeNull();
+      expect(harness.getOrCreateRulesArbiterClient()).toBeNull();
+
+      expect(liveConstructorSpy).not.toHaveBeenCalled();
+      expect(arbiterConstructorSpy).not.toHaveBeenCalled();
+
+      // Placeholder apiKey explicitly rejected
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "demo-api-key",
+        projectId: "sof-gm-screen"
+      };
+
+      expect(harness.getOrCreateLiveTabletopClient()).toBeNull();
+      expect(harness.getLiveTabletopClient()).toBeNull();
+      expect(harness.getOrCreateRulesArbiterClient()).toBeNull();
+
+      expect(liveConstructorSpy).not.toHaveBeenCalled();
+      expect(arbiterConstructorSpy).not.toHaveBeenCalled();
+    });
+
+    it("instantiates live clients with SOF_FIREBASE_CONFIG and consolidates singletons when configured", () => {
+      const harness = setupClientHarness();
+      delete (window as any).liveTabletopClient;
+      delete (window as any).rulesArbiterClient;
+
+      const validConfig = {
+        apiKey: "AIzaSyLiveSecret999",
+        projectId: "sof-production-live",
+        authDomain: "sof-production-live.firebaseapp.com"
+      };
+      (window as any).SOF_FIREBASE_CONFIG = validConfig;
+
+      const mockLiveInstance = { id: "live-inst-1" };
+      const liveConstructorSpy = vi.fn().mockImplementation(function () {
+        return mockLiveInstance;
+      });
+      const mockArbiterInstance = { id: "arbiter-inst-1" };
+      const arbiterConstructorSpy = vi.fn().mockImplementation(function () {
+        return mockArbiterInstance;
+      });
+
+      (window as any).LiveTabletopClient = liveConstructorSpy;
+      (window as any).RulesArbiterClient = arbiterConstructorSpy;
+
+      const client1 = harness.getOrCreateLiveTabletopClient();
+      expect(client1).toBe(mockLiveInstance);
+      expect(liveConstructorSpy).toHaveBeenCalledTimes(1);
+      expect(liveConstructorSpy).toHaveBeenCalledWith({
+        firebaseConfig: validConfig
+      });
+
+      // Consolidated getter shares singleton and does not re-instantiate
+      const client2 = harness.getLiveTabletopClient();
+      expect(client2).toBe(mockLiveInstance);
+      expect(liveConstructorSpy).toHaveBeenCalledTimes(1);
+
+      const arbiterClient = harness.getOrCreateRulesArbiterClient();
+      expect(arbiterClient).toBe(mockArbiterInstance);
+      expect(arbiterConstructorSpy).toHaveBeenCalledTimes(1);
+      expect(arbiterConstructorSpy).toHaveBeenCalledWith({
+        firebaseConfig: validConfig
+      });
+    });
+  });
 });

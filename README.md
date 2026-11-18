@@ -71,6 +71,13 @@ Configure these in **Project Settings → Script properties** inside the Google 
 | `SOF_FIREBASE_CONFIG`                          | Optional       | JSON string override for frontend Firebase configuration (defaults to `robotic-casing-443602-g2`).                                                |
 | `SESSION_<YYYY-MM-DD>` / `SOF_RULE_FEEDBACK_*` | Auto-managed   | Cached session folder IDs and rolling rate-limit counters managed automatically by `Code.gs` and pruned by `pruneRuleFeedbackRateLimitsTrigger_`. |
 
+### Frontend Capability Gating (`window.SOF_FIREBASE_CONFIG`)
+
+The client runtime uses progressive capability gating (`isFirebaseConfigured_()`) to safely separate live dual-engine features from Cold Prep Archive operation:
+
+- **Configured State:** When `window.SOF_FIREBASE_CONFIG` is present with a valid, non-placeholder `apiKey` (explicitly rejecting `"demo-api-key"`) and a non-empty `projectId`, the frontend activates real-time multi-tab Firestore synchronisation, anonymous tabletop auth, and client-side Firebase AI Logic rules adjudication.
+- **Unconfigured / Cold Fallback:** If `window.SOF_FIREBASE_CONFIG` is undefined, null, or carries `"demo-api-key"`, `isFirebaseConfigured_()` returns `false`. Client getters (`getOrCreateLiveTabletopClient_()`, `getLiveTabletopClient_()`, `getOrCreateRulesArbiterClient_()`) return `null` instead of instantiating SDKs against dummy credentials. The screen seamlessly falls back to Cold Prep Archive mode (local character identity selection, 5-member canonical roster defaults, and Tier 3 local fuzzy rules lookup).
+
 ### Raspberry Pi Environment Variables (`scripts/rpi_vad_chunker.py`)
 
 | Environment Variable        | CLI Flag Equivalency      | Purpose                                                                                            |
@@ -90,6 +97,9 @@ Configure these in **Project Settings → Script properties** inside the Google 
 ## Local Development Workflow
 
 ```bash
+# Export static distribution and compile browser tabletop bundle:
+node scripts/export-static.js
+
 # Run the full automated verification suite (TypeScript, ESLint, Stylelint, Markdownlint, Prettier, Vitest, Knip, Artifacts):
 npm run check
 

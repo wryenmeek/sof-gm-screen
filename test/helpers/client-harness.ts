@@ -814,7 +814,11 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined,
         executeDictationQuery: typeof executeDictationQuery_ !== "undefined" ? executeDictationQuery_ : undefined,
         broadcastRuleRuling: typeof broadcastRuleRuling_ !== "undefined" ? broadcastRuleRuling_ : undefined,
-        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined
+        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined,
+        isFirebaseConfigured: typeof isFirebaseConfigured_ !== "undefined" ? isFirebaseConfigured_ : undefined,
+        getOrCreateLiveTabletopClient: typeof getOrCreateLiveTabletopClient_ !== "undefined" ? getOrCreateLiveTabletopClient_ : undefined,
+        getLiveTabletopClient: typeof getLiveTabletopClient_ !== "undefined" ? getLiveTabletopClient_ : undefined,
+        getOrCreateRulesArbiterClient: typeof getOrCreateRulesArbiterClient_ !== "undefined" ? getOrCreateRulesArbiterClient_ : undefined
       };
     `
   );

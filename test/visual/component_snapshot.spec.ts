@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import fs from "fs";
+import path from "path";
 
 function renderTemplateHtml(mode: "gm" | "companion"): string {
   const rawHtml = fs.readFileSync("Index.html", "utf8");
@@ -686,5 +687,43 @@ test.describe("Index.html Component Visual Snapshot Regression", () => {
     await page.evaluate(() => document.fonts.ready);
 
     await expect(page).toHaveScreenshot("mobile-companion-gm-login-modal.png");
+  });
+
+  test("12. Static Export Distribution: Browser Bundle Exports LiveTabletopClient & RulesArbiterClient (Ticket #54)", async ({
+    page
+  }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        consoleErrors.push(msg.text());
+      }
+    });
+    page.on("pageerror", (err) => {
+      consoleErrors.push(err.message);
+    });
+
+    const publicIndexPath = path.resolve("public", "index.html");
+    const publicBundlePath = path.resolve("public", "tabletop-bundle.js");
+    expect(fs.existsSync(publicIndexPath)).toBe(true);
+    expect(fs.existsSync(publicBundlePath)).toBe(true);
+
+    await page.goto("file://" + publicIndexPath, {
+      waitUntil: "domcontentloaded"
+    });
+
+    await page.waitForFunction(
+      () =>
+        typeof (window as any).LiveTabletopClient === "function" &&
+        typeof (window as any).RulesArbiterClient === "function"
+    );
+
+    const clientTypes = await page.evaluate(() => ({
+      liveTabletopType: typeof (window as any).LiveTabletopClient,
+      rulesArbiterType: typeof (window as any).RulesArbiterClient
+    }));
+
+    expect(clientTypes.liveTabletopType).toBe("function");
+    expect(clientTypes.rulesArbiterType).toBe("function");
+    expect(consoleErrors).toEqual([]);
   });
 });

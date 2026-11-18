@@ -9,6 +9,7 @@
     />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.min.js"></script>
+    <script src="tabletop-bundle.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -4348,15 +4349,45 @@
         highlightActivePlayerIdentity_();
       }
 
+      function isFirebaseConfigured_() {
+        if (typeof window === "undefined" || !window.SOF_FIREBASE_CONFIG) {
+          return false;
+        }
+        const config = window.SOF_FIREBASE_CONFIG;
+        if (!config.apiKey || typeof config.apiKey !== "string") {
+          return false;
+        }
+        const apiKey = config.apiKey.trim();
+        if (apiKey === "" || apiKey === "demo-api-key") {
+          return false;
+        }
+        if (
+          !config.projectId ||
+          typeof config.projectId !== "string" ||
+          config.projectId.trim() === ""
+        ) {
+          return false;
+        }
+        return true;
+      }
+
       function getOrCreateLiveTabletopClient_() {
         if (liveTabletopClient) return liveTabletopClient;
         if (typeof window !== "undefined" && window.liveTabletopClient) {
           liveTabletopClient = window.liveTabletopClient;
           return liveTabletopClient;
         }
-        if (typeof window !== "undefined" && window.LiveTabletopClient) {
+        if (!isFirebaseConfigured_()) {
+          return null;
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.LiveTabletopClient === "function"
+        ) {
           try {
-            liveTabletopClient = new window.LiveTabletopClient();
+            liveTabletopClient = new window.LiveTabletopClient({
+              firebaseConfig: window.SOF_FIREBASE_CONFIG
+            });
             return liveTabletopClient;
           } catch (_e) {
             console.warn("Could not instantiate LiveTabletopClient:", _e);
@@ -4949,9 +4980,17 @@
           return activeRulesArbiterClient_;
         }
         if (activeRulesArbiterClient_) return activeRulesArbiterClient_;
-        if (typeof window !== "undefined" && window.RulesArbiterClient) {
+        if (!isFirebaseConfigured_()) {
+          return null;
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.RulesArbiterClient === "function"
+        ) {
           try {
-            activeRulesArbiterClient_ = new window.RulesArbiterClient();
+            activeRulesArbiterClient_ = new window.RulesArbiterClient({
+              firebaseConfig: window.SOF_FIREBASE_CONFIG
+            });
             return activeRulesArbiterClient_;
           } catch (_e) {
             console.warn("Could not instantiate RulesArbiterClient:", _e);
@@ -5772,29 +5811,10 @@
       }
 
       let isFirestoreLive_ = false;
-      let liveTabletopClient_ = null;
       let audioCueUnsubscribe_ = null;
 
       function getLiveTabletopClient_() {
-        if (liveTabletopClient_) return liveTabletopClient_;
-        if (typeof window !== "undefined") {
-          if (window.liveTabletopClient) {
-            liveTabletopClient_ = window.liveTabletopClient;
-            return liveTabletopClient_;
-          }
-          if (typeof window.LiveTabletopClient === "function") {
-            try {
-              liveTabletopClient_ = new window.LiveTabletopClient();
-              return liveTabletopClient_;
-            } catch (err) {
-              console.warn(
-                "[LiveTabletop] Failed to instantiate LiveTabletopClient:",
-                err
-              );
-            }
-          }
-        }
-        return null;
+        return getOrCreateLiveTabletopClient_();
       }
 
       function setFirestoreLiveState_(isLive) {

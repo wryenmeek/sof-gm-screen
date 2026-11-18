@@ -18,4 +18,4 @@ Consult [`GLOSSARY.md`](GLOSSARY.md) for canonical vocabulary and [`CODING_STAND
 
 ## Quality Gate & Local Verification
 
-Run `npm run check` before committing changes or opening a PR; `.githooks/pre-commit` enforces this automatically. To verify the full `.github/workflows/ci.yml` pipeline locally in Docker, run `bash scripts/act/install-act.sh` (if `act` is missing) and `bash scripts/act/run-act.sh "push -j check"`.
+Run `npm run check` before committing changes or opening a PR; `.githooks/pre-commit` enforces this automatically. The test suite automatically verifies client UI, Apps Script VM mocks, and Cloud Firestore security rules (via the fast in-memory AST runner [`test/helpers/rules-mock-runner.ts`](test/helpers/rules-mock-runner.ts), requiring no external Java/Docker dependencies). To verify the full `.github/workflows/ci.yml` pipeline locally in Docker, run `bash scripts/act/install-act.sh` (if `act` is missing) and `bash scripts/act/run-act.sh "push -j check"`. For live Firestore emulator testing on port 8088, use `firebase emulators:start --only firestore`.

@@ -4,7 +4,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 ## Domain & Architecture Pointers
 
-- **Ubiquitous language:** [`GLOSSARY.md`](GLOSSARY.md). Name new functions, UI labels, test descriptions, and issue titles using the canonical terms (`Session`, `Session Asset`, `Shortcut Folder`, `GM Screen`, `Pinned Pane`, `Table Notes`, `Session Manifest`, `Encounter Dossier`, `Monster Statblock`, `Floor Map`, `Handout`, `Tabletop Mixer`, `Mood Cue`, `Audio Timeline Sidecar`, `Player Companion`, `Push-to-Talk Rules Sniffer`, `Rules Glossary`, `Rule Card`, `Speech Chunk`, `Audio Cue`, `Attendance Quorum`, `Storyline Lock`, `Weather Hexflower`, `Narrative Promise`).
+- **Ubiquitous language:** [`GLOSSARY.md`](GLOSSARY.md). Name new functions, UI labels, test descriptions, and issue titles using the canonical terms (`Session`, `Session Asset`, `Shortcut Folder`, `GM Screen`, `Pinned Pane`, `Table Notes`, `Session Manifest`, `Encounter Dossier`, `Monster Statblock`, `Floor Map`, `Handout`, `Tabletop Mixer`, `Mood Cue`, `Audio Timeline Sidecar`, `Player Companion`, `Push-to-Talk Rules Sniffer`, `Rules Glossary`, `Rule Card`, `Speech Chunk`, `Audio Cue`, `Attendance Quorum`, `Storyline Lock`, `Weather Hexflower`, `Narrative Promise`, `Table Reaction`, `Character Roster Claiming`).
 - **Architectural constraints (`docs/adr/`):**
   - [`0001-google-apps-script-architecture.md`](docs/adr/0001-google-apps-script-architecture.md) — Apps Script `HtmlService` + Google Drive backend.
   - [`0002-base64-asset-inlining.md`](docs/adr/0002-base64-asset-inlining.md) — _(Superseded by ADR-0004)_.
@@ -16,6 +16,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
   - [`0008-companion-isolation-and-os-dictation-fallback.md`](docs/adr/0008-companion-isolation-and-os-dictation-fallback.md) — Server-side `?view=companion` isolation, `assertGmAccess_` RPC token guard, and native OS dictation input.
   - [`0009-edge-pi-classifier-tiered-fallback.md`](docs/adr/0009-edge-pi-classifier-tiered-fallback.md) — Edge Raspberry Pi Silero VAD chunking and 3-tier classifier failover (`Tier 1 Pi Local <= 1500ms` → `Tier 2 Gemini 2.5 Flash` → `Tier 3 Manual UI`) via `doPost(e)` + `CacheService`.
   - [`0010-workspace-governance-quorum-and-on-demand-promises.md`](docs/adr/0010-workspace-governance-quorum-and-on-demand-promises.md) — Zero-token Wednesday Attendance Quorum audit (0-guest guard, 2d8 Weather Hexflower, managed Calendar markers) and on-demand Narrative Promise extraction with paginated Google Tasks deduplication.
+  - [`0011-dual-engine-real-time-tabletop-fabric.md`](docs/adr/0011-dual-engine-real-time-tabletop-fabric.md) — Dual-Engine Real-Time Tabletop Fabric combining Cloud Firestore (Modular SDK v11, sub-50ms mood cue and combat pub/sub, anonymous roster claiming, 20-reaction FIFO queue) with Google Apps Script campaign governance.
 
 ## Cross-Boundary Rules
 
@@ -42,3 +43,15 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 6. **Webhook JSON Error Contract (`Code.gs`):**
    Apps Script `doPost(e)` handlers must wrap execution in top-level try/catch blocks and return structured JSON responses via `ContentService.createTextOutput(...).setMimeType(ContentService.MimeType.JSON)` rather than permitting unhandled exceptions to generate Google HTML error pages, which break edge parsers.
+
+7. **Dual-Path Security Partition Invariant (`firestore.rules`):**
+   Enforce structural data boundaries between GM-private state and public player projections. The `combat_gm` collection is strictly restricted to authenticated GM credentials (`isGm()`) for unredacted monster stats and secrets. The `combat` projection collection is publicly readable by authenticated clients (`isAuthenticated()`), allowing players to view turn order and public HP without exposing hidden GM encounter dossiers.
+
+8. **Client-Side Offline Cache & Multi-Tab Discipline (`src/live_tabletop_client.ts`):**
+   Initialize Cloud Firestore with `persistentLocalCache` and multi-tab synchronization (`persistentMultipleTabManager` or `persistentSingleTabManager` fallback) with a strict 100MB LRU cache budget (`CACHE_SIZE_UNLIMITED` is prohibited). This guarantees offline resilience for table laptops and mobile companions while bounding IndexedDB growth.
+
+9. **Reaction Bounded FIFO Invariant (`src/live_tabletop_client.ts`, `firestore.rules`):**
+   The real-time table reaction feed on `live/reactions` must maintain a 20-item sliding FIFO queue per session. Clients submitting reactions via `appendReaction` trim excess entries to prevent unbounded document size, and security rules enforce required schema keys (`type`, `emoji`, `timestamp`, `sender`) and rate bounds.
+
+10. **Port Allocation Discipline (`firebase.json`, `scripts/`):**
+    Maintain dedicated, non-overlapping ports across local testing environments: Firebase Cloud Firestore Emulator operates on port `8088`, while the local Raspberry Pi webhook mock server listens on port `8080`.

@@ -294,7 +294,7 @@ sequenceDiagram
 
 ## 5. Architectural Decision Record Proposal (ADR-0011)
 
-### Status: Proposed
+### Status: Accepted (Formally ratified in [`ADR-0011`](adr/0011-dual-engine-real-time-tabletop-fabric.md) and merged in PR #40)
 
 ### Context
 
@@ -302,7 +302,7 @@ sequenceDiagram
 
 ### Decision
 
-Adopt a **Dual-Engine Architecture**:
+Adopt a **Dual-Engine Architecture** (ratified in full in [`docs/adr/0011-dual-engine-real-time-tabletop-fabric.md`](adr/0011-dual-engine-real-time-tabletop-fabric.md)):
 
 1. **Google Apps Script** remains the single source of truth for **Workspace Campaign Governance**: Google Calendar attendance quorum, Google Tasks narrative promises, Google Drive session asset folders, and Google Sheets feedback archiving.
 2. **Cloud Firestore & Firebase Hosting** serve as the **Live Tabletop Edge Engine**: real-time mood cue pub/sub, live combat tracker synchronization, anonymous player authentication, and top-level microphone access.
@@ -316,6 +316,8 @@ Adopt a **Dual-Engine Architecture**:
 ---
 
 ## 6. Phased Implementation Roadmap
+
+> **Status Update (PR #40):** Phase 1 (Real-Time Tabletop Sync) and Phase 2 (Frictionless Identity & Partitioned Security Rules) are **Fully Implemented & Merged** into `main`. Phases 3 and 4 remain scheduled for subsequent milestones.
 
 ```mermaid
 gantt

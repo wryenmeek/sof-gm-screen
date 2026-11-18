@@ -36,13 +36,18 @@
       "enforcement": "gate"
     },
     {
+      "pattern": "src/rules_arbiter_client.ts",
+      "required_skills": ["firebase-ai-logic-basics", "code-review", "tdd"],
+      "enforcement": "gate"
+    },
+    {
       "pattern": "src/**",
       "required_skills": ["code-review", "tdd"],
       "enforcement": "gate"
     },
     {
       "pattern": "firestore.rules",
-      "required_skills": ["code-review"],
+      "required_skills": ["code-review", "firebase-security-rules-auditor"],
       "enforcement": "gate"
     },
     {

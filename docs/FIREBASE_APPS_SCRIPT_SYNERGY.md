@@ -145,17 +145,19 @@ service cloud.firestore {
       allow write: if request.auth.token.email == "wryenmeek@gmail.com";
     }
 
-    // Live Combat & Audio Cues: Readable by all, writable by GM or Edge Pi service account
+    // Live Combat & Audio Cues: Readable by all; writable by GM, edge Pi, or tabletop client for RULE_QUERY
     match /sessions/{sessionDate}/live/{docId} {
       allow read: if request.auth != null;
-      allow write: if request.auth.token.email == "wryenmeek@gmail.com"
-                  || request.auth.token.firebase.sign_in_provider == "custom";
+      allow write: if isGm()
+                  || (docId == "audio_cue"
+                      && request.resource.data.intent == "RULE_QUERY"
+                      && request.resource.data.authorUid == request.auth.uid);
     }
 
     // Player Rule Card Feedback: Rate limited & attributed to authentic player UID
-    match /feedback/{feedbackId} {
+    match /rules_feedback/{feedbackId} {
       allow create: if request.auth != null
-                    && request.resource.data.userId == request.auth.uid;
+                    && request.resource.data.authorUid == request.auth.uid;
       allow update, delete: if false;
     }
   }
@@ -174,28 +176,46 @@ Current rule queries in the **Player Companion** use `MiniSearch` client-side fu
 
 #### Firebase Solution
 
-Leverage **Firebase AI Logic (Vertex AI for Firebase SDK)** with **Gemini 2.5 Flash**:
+Leverage **Firebase AI Logic (`@firebase/vertexai` SDK)** with **Gemini 2.5 Flash** and strict JSON schema enforcement ([ADR-0012](adr/0012-client-side-rules-arbiter-firebase-ai-logic.md)):
 
 ```javascript
-import { getVertexAI, getGenerativeModel } from "firebase/vertexai";
+import { getVertexAI, getGenerativeModel, SchemaType } from "firebase/vertexai";
 
 const vertexAI = getVertexAI();
 const rulesModel = getGenerativeModel(vertexAI, {
   model: "gemini-2.5-flash",
   generationConfig: {
     responseMimeType: "application/json",
-    temperature: 0.1
+    temperature: 0.1,
+    responseSchema: {
+      type: SchemaType.OBJECT,
+      properties: {
+        ruleTitle: { type: SchemaType.STRING },
+        ruleId: { type: SchemaType.STRING },
+        summary: { type: SchemaType.STRING },
+        ruling: { type: SchemaType.STRING },
+        citations: {
+          type: SchemaType.ARRAY,
+          items: { type: SchemaType.STRING }
+        },
+        confidence: {
+          type: SchemaType.STRING,
+          enum: ["exact", "interpretation", "unsupported"]
+        }
+      },
+      required: ["ruleTitle", "summary", "ruling", "citations", "confidence"]
+    }
   },
-  systemInstruction:
-    'You are the Sea of Fortune 5e Rules Arbiter. Analyze the player\'s voice query against 5e SRD rules.\nReturn a structured JSON with:\n{\n  "ruleCardId": "string (matching SRD card ID if applicable)",\n  "ruling": "concise 1-2 sentence ruling for the table",\n  "citation": "PHB/SRD reference",\n  "confidence": number\n}'
+  systemInstruction: RULES_ARBITER_SYSTEM_INSTRUCTION
 });
 ```
 
 #### Benefits
 
-- **Sub-Second Voice Resolution:** Gemini 2.5 Flash processes audio or transcripts in <800ms.
-- **Prompt Caching:** Static 5e SRD rules text is cached at 75% discount, keeping API cost negligible.
-- **Direct Rule Card Highlighting:** The model outputs the exact matching `ruleCardId`, prompting the **Player Companion** to immediately expand the canonical reference card with full text.
+- **Sub-Second Voice Resolution:** Gemini 2.5 Flash processes queries in 400–800ms directly in the client without serverless cold starts.
+- **Prompt Caching:** Static 5e SRD rules instructions are cached at a 75% discount, minimizing token costs.
+- **Authoritative Grounding:** Model outputs verified `citations` array with book and page references (e.g. `PHB p. 195`), along with a qualitative `confidence` badge (`exact`, `interpretation`, `unsupported`).
+- **Synchronized Tabletop Broadcast:** Resolving a ruling automatically broadcasts to `sessions/{date}/live/audio_cue`, expanding Rule Cards across all GM and player screens simultaneously.
 
 ---
 
@@ -317,21 +337,21 @@ Adopt a **Dual-Engine Architecture** (ratified in full in [`docs/adr/0011-dual-e
 
 ## 6. Phased Implementation Roadmap
 
-> **Status Update (PR #40):** Phase 1 (Real-Time Tabletop Sync) and Phase 2 (Frictionless Identity & Partitioned Security Rules) are **Fully Implemented & Merged** into `main`. Phases 3 and 4 remain scheduled for subsequent milestones.
+> **Status Update (PR #50):** Phase 1 (Real-Time Tabletop Sync), Phase 2 (Frictionless Identity & Partitioned Security Rules), and Phase 3 (Conversational Rules Arbiter via Firebase AI Logic / Gemini 2.5 Flash) are **Fully Implemented & Merged** into `main`. Phase 4 remains scheduled for subsequent milestones.
 
 ```mermaid
 gantt
     title Firebase & Apps Script Phased Roadmap
     dateFormat  YYYY-MM-DD
     section Phase 1: Real-Time Sync
-    Firestore Real-Time Audio Cue & Combat Sync   :active, p1_1, 2026-11-10, 5d
-    Deprecate 3000ms CacheService Polling Loop   :p1_2, after p1_1, 2d
+    Firestore Real-Time Audio Cue & Combat Sync   :done, p1_1, 2026-11-10, 5d
+    Deprecate 3000ms CacheService Polling Loop   :done, p1_2, after p1_1, 2d
     section Phase 2: Frictionless Identity
-    Anonymous Player Auth & QR Code Joining      :p2_1, after p1_2, 4d
-    Google Sign-In for GM with Custom Claims     :p2_2, after p2_1, 3d
+    Anonymous Player Auth & QR Code Joining      :done, p2_1, after p1_2, 4d
+    Google Sign-In for GM with Custom Claims     :done, p2_2, after p2_1, 3d
     section Phase 3: In-Game AI Logic
-    Gemini 2.5 Flash SRD Rules Arbiter          :p3_1, after p2_2, 5d
-    Structured JSON Output & Card Highlighting   :p3_2, after p3_1, 3d
+    Gemini 2.5 Flash SRD Rules Arbiter          :done, p3_1, after p2_2, 5d
+    Structured JSON Output & Card Highlighting   :done, p3_2, after p3_1, 3d
     section Phase 4: Dynamic Tuning & Telemetry
     Firebase Remote Config for Mixer & VAD       :p4_1, after p3_2, 3d
     Crashlytics Client Audio Telemetry           :p4_2, after p4_1, 3d

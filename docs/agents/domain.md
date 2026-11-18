@@ -25,9 +25,15 @@ How the engineering skills consume this repo's domain documentation and architec
 ├── src/
 │   └── live_tabletop_client.ts    # Cloud Firestore Modular SDK v11 tabletop sync client
 ├── validate_session_artifacts.py  # Pre-flight validator for HTML, MD, Python & RPC contracts
+├── .githooks/
+│   ├── pre-commit                 # Runs npm run check before commits
+│   └── commit-msg                 # Enforces Conventional Commits and Antigravity-Session-ID
 ├── .github/
 │   ├── copilot-instructions.md    # GitHub Copilot context pointer
-│   └── workflows/ci.yml           # Automated quality gate workflow
+│   ├── required-skills.json       # Maps paths to required agent skill receipts
+│   └── workflows/
+│       ├── ci.yml                 # Automated quality gate workflow
+│       └── verify-telemetry.yml   # Antigravity session telemetry & provenance pre-merge guard
 ├── scripts/
 │   ├── act/                       # Local GitHub Actions (act) runner helpers
 │   └── rpi_vad_chunker.py         # Raspberry Pi Silero VAD & 3-tier classifier (direct Firestore + webhook)

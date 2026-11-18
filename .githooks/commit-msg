@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Enforces Conventional Commits subject format and Antigravity-Session-ID trailer.
+set -euo pipefail
+
+MSG_FILE="${1:?Commit message file path required}"
+SUBJECT="$(head -n 1 "${MSG_FILE}")"
+
+if [[ ! "${SUBJECT}" =~ ^(Merge|Revert)\  ]]; then
+  CONVENTIONAL_RE='^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([a-zA-Z0-9_,./-]+\))?!?: .+'
+  if [[ ! "${SUBJECT}" =~ ${CONVENTIONAL_RE} ]]; then
+    echo "❌ [commit-msg] Commit subject must follow Conventional Commits (e.g., feat:, fix:, chore:, test:, refactor:)." >&2
+    echo "   Received: ${SUBJECT}" >&2
+    exit 1
+  fi
+fi
+
+if ! grep -qE '^Antigravity-Session-ID:[[:space:]]*[0-9a-fA-F-]{8,}' "${MSG_FILE}"; then
+  if [[ -n "${ANTIGRAVITY_SESSION_ID:-}" ]]; then
+    printf "\nAntigravity-Session-ID: %s\n" "${ANTIGRAVITY_SESSION_ID}" >> "${MSG_FILE}"
+    echo "ℹ️ [commit-msg] Auto-injected Antigravity-Session-ID trailer from environment."
+  else
+    echo "❌ [commit-msg] Missing required commit trailer: 'Antigravity-Session-ID: <session-uuid>'." >&2
+    exit 1
+  fi
+fi

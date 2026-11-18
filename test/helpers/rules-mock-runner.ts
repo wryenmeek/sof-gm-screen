@@ -257,7 +257,43 @@ export class MockFirestoreDatabase {
 
         if (liveDocId === "audio_cue") {
           if (op === "get") return this.isAuthenticated(auth);
-          return this.isGm(auth);
+          if (this.isGm(auth)) return true;
+          if (op === "create" || op === "update") {
+            if (!this.isAuthenticated(auth)) return false;
+            if (!incomingData) return false;
+            if (incomingData.intent !== "RULE_QUERY") return false;
+            const keys = Object.keys(incomingData);
+            const allowed = [
+              "intent",
+              "source",
+              "triggeredAt",
+              "rule",
+              "mood",
+              "confidence",
+              "payload"
+            ];
+            if (!keys.every((k) => allowed.includes(k))) return false;
+            if (!incomingData.source || typeof incomingData.source !== "string")
+              return false;
+            if (
+              incomingData.payload !== undefined &&
+              incomingData.payload !== null &&
+              (typeof incomingData.payload !== "object" ||
+                Array.isArray(incomingData.payload))
+            ) {
+              return false;
+            }
+            if (
+              incomingData.confidence !== undefined &&
+              incomingData.confidence !== null &&
+              typeof incomingData.confidence !== "number" &&
+              typeof incomingData.confidence !== "string"
+            ) {
+              return false;
+            }
+            return true;
+          }
+          return false;
         }
 
         if (liveDocId === "combat") {

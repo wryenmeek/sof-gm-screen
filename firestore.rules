@@ -115,10 +115,19 @@ service cloud.firestore {
       // LIVE TABLETOP SYNCHRONIZATION: live/{docId}
       // -----------------------------------------------------------------------
 
-      // 1. Audio Cue Document (Live Mood Transitions & Sound Effects)
+      // 1. Audio Cue Document (Live Mood Transitions, Sound Effects & Rules Arbiter Tabletop Broadcast)
       match /live/audio_cue {
         allow read: if isAuthenticated();
         allow write: if isGm();
+        allow create, update: if isAuthenticated() &&
+          request.resource.data.intent == 'RULE_QUERY' &&
+          request.resource.data.keys().hasAll(['intent', 'source']) &&
+          request.resource.data.keys().hasOnly(['intent', 'source', 'triggeredAt', 'rule', 'mood', 'confidence', 'payload']) &&
+          request.resource.data.source is string &&
+          (!('rule' in request.resource.data) || request.resource.data.rule == null || request.resource.data.rule is string) &&
+          (!('mood' in request.resource.data) || request.resource.data.mood == null || request.resource.data.mood is string) &&
+          (!('payload' in request.resource.data) || request.resource.data.payload == null || request.resource.data.payload is map) &&
+          (!('confidence' in request.resource.data) || request.resource.data.confidence == null || request.resource.data.confidence is number || request.resource.data.confidence is string);
       }
 
       // 2. Player-Safe Combat Projection (Initiative order, visible monsters)

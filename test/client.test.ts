@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { setupClientHarness } from "./helpers/client-harness";
+import {
+  setupClientHarness,
+  MockLiveTabletopClient
+} from "./helpers/client-harness";
 import {
   LiveTabletopClient,
   projectCombatPublic,
@@ -1072,6 +1075,138 @@ A resonant construct of bronze and coral.
       expect(
         document.getElementById("rule-card")!.classList.contains("visible")
       ).toBe(false);
+    });
+
+    it("Ticket 04 / #49: expands #rule-card modal with broadcast ruling details upon receiving incoming RULE_QUERY intent", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any,
+        viewMode: "companion"
+      });
+      harness.initLiveAudioCueSubscription("2026-10-31");
+
+      // Emit incoming RULE_QUERY cue with structured ruling payload
+      mockClient.emitCue({
+        intent: "RULE_QUERY",
+        mood: "exploration",
+        rule: "Underwater Concentration",
+        source: "companion_ptt",
+        payload: {
+          ruleTitle: "Underwater Concentration",
+          ruleId: "underwater_concentration",
+          summary: "Taking damage while swimming requires standard Con save.",
+          ruling: "DC 10 or half damage save required when submerged.",
+          confidence: 1.0,
+          ruleConfidence: "exact",
+          citations: ["PHB p. 203", "DMG p. 116"]
+        }
+      });
+
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Underwater Concentration"
+      );
+      expect(document.getElementById("card-summary")!.textContent).toBe(
+        "Taking damage while swimming requires standard Con save."
+      );
+      expect(document.getElementById("card-ruling")!.textContent).toBe(
+        "DC 10 or half damage save required when submerged."
+      );
+      const confEl = document.getElementById("card-confidence")!;
+      expect(confEl.textContent).toBe("exact");
+      expect(confEl.getAttribute("data-confidence")).toBe("exact");
+      const citationsEl = document.getElementById("card-citations")!;
+      expect(citationsEl.children.length).toBe(2);
+      expect(citationsEl.children[0].textContent).toBe("PHB p. 203");
+      expect(citationsEl.children[1].textContent).toBe("DMG p. 116");
+    });
+
+    it("Ticket 04 / #49: broadcasts resolved rules ruling to live/audio_cue when arbiter query resolves", async () => {
+      const mockClient = new MockLiveTabletopClient();
+      const mockArbiter = {
+        queryRulesArbiter: vi.fn().mockResolvedValue({
+          success: true,
+          data: {
+            ruleTitle: "Cover and Reach",
+            ruleId: "cover_reach",
+            summary: "Cover bonus applies against reach melee attacks.",
+            ruling: "Creature with half cover gets +2 to AC.",
+            confidence: "interpretation",
+            citations: ["PHB p. 196"]
+          }
+        })
+      };
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any,
+        rulesArbiterClient: mockArbiter as any,
+        sessionDate: "2026-10-31"
+      });
+
+      // Query with broadcast enabled (default)
+      await harness.executeDictationQuery(
+        "Can I attack with reach through cover?",
+        true
+      );
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockClient.broadcastRuleQueryCalls.length).toBe(1);
+      expect(mockClient.broadcastRuleQueryCalls[0].sessionDate).toBe(
+        "2026-10-31"
+      );
+      expect(mockClient.broadcastRuleQueryCalls[0].ruling.ruleTitle).toBe(
+        "Cover and Reach"
+      );
+
+      // Query with broadcast disabled
+      mockClient.broadcastRuleQueryCalls = [];
+      await harness.executeDictationQuery(
+        "Can I attack with reach through cover?",
+        false
+      );
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockClient.broadcastRuleQueryCalls.length).toBe(0);
+    });
+
+    it("Ticket 04 / #49: LiveTabletopClient.broadcastRuleQuery formats and publishes RULE_QUERY cue document", async () => {
+      const mockPublish = vi.fn().mockResolvedValue(undefined);
+      const client = new LiveTabletopClient({
+        appName: `test-arbiter-${Date.now()}`
+      });
+      client.publishAudioCue = mockPublish;
+
+      await client.broadcastRuleQuery(
+        "2026-11-20",
+        {
+          ruleTitle: "Grappling Escape",
+          ruleId: "grapple_escape",
+          summary: "Contested Athletics vs Athletics or Acrobatics.",
+          ruling: "Target uses an action to break free with contest check.",
+          confidence: "exact",
+          citations: ["PHB p. 195"]
+        },
+        "companion_ptt"
+      );
+
+      expect(mockPublish).toHaveBeenCalledTimes(1);
+      expect(mockPublish).toHaveBeenCalledWith("2026-11-20", {
+        intent: "RULE_QUERY",
+        mood: "exploration",
+        rule: "Grappling Escape",
+        source: "companion_ptt",
+        payload: {
+          ruleTitle: "Grappling Escape",
+          ruleId: "grapple_escape",
+          summary: "Contested Athletics vs Athletics or Acrobatics.",
+          ruling: "Target uses an action to break free with contest check.",
+          citations: ["PHB p. 195"],
+          ruleConfidence: "exact",
+          confidence: 1.0
+        }
+      });
+
+      client.destroy();
     });
   });
 });

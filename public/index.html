@@ -1810,15 +1810,40 @@
       aria-live="polite"
       aria-labelledby="card-title"
     >
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-        <h2 id="card-title" style="margin: 0; font-size: 1.15rem; color: var(--gold-light);">Rule Title</h2>
-        <span id="card-confidence" class="confidence-badge" style="display: none;"></span>
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 8px;
+        "
+      >
+        <h2
+          id="card-title"
+          style="margin: 0; font-size: 1.15rem; color: var(--gold-light)"
+        >
+          Rule Title
+        </h2>
+        <span
+          id="card-confidence"
+          class="confidence-badge"
+          style="display: none"
+        ></span>
       </div>
-      <div id="card-type" style="color: var(--cyan); font-size: 0.85rem; margin-top: 4px;">Mechanic</div>
-      <p id="card-summary" class="rule-summary" style="display: none;"></p>
-      <div id="card-ruling" class="rule-ruling" style="display: none;"></div>
-      <p id="card-text" style="display: none;"></p>
-      <div id="card-citations" class="rule-citations" style="display: none; margin: 8px 0; flex-wrap: wrap; gap: 6px;"></div>
+      <div
+        id="card-type"
+        style="color: var(--cyan); font-size: 0.85rem; margin-top: 4px"
+      >
+        Mechanic
+      </div>
+      <p id="card-summary" class="rule-summary" style="display: none"></p>
+      <div id="card-ruling" class="rule-ruling" style="display: none"></div>
+      <p id="card-text" style="display: none"></p>
+      <div
+        id="card-citations"
+        class="rule-citations"
+        style="display: none; margin: 8px 0; flex-wrap: wrap; gap: 6px"
+      ></div>
       <div style="display: flex; gap: 8px; margin-top: 12px">
         <button id="btn-up" class="primary">👍 Helpful</button>
         <button id="btn-down">👎 Irrelevant</button>
@@ -4775,6 +4800,8 @@
         window.renderFloatingReactionBubble = renderFloatingReactionBubble_;
         window.initGmReactionsSubscription = initGmReactionsSubscription_;
         window.initCombatTracker = initCombatTracker;
+        window.executeDictationQuery = executeDictationQuery_;
+        window.broadcastRuleRuling = broadcastRuleRuling_;
       }
 
       function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {
@@ -4910,9 +4937,29 @@
         return words.length >= 5;
       }
 
+      function broadcastRuleRuling_(ruling) {
+        if (!ruling) return;
+        const client = getLiveTabletopClient_();
+        const date =
+          typeof currentSessionDate === "string" && currentSessionDate
+            ? currentSessionDate
+            : "2026-10-31";
+        if (client && typeof client.broadcastRuleQuery === "function") {
+          client
+            .broadcastRuleQuery(
+              date,
+              ruling,
+              isCompanionMode_() ? "companion_ptt" : "gm_manual_tier3"
+            )
+            .catch(function (err) {
+              console.warn("Failed to broadcast ruling to tabletop:", err);
+            });
+        }
+      }
+
       let activeDictationSeq_ = 0;
 
-      function executeDictationQuery_(rawQuery) {
+      function executeDictationQuery_(rawQuery, broadcast = true) {
         const cleaned = String(rawQuery || "").trim();
         if (!cleaned) return;
         const seq = ++activeDictationSeq_;
@@ -4933,13 +4980,16 @@
         const arbiter = getOrCreateRulesArbiterClient_();
         if (arbiter && typeof arbiter.queryRulesArbiter === "function") {
           showPttStatus_("Consulting 5e Rules Arbiter (Gemini 2.5 Flash)...");
-          arbiter
+          return arbiter
             .queryRulesArbiter(cleaned)
             .then(function (result) {
               if (seq !== activeDictationSeq_) return;
               if (result && result.success && result.data) {
                 showRuleCard_(result.data, cleaned);
                 showPttStatus_(`✓ Rule resolved: ${result.data.ruleTitle}`);
+                if (broadcast) {
+                  broadcastRuleRuling_(result.data);
+                }
               } else if (result && result.isOffline) {
                 // Tier 3: Offline fallback to keyword search if available
                 const fallbackMatch = matchSpokenRuleQuery_(cleaned);
@@ -4956,6 +5006,7 @@
                   `No rule found for "${cleaned}". Try searching keywords above.`;
                 showPttStatus_(errMsg, true);
               }
+              return result;
             })
             .catch(function (err) {
               if (seq !== activeDictationSeq_) return;
@@ -5184,9 +5235,7 @@
             ruleCitations = ruleOrTitle.citations;
           }
           ruleSource =
-            (ruleConfidence
-              ? `Rules Arbiter (${ruleConfidence})`
-              : "") ||
+            (ruleConfidence ? `Rules Arbiter (${ruleConfidence})` : "") ||
             ruleOrTitle.source ||
             ruleOrTitle.type ||
             "Mechanic";
@@ -5501,21 +5550,37 @@
           if (!isCompanionMode_()) {
             activeMixer.triggerSfx(intentPayload.trackId || payload.trackTitle);
           }
-        } else if (
-          intentPayload.intent === "RULE_QUERY" &&
-          intentPayload.rule
-        ) {
-          const key = intentPayload.rule.toLowerCase();
-          const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
-          const matched = (matchedFromSearch && matchedFromSearch.entry) ||
-            DEFAULT_GLOSSARY[key] || {
-              id: "rule_" + key,
-              title: intentPayload.rule,
-              source: "Rule",
-              summary: "Matched table query: " + intentPayload.rule,
-              tags: key
+        } else if (intentPayload.intent === "RULE_QUERY") {
+          const payload = intentPayload.payload || {};
+          let rulingData = null;
+          if (payload.ruling || payload.ruleTitle) {
+            rulingData = {
+              ruleTitle: payload.ruleTitle || intentPayload.rule || "Ruling",
+              ruleId: payload.ruleId || intentPayload.rule || "rule_ruling",
+              summary: payload.summary || "",
+              ruling: payload.ruling || "",
+              citations: payload.citations || [],
+              confidence:
+                payload.ruleConfidence || payload.confidence || "exact"
             };
-          showRuleCard_(matched, key);
+          } else if (intentPayload.rule) {
+            const key = intentPayload.rule.toLowerCase();
+            const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
+            rulingData = (matchedFromSearch && matchedFromSearch.entry) ||
+              DEFAULT_GLOSSARY[key] || {
+                id: "rule_" + key,
+                title: intentPayload.rule,
+                source: "Rule",
+                summary: "Matched table query: " + intentPayload.rule,
+                tags: key
+              };
+          }
+          if (rulingData) {
+            showRuleCard_(
+              rulingData,
+              intentPayload.rule || rulingData.ruleTitle || ""
+            );
+          }
         }
       }
 

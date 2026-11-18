@@ -259,6 +259,12 @@ export class MockLiveTabletopClient {
     return () => this.audioCueListeners.delete(cb);
   }
 
+  public emitCue(cue: any): void {
+    for (const listener of this.audioCueListeners) {
+      listener(cue);
+    }
+  }
+
   public subscribeToCombat(_sessionDate: string, cb: any): () => void {
     this.combatListeners.add(cb);
     return () => this.combatListeners.delete(cb);
@@ -281,6 +287,20 @@ export class MockLiveTabletopClient {
     this.reactionsListeners.add(cb);
     cb({ recentReactions: [...this.reactionsStore], updatedAt: Date.now() });
     return () => this.reactionsListeners.delete(cb);
+  }
+
+  public broadcastRuleQueryCalls: Array<{
+    sessionDate: string;
+    ruling: any;
+    source?: string;
+  }> = [];
+
+  public async broadcastRuleQuery(
+    sessionDate: string,
+    ruling: any,
+    source: string = "companion_ptt"
+  ): Promise<void> {
+    this.broadcastRuleQueryCalls.push({ sessionDate, ruling, source });
   }
 
   public async publishAudioCue(): Promise<void> {}
@@ -787,7 +807,10 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         renderFloatingReactionBubble: typeof renderFloatingReactionBubble_ !== "undefined" ? renderFloatingReactionBubble_ : undefined,
         initGmReactionsSubscription: typeof initGmReactionsSubscription_ !== "undefined" ? initGmReactionsSubscription_ : undefined,
         checkTurnAlert: typeof checkTurnAlert_ !== "undefined" ? checkTurnAlert_ : undefined,
-        triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined
+        triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined,
+        executeDictationQuery: typeof executeDictationQuery_ !== "undefined" ? executeDictationQuery_ : undefined,
+        broadcastRuleRuling: typeof broadcastRuleRuling_ !== "undefined" ? broadcastRuleRuling_ : undefined,
+        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined
       };
     `
   );

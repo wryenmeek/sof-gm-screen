@@ -4710,6 +4710,8 @@
         window.renderFloatingReactionBubble = renderFloatingReactionBubble_;
         window.initGmReactionsSubscription = initGmReactionsSubscription_;
         window.initCombatTracker = initCombatTracker;
+        window.executeDictationQuery = executeDictationQuery_;
+        window.broadcastRuleRuling = broadcastRuleRuling_;
       }
 
       function loadDriveRulesGlossary_(sessionDate = currentSessionDate) {
@@ -4845,9 +4847,29 @@
         return words.length >= 5;
       }
 
+      function broadcastRuleRuling_(ruling) {
+        if (!ruling) return;
+        const client = getLiveTabletopClient_();
+        const date =
+          typeof currentSessionDate === "string" && currentSessionDate
+            ? currentSessionDate
+            : "2026-10-31";
+        if (client && typeof client.broadcastRuleQuery === "function") {
+          client
+            .broadcastRuleQuery(
+              date,
+              ruling,
+              isCompanionMode_() ? "companion_ptt" : "gm_manual_tier3"
+            )
+            .catch(function (err) {
+              console.warn("Failed to broadcast ruling to tabletop:", err);
+            });
+        }
+      }
+
       let activeDictationSeq_ = 0;
 
-      function executeDictationQuery_(rawQuery) {
+      function executeDictationQuery_(rawQuery, broadcast = true) {
         const cleaned = String(rawQuery || "").trim();
         if (!cleaned) return;
         const seq = ++activeDictationSeq_;
@@ -4868,13 +4890,16 @@
         const arbiter = getOrCreateRulesArbiterClient_();
         if (arbiter && typeof arbiter.queryRulesArbiter === "function") {
           showPttStatus_("Consulting 5e Rules Arbiter (Gemini 2.5 Flash)...");
-          arbiter
+          return arbiter
             .queryRulesArbiter(cleaned)
             .then(function (result) {
               if (seq !== activeDictationSeq_) return;
               if (result && result.success && result.data) {
                 showRuleCard_(result.data, cleaned);
                 showPttStatus_(`✓ Rule resolved: ${result.data.ruleTitle}`);
+                if (broadcast) {
+                  broadcastRuleRuling_(result.data);
+                }
               } else if (result && result.isOffline) {
                 // Tier 3: Offline fallback to keyword search if available
                 const fallbackMatch = matchSpokenRuleQuery_(cleaned);
@@ -4891,6 +4916,7 @@
                   `No rule found for "${cleaned}". Try searching keywords above.`;
                 showPttStatus_(errMsg, true);
               }
+              return result;
             })
             .catch(function (err) {
               if (seq !== activeDictationSeq_) return;
@@ -5434,21 +5460,37 @@
           if (!isCompanionMode_()) {
             activeMixer.triggerSfx(intentPayload.trackId || payload.trackTitle);
           }
-        } else if (
-          intentPayload.intent === "RULE_QUERY" &&
-          intentPayload.rule
-        ) {
-          const key = intentPayload.rule.toLowerCase();
-          const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
-          const matched = (matchedFromSearch && matchedFromSearch.entry) ||
-            DEFAULT_GLOSSARY[key] || {
-              id: "rule_" + key,
-              title: intentPayload.rule,
-              source: "Rule",
-              summary: "Matched table query: " + intentPayload.rule,
-              tags: key
+        } else if (intentPayload.intent === "RULE_QUERY") {
+          const payload = intentPayload.payload || {};
+          let rulingData = null;
+          if (payload.ruling || payload.ruleTitle) {
+            rulingData = {
+              ruleTitle: payload.ruleTitle || intentPayload.rule || "Ruling",
+              ruleId: payload.ruleId || intentPayload.rule || "rule_ruling",
+              summary: payload.summary || "",
+              ruling: payload.ruling || "",
+              citations: payload.citations || [],
+              confidence:
+                payload.ruleConfidence || payload.confidence || "exact"
             };
-          showRuleCard_(matched, key);
+          } else if (intentPayload.rule) {
+            const key = intentPayload.rule.toLowerCase();
+            const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
+            rulingData = (matchedFromSearch && matchedFromSearch.entry) ||
+              DEFAULT_GLOSSARY[key] || {
+                id: "rule_" + key,
+                title: intentPayload.rule,
+                source: "Rule",
+                summary: "Matched table query: " + intentPayload.rule,
+                tags: key
+              };
+          }
+          if (rulingData) {
+            showRuleCard_(
+              rulingData,
+              intentPayload.rule || rulingData.ruleTitle || ""
+            );
+          }
         }
       }
 

@@ -4396,23 +4396,71 @@
         return null;
       }
 
+      const CANONICAL_PARTY_ROSTER = [
+        { characterId: "pog", name: "Pog", claimedBy: null },
+        { characterId: "vaelor", name: "Vaelor", claimedBy: null },
+        { characterId: "orca", name: "Orca", claimedBy: null },
+        { characterId: "fade", name: "Fade", claimedBy: null },
+        { characterId: "guest", name: "Guest", claimedBy: null }
+      ];
+      let gmRosterUnsubscribe_ = null;
+
+      function mergeRosterWithCanonicalBaseline_(liveRoster) {
+        const canonical = CANONICAL_PARTY_ROSTER.map(function (c) {
+          return Object.assign({}, c);
+        });
+        if (
+          !liveRoster ||
+          !Array.isArray(liveRoster) ||
+          liveRoster.length === 0
+        ) {
+          return canonical;
+        }
+        const liveMap = new Map();
+        liveRoster.forEach(function (item) {
+          const id = (item.characterId || item.name || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          if (id) {
+            liveMap.set(id, item);
+          }
+        });
+
+        const merged = canonical.map(function (c) {
+          const live = liveMap.get(c.characterId);
+          if (live) {
+            liveMap.delete(c.characterId);
+            return Object.assign({}, c, live);
+          }
+          return c;
+        });
+
+        liveMap.forEach(function (extra) {
+          merged.push(extra);
+        });
+
+        return merged;
+      }
+
       function initGmRoster_() {
+        if (typeof gmRosterUnsubscribe_ === "function") {
+          gmRosterUnsubscribe_();
+          gmRosterUnsubscribe_ = null;
+        }
+        // Initial render: Always baseline five canonical party members as Unclaimed
+        currentRosterList = mergeRosterWithCanonicalBaseline_([]);
+        updateGmRosterDom_(currentRosterList);
+
         const client = getOrCreateLiveTabletopClient_();
         if (client && typeof client.subscribeToRoster === "function") {
-          client.subscribeToRoster(currentSessionDate, function (roster) {
-            currentRosterList = roster || [];
-            updateGmRosterDom_(currentRosterList);
-          });
-          return;
+          gmRosterUnsubscribe_ = client.subscribeToRoster(
+            currentSessionDate,
+            function (roster) {
+              currentRosterList = mergeRosterWithCanonicalBaseline_(roster);
+              updateGmRosterDom_(currentRosterList);
+            }
+          );
         }
-        currentRosterList = [
-          { characterId: "pog", name: "Pog", claimedBy: null },
-          { characterId: "vaelor", name: "Vaelor", claimedBy: null },
-          { characterId: "orca", name: "Orca", claimedBy: null },
-          { characterId: "fade", name: "Fade", claimedBy: null },
-          { characterId: "guest", name: "Guest", claimedBy: null }
-        ];
-        updateGmRosterDom_(currentRosterList);
       }
 
       function bootstrapCompanionRoster_() {
@@ -4586,13 +4634,9 @@
             }
           });
         }
-        if (!roster || roster.length === 0) {
-          container.innerHTML =
-            '<div class="roster-empty-hint" style="color: #64748b; font-size: 11px;">No characters in roster.</div>';
-          return;
-        }
+        const resolvedRoster = mergeRosterWithCanonicalBaseline_(roster);
         let html = "";
-        roster.forEach(function (char) {
+        resolvedRoster.forEach(function (char) {
           const isClaimed = !!char.claimedBy;
           const statusText = isClaimed
             ? "Claimed (" +
@@ -4719,10 +4763,20 @@
                 selectPlayerIdentity(target.name, target.id);
               } else if (result && result.code === "ALREADY_CLAIMED") {
                 handleClaimRaceLoss_(target.name, target.id);
+              } else {
+                console.warn(
+                  "[LiveTabletop] Switch failed with non-fatal code, falling back to local selection:",
+                  result && result.code
+                );
+                selectPlayerIdentity(target.name, target.id);
               }
             })
-            .catch(function (_err) {
-              handleClaimRaceLoss_(target.name, target.id);
+            .catch(function (err) {
+              console.warn(
+                "[LiveTabletop] Switch rejected, degrading to local identity selection:",
+                err
+              );
+              selectPlayerIdentity(target.name, target.id);
             });
         } else {
           executeCharacterClaim_(target.id, target.name);
@@ -4747,10 +4801,20 @@
               selectPlayerIdentity(charName, charId);
             } else if (result && result.code === "ALREADY_CLAIMED") {
               handleClaimRaceLoss_(charName, charId);
+            } else {
+              console.warn(
+                "[LiveTabletop] Claim failed with non-fatal code, falling back to local selection:",
+                result && result.code
+              );
+              selectPlayerIdentity(charName, charId);
             }
           })
-          .catch(function (_err) {
-            handleClaimRaceLoss_(charName, charId);
+          .catch(function (err) {
+            console.warn(
+              "[LiveTabletop] Claim rejected, degrading to local identity selection:",
+              err
+            );
+            selectPlayerIdentity(charName, charId);
           });
       }
 

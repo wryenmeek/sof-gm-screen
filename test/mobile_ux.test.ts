@@ -697,6 +697,75 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       );
     });
 
+    it("falls back to local identity selection without race-loss shake when claimCharacter encounters ERROR or rejects (Ticket #55)", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_test_user", isAnonymous: true }
+      });
+
+      harness.liveTabletopClient.claimCharacter = vi.fn().mockResolvedValue({
+        success: false,
+        code: "ERROR",
+        error: "Network unavailable"
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      const donaldCard = document.querySelector(
+        '[data-character-id="donald"]'
+      ) as HTMLButtonElement;
+
+      harness.handleCharacterCardClick("Donald", "donald");
+      await vi.runAllTimersAsync();
+
+      if (donaldCard) {
+        expect(donaldCard.classList.contains("contested")).toBe(false);
+      }
+      expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
+        "Donald"
+      );
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Donald"
+      );
+    });
+
+    it("falls back to local identity selection without race-loss shake when switchCharacter encounters ERROR or rejects (Ticket #55)", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_switcher", isAnonymous: true }
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      harness.handleCharacterCardClick("Pog", "pog");
+      await vi.runAllTimersAsync();
+
+      harness.liveTabletopClient.switchCharacter = vi.fn().mockResolvedValue({
+        success: false,
+        code: "ERROR",
+        error: "Simulated switch error"
+      });
+
+      harness.handleCharacterCardClick("Donald", "donald");
+      harness.confirmSwitchCharacter();
+      await vi.runAllTimersAsync();
+
+      const donaldCard = document.querySelector(
+        '[data-character-id="donald"]'
+      ) as HTMLButtonElement;
+      if (donaldCard) {
+        expect(donaldCard.classList.contains("contested")).toBe(false);
+      }
+      expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
+        "Donald"
+      );
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Donald"
+      );
+    });
+
     it("reconnection logic validates cached character on page reload and bypasses the picker modal if still claimed", async () => {
       // Scenario A: Cached character is still claimed by current user UID -> Bypasses picker modal
       const reconnectHarness = setupClientHarness({

@@ -1373,4 +1373,196 @@ A resonant construct of bronze and coral.
       });
     });
   });
+
+  describe("Progressive Fallback Hardening for Character Roster Claiming & GM Party Roster Seeding (Ticket #55)", () => {
+    describe("Character Claiming & Switching Fallbacks", () => {
+      it("falls back to selectPlayerIdentity without race-loss shake when claimCharacter returns code: ERROR", async () => {
+        const harness = setupClientHarness({ viewMode: "companion" });
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.claimCharacter = vi.fn().mockResolvedValue({
+          success: false,
+          code: "ERROR",
+          error: "Permission denied or network offline"
+        });
+
+        harness.executeCharacterClaim("pog", "Pog");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="pog"]');
+        expect(card?.classList.contains("contested")).toBe(false);
+
+        expect(localStorage.getItem("sof_player_identity")).toBe("Pog");
+        const playerTag = document.getElementById("player-tag");
+        expect(playerTag?.textContent).toContain("Pog");
+      });
+
+      it("falls back to selectPlayerIdentity without race-loss shake when claimCharacter rejects", async () => {
+        const harness = setupClientHarness({ viewMode: "companion" });
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.claimCharacter = vi
+          .fn()
+          .mockRejectedValue(new Error("Firestore unavailable"));
+
+        harness.executeCharacterClaim("vaelor", "Vaelor");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="vaelor"]');
+        expect(card?.classList.contains("contested")).toBe(false);
+
+        expect(localStorage.getItem("sof_player_identity")).toBe("Vaelor");
+        const playerTag = document.getElementById("player-tag");
+        expect(playerTag?.textContent).toContain("Vaelor");
+      });
+
+      it("triggers race-loss shake and rejection message when claimCharacter returns code: ALREADY_CLAIMED", async () => {
+        const harness = setupClientHarness({ viewMode: "companion" });
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.claimCharacter = vi.fn().mockResolvedValue({
+          success: false,
+          code: "ALREADY_CLAIMED"
+        });
+
+        harness.executeCharacterClaim("orca", "Orca");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="orca"]');
+        expect(card?.classList.contains("contested")).toBe(true);
+
+        const toast = document.querySelector(".toast-msg");
+        expect(toast?.textContent).toContain(
+          "Orca has just been claimed by another player."
+        );
+      });
+
+      it("falls back to selectPlayerIdentity when switchCharacter returns code: ERROR or rejects", async () => {
+        const harness = setupClientHarness({
+          viewMode: "companion",
+          initialLocalStorage: {
+            sof_claimed_character_2026_10_31: "pog",
+            sof_player_identity: "Pog"
+          }
+        });
+
+        (window as any).currentClaimedCharacterId = "pog";
+        (window as any).currentPlayerIdentity = "Pog";
+
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.switchCharacter = vi.fn().mockResolvedValue({
+          success: false,
+          code: "ERROR",
+          error: "Simulated switch error"
+        });
+
+        harness.handleCharacterCardClick("Fade", "fade");
+        harness.confirmSwitchCharacter();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="fade"]');
+        expect(card?.classList.contains("contested")).toBe(false);
+
+        expect(localStorage.getItem("sof_player_identity")).toBe("Fade");
+      });
+    });
+
+    describe("GM Party Roster Baseline Preservation & Listener Lifecycle", () => {
+      it("renders the 5 canonical party members as Unclaimed on init before snapshot arrival", () => {
+        const harness = setupClientHarness({ viewMode: "gm" });
+        harness.initGmRoster();
+
+        const rosterList = document.getElementById("gm-roster-list")!;
+        ["Pog", "Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+          expect(rosterList.textContent).toContain(name);
+        });
+        expect(rosterList.textContent).not.toContain(
+          "No characters in roster."
+        );
+      });
+
+      it("retains the 5 canonical party members as Unclaimed when subscribeRoster emits empty array []", () => {
+        let snapshotCallback: ((roster: any[]) => void) | null = null;
+        const mockUnsubscribe = vi.fn();
+        const mockLiveClient = {
+          subscribeToRoster: vi
+            .fn()
+            .mockImplementation((_date: string, cb: any) => {
+              snapshotCallback = cb;
+              return mockUnsubscribe;
+            })
+        };
+
+        const harness = setupClientHarness({
+          viewMode: "gm",
+          liveTabletopClient: mockLiveClient as any
+        });
+
+        harness.initGmRoster();
+
+        expect(snapshotCallback).not.toBeNull();
+        snapshotCallback!([]);
+
+        const rosterList = document.getElementById("gm-roster-list")!;
+        expect(rosterList.textContent).not.toContain(
+          "No characters in roster."
+        );
+        ["Pog", "Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+          expect(rosterList.textContent).toContain(name);
+        });
+      });
+
+      it("merges partial snapshots preserving remaining canonical party members as Unclaimed", () => {
+        let snapshotCallback: ((roster: any[]) => void) | null = null;
+        const mockLiveClient = {
+          subscribeToRoster: vi
+            .fn()
+            .mockImplementation((_date: string, cb: any) => {
+              snapshotCallback = cb;
+              return vi.fn();
+            })
+        };
+
+        const harness = setupClientHarness({
+          viewMode: "gm",
+          liveTabletopClient: mockLiveClient as any
+        });
+
+        harness.initGmRoster();
+
+        snapshotCallback!([
+          { characterId: "pog", name: "Pog", claimedBy: "player_pog_uid" }
+        ]);
+
+        const rosterList = document.getElementById("gm-roster-list")!;
+        expect(rosterList.textContent).toContain("Pog");
+        expect(rosterList.textContent).toContain("Claimed (player_p...");
+
+        ["Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+          expect(rosterList.textContent).toContain(name);
+        });
+      });
+
+      it("unsubscribes prior gmRoster listener on re-invocation", () => {
+        const mockUnsubscribe = vi.fn();
+        const mockLiveClient = {
+          subscribeToRoster: vi.fn().mockReturnValue(mockUnsubscribe)
+        };
+
+        const harness = setupClientHarness({
+          viewMode: "gm",
+          liveTabletopClient: mockLiveClient as any
+        });
+
+        harness.initGmRoster();
+        expect(mockLiveClient.subscribeToRoster).toHaveBeenCalledTimes(1);
+        expect(mockUnsubscribe).not.toHaveBeenCalled();
+
+        harness.initGmRoster();
+        expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+        expect(mockLiveClient.subscribeToRoster).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
 });

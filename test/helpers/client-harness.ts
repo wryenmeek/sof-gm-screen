@@ -818,7 +818,10 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         isFirebaseConfigured: typeof isFirebaseConfigured_ !== "undefined" ? isFirebaseConfigured_ : undefined,
         getOrCreateLiveTabletopClient: typeof getOrCreateLiveTabletopClient_ !== "undefined" ? getOrCreateLiveTabletopClient_ : undefined,
         getLiveTabletopClient: typeof getLiveTabletopClient_ !== "undefined" ? getLiveTabletopClient_ : undefined,
-        getOrCreateRulesArbiterClient: typeof getOrCreateRulesArbiterClient_ !== "undefined" ? getOrCreateRulesArbiterClient_ : undefined
+        getOrCreateRulesArbiterClient: typeof getOrCreateRulesArbiterClient_ !== "undefined" ? getOrCreateRulesArbiterClient_ : undefined,
+        executeCharacterClaim: typeof executeCharacterClaim_ !== "undefined" ? executeCharacterClaim_ : undefined,
+        getGmRosterUnsubscribe: () => typeof gmRosterUnsubscribe_ !== "undefined" ? gmRosterUnsubscribe_ : null,
+        mergeRosterWithCanonicalBaseline: typeof mergeRosterWithCanonicalBaseline_ !== "undefined" ? mergeRosterWithCanonicalBaseline_ : undefined
       };
     `
   );

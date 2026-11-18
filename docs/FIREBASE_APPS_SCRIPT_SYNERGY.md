@@ -350,11 +350,13 @@ gantt
 2. Replace `localStorage` player tag with cryptographically verifiable character claim.
 3. Deploy declarative Firestore Security Rules protecting GM encounter dossiers.
 
-### Phase 3: Conversational Rules Arbiter (Firebase AI Logic)
+### Phase 3: Conversational Rules Arbiter (Firebase AI Logic) — Completed (ADR-0012)
 
-1. Integrate Vertex AI for Firebase SDK in `Index.html`.
-2. Bind Push-to-Talk dictation output to Gemini 2.5 Flash with 5e SRD system prompt.
-3. Return structured JSON with automatic rule card modal expansion.
+1. Implemented client-side `RulesArbiterClient` (`src/rules_arbiter_client.ts`) using Firebase AI Logic (`@firebase/vertexai` / `gemini-2.5-flash`) with structured JSON schema (`ARBITER_RULE_RESPONSE_SCHEMA`) and strict 5e SRD system prompt.
+2. Integrated 3-Tier Rules Lookup Ladder in `Index.html`: Tier 1 (local RAM MiniSearch <5ms, zero token cost) → Tier 2 (Gemini 2.5 Flash Arbiter with 5000ms timeout budget) → Tier 3 (offline glossary fallback).
+3. Connected Push-to-Talk and keyboard dictation to automatically resolve natural-language tabletop rules inquiries and format interactive Rule Cards with Rule Confidence badges and Rule Citations pills.
+4. Implemented real-time tabletop rules broadcast via Cloud Firestore `sessions/{date}/live/audio_cue`, synchronizing modal rulings across GM Screen and Player Companion screens simultaneously.
+5. Hardened `firestore.rules` and `Index.html` to eliminate ducking injection exploits, enforce author UID ownership, and persist player feedback to `rules_feedback`. Details in [ADR-0012](adr/0012-client-side-rules-arbiter-firebase-ai-logic.md).
 
 ### Phase 4: Dynamic Table Tuning (Remote Config & Telemetry)
 

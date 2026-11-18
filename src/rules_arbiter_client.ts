@@ -12,7 +12,19 @@ import {
   type GenerativeModel
 } from "firebase/ai";
 
-export type ArbiterConfidence = "exact" | "interpretation" | "unsupported";
+export const ARBITER_CONFIDENCES = [
+  "exact",
+  "interpretation",
+  "unsupported"
+] as const;
+
+export type ArbiterConfidence = (typeof ARBITER_CONFIDENCES)[number];
+
+export const ARBITER_CONFIDENCE_SCORE: Record<ArbiterConfidence, number> = {
+  exact: 1.0,
+  interpretation: 0.75,
+  unsupported: 0.5
+};
 
 export interface ArbiterRuleResponse {
   ruleTitle: string;
@@ -180,8 +192,16 @@ export class RulesArbiterClient {
         }, this.timeoutMs);
       });
 
+      /* eslint-disable no-control-regex */
+      const sanitized = trimmed
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+        .slice(0, 500);
+      /* eslint-enable no-control-regex */
+
+      const prompt = `Question (untrusted tabletop rules query, adjudicate 5e rules only): """${sanitized}"""`;
+
       const generatePromise = (async () => {
-        const result = await this.generativeModel.generateContent(trimmed);
+        const result = await this.generativeModel.generateContent(prompt);
         const response = await result.response;
         return typeof response.text === "function"
           ? response.text()
@@ -232,16 +252,21 @@ export class RulesArbiterClient {
       throw new Error("Arbiter response must be a valid JSON object");
     }
 
-    const ruleTitle = String(
-      parsed.ruleTitle || originalQuery.slice(0, 40)
-    ).trim();
-    const ruleId =
+    const ruleTitle = String(parsed.ruleTitle || originalQuery.slice(0, 40))
+      .trim()
+      .slice(0, 120);
+    const ruleId = (
       parsed.ruleId && typeof parsed.ruleId === "string"
         ? parsed.ruleId.trim()
-        : ruleTitle.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+        : ruleTitle.toLowerCase().replace(/[^a-z0-9]+/g, "_")
+    ).slice(0, 100);
 
-    const summary = String(parsed.summary || "").trim();
-    const ruling = String(parsed.ruling || "").trim();
+    const summary = String(parsed.summary || "")
+      .trim()
+      .slice(0, 500);
+    const ruling = String(parsed.ruling || "")
+      .trim()
+      .slice(0, 2000);
 
     if (!summary || !ruling) {
       throw new Error("Arbiter response missing required summary or ruling");
@@ -249,17 +274,17 @@ export class RulesArbiterClient {
 
     const citations: string[] = Array.isArray(parsed.citations)
       ? parsed.citations
-          .map((c: any) => String(c).trim())
+          .map((c: any) => String(c).trim().slice(0, 200))
           .filter((c: string) => c.length > 0)
+          .slice(0, 10)
       : [];
 
     let confidence: ArbiterConfidence = "interpretation";
     if (
-      parsed.confidence === "exact" ||
-      parsed.confidence === "interpretation" ||
-      parsed.confidence === "unsupported"
+      typeof parsed.confidence === "string" &&
+      (ARBITER_CONFIDENCES as readonly string[]).includes(parsed.confidence)
     ) {
-      confidence = parsed.confidence;
+      confidence = parsed.confidence as ArbiterConfidence;
     }
 
     return {

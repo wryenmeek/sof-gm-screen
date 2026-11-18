@@ -51,7 +51,7 @@ describe("RulesArbiterClient (Firebase AI Logic)", () => {
     );
 
     expect(mockModel.generateContent).toHaveBeenCalledWith(
-      "Can a rogue sneak attack while falling?"
+      'Question (untrusted tabletop rules query, adjudicate 5e rules only): """Can a rogue sneak attack while falling?"""'
     );
     expect(result.success).toBe(true);
     expect(result.data).toEqual(expectedResponse);
@@ -306,5 +306,75 @@ describe("RulesArbiterClient (Firebase AI Logic)", () => {
     expect(RULES_ARBITER_SYSTEM_INSTRUCTION).toContain("5e Rules Arbiter");
     expect(RULES_ARBITER_SYSTEM_INSTRUCTION).toContain("SRD");
     expect(RULES_ARBITER_SYSTEM_INSTRUCTION).toContain("confidence");
+  });
+
+  it("sanitizes input prompt by stripping control characters and clamping query length to 500 characters", async () => {
+    const mockModel = {
+      generateContent: vi.fn().mockResolvedValue({
+        response: {
+          text: () =>
+            JSON.stringify({
+              ruleTitle: "Grappling",
+              summary: "Grapple rules",
+              ruling: "Athletics contest",
+              citations: ["PHB p. 195"],
+              confidence: "exact"
+            })
+        }
+      })
+    };
+    const client = new RulesArbiterClient({ generativeModel: mockModel });
+    const longQuery = "a".repeat(600) + "\x00\x1F";
+    await client.queryRulesArbiter(longQuery);
+
+    const callArg = mockModel.generateContent.mock.calls[0][0] as string;
+    expect(callArg).not.toContain("\x00");
+    expect(callArg).not.toContain("\x1F");
+    expect(callArg.length).toBeLessThan(650);
+  });
+
+  it("enforces output bounds on ruleTitle, summary, ruling, and citations", async () => {
+    const oversizedPayload = {
+      ruleTitle: "T".repeat(200),
+      summary: "S".repeat(1000),
+      ruling: "R".repeat(3000),
+      citations: Array.from(
+        { length: 20 },
+        (_, i) => `Citation ${i} ` + "C".repeat(300)
+      ),
+      confidence: "exact"
+    };
+
+    const mockModel = {
+      generateContent: vi.fn().mockResolvedValue({
+        response: {
+          text: () => JSON.stringify(oversizedPayload)
+        }
+      })
+    };
+    const client = new RulesArbiterClient({ generativeModel: mockModel });
+    const result = await client.queryRulesArbiter("Oversized test query");
+
+    expect(result.success).toBe(true);
+    expect(result.data?.ruleTitle.length).toBeLessThanOrEqual(120);
+    expect(result.data?.summary.length).toBeLessThanOrEqual(500);
+    expect(result.data?.ruling.length).toBeLessThanOrEqual(2000);
+    expect(result.data?.citations.length).toBeLessThanOrEqual(10);
+    result.data?.citations.forEach((c) => {
+      expect(c.length).toBeLessThanOrEqual(200);
+    });
+  });
+
+  it("exports ARBITER_CONFIDENCES and ARBITER_CONFIDENCE_SCORE mapping correctly", async () => {
+    const { ARBITER_CONFIDENCES, ARBITER_CONFIDENCE_SCORE } =
+      await import("../src/rules_arbiter_client");
+    expect(ARBITER_CONFIDENCES).toEqual([
+      "exact",
+      "interpretation",
+      "unsupported"
+    ]);
+    expect(ARBITER_CONFIDENCE_SCORE.exact).toBe(1.0);
+    expect(ARBITER_CONFIDENCE_SCORE.interpretation).toBe(0.75);
+    expect(ARBITER_CONFIDENCE_SCORE.unsupported).toBe(0.5);
   });
 });

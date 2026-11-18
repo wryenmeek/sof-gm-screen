@@ -34,3 +34,7 @@ Adopt a dual-engine model combining Google Apps Script and Cloud Firestore:
 
 - **Positive:** Tabletop mood cue transitions drop from $\ge 3000\text{ ms}$ to $<50\text{ ms}$; zero Apps Script polling quota consumption; instant multi-device combat tracker sync; unblocked top-level HTTPS microphone permissions on Firebase Hosting; resilient offline operation via IndexedDB; frictionless QR code onboarding for players without requiring Google accounts.
 - **Negative:** Requires maintaining Firebase Security Rules (`firestore.rules`) and local emulator/mock test harnesses alongside Google Apps Script mocks; requires dual deployment targets (`clasp push` for Apps Script and Firebase Hosting / Rules deployment).
+
+## Amendments
+
+- **2026-11-17 (ADR-0012):** Extended the Firestore live synchronization fabric with `match /live/audio_cue` rules broadcast for `RULE_QUERY` intents (`source in ['companion_ptt', 'gemini_tier2']`), ducking protection, and client-side conversational 5e rules adjudication via Firebase AI Logic (Gemini 2.5 Flash). See [ADR-0012](0012-client-side-rules-arbiter-firebase-ai-logic.md).

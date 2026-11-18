@@ -621,7 +621,8 @@ describe("Cloud Firestore Security Rules & Access Boundary Suite (SEC-01 - SEC-1
           ruling:
             "When making a melee attack against a creature flanked by an ally, attack with advantage.",
           citations: ["DMG p. 251"],
-          confidence: "exact"
+          ruleConfidence: "exact",
+          confidence: 1.0
         }
       };
       await assertSucceeds(playerDb.doc(cuePath).set(validRuleCue));
@@ -672,7 +673,53 @@ describe("Cloud Firestore Security Rules & Access Boundary Suite (SEC-01 - SEC-1
       };
       await assertFails(playerDb.doc(cuePath).set(malformedConfidenceCue));
 
-      // 8. GM publishing MUSIC_CUE and SFX -> SUCCEEDS
+      // 8. Authenticated player attempting to inject ducking controls in payload -> FAILS
+      const duckingExploitCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        rule: "Stealth",
+        payload: {
+          ruleTitle: "Stealth",
+          summary: "Hidden check.",
+          ruling: "Contested Stealth vs Perception.",
+          citations: ["PHB p. 177"],
+          ducking: true,
+          duckingGain: 0,
+          duckingDurationMs: 999999
+        }
+      };
+      await assertFails(playerDb.doc(cuePath).set(duckingExploitCue));
+
+      // 9. Authenticated player claiming GM source tier -> FAILS
+      const spoofedSourceCue = {
+        intent: "RULE_QUERY",
+        source: "gm_manual_tier3",
+        rule: "Stealth",
+        payload: {
+          ruleTitle: "Stealth",
+          summary: "Hidden check.",
+          ruling: "Contested Stealth vs Perception.",
+          citations: ["PHB p. 177"]
+        }
+      };
+      await assertFails(playerDb.doc(cuePath).set(spoofedSourceCue));
+
+      // 10. Authenticated player claiming another player's authorUid -> FAILS
+      const spoofedAuthorCue = {
+        intent: "RULE_QUERY",
+        source: "companion_ptt",
+        authorUid: "another_player_uid",
+        rule: "Stealth",
+        payload: {
+          ruleTitle: "Stealth",
+          summary: "Hidden check.",
+          ruling: "Contested Stealth vs Perception.",
+          citations: ["PHB p. 177"]
+        }
+      };
+      await assertFails(playerDb.doc(cuePath).set(spoofedAuthorCue));
+
+      // 11. GM publishing MUSIC_CUE and SFX -> SUCCEEDS
       await assertSucceeds(gmDb.doc(cuePath).set(musicCue));
       await assertSucceeds(gmDb.doc(cuePath).set(sfxCue));
     });

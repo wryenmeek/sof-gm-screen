@@ -5,3 +5,7 @@ The Player Companion is served via a dedicated server-side `doGet(e)` branch (`?
 ## Player Rule Card Feedback Limits
 
 The public Player Companion Rule Card feedback endpoint intentionally remains callable without a GM token, but accepts feedback only for an existing session date. Durable, lock-protected counters limit submissions to 20 votes per player per session date, 40 votes per player across session dates in a rolling six-hour window, and 200 votes globally in a rolling six-hour window. Exceeding any cap returns `{ status: "rate_limited" }`; the client tells the player to try again later, and the rejected vote is not written. If the feedback spreadsheet cannot be opened or written, the endpoint returns `{ status: "unavailable" }` and does not charge the rate limit.
+
+## Amendments
+
+- **2026-11-17 (ADR-0012):** Augmented the Player Companion Push-to-Talk Rules Sniffer with the 3-Tier Rules Lookup Ladder, resolving conversational queries via Firebase AI Logic (Gemini 2.5 Flash), broadcasting rulings to `live/audio_cue`, and persisting ratings to Firestore `rules_feedback`. See [ADR-0012](0012-client-side-rules-arbiter-firebase-ai-logic.md).

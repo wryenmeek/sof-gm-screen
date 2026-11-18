@@ -6,3 +6,7 @@ Live audio intent classification (`MUSIC_CUE`, `RULE_QUERY`, `BANTER`) runs on t
 2. **Tier 2 (Cloud Fallback):** If the local Pi model exceeds 1,500ms, errors, or is disabled, the Pi automatically sends the voice-gated Speech Chunk to the Gemini 2.5 Flash structured-JSON API over outbound HTTPS.
 3. **Tier 3 (Manual UI Fallback):** If both Tier 1 and Tier 2 fail or the Pi is offline, the GM Screen exposes 1-click Mood Cue buttons (`Exploration`, `Tension`, `Combat`, `Rest`) and instant MiniSearch Rule Card lookup.
 4. **Zero-Tunnel Cue Transport & Dual-Cache Bridge:** The Pi posts the resulting 80-byte JSON cue over outbound HTTPS to Apps Script `doPost(e)` (authenticated with `SOF_GM_KEY`). In `doPost(e)`, all cues are cached in `sof_latest_audio_cue` for the GM Screen, while `RULE_QUERY` cues are duplicated into `sof_latest_companion_rule_query` so player companions can poll rules without GM secret exposure.
+
+## Amendments
+
+- **2026-11-17 (ADR-0012):** Differentiated the edge Speech Chunk 3-Tier Classifier from the tabletop conversational Rules Lookup Ladder, routing resolved arbiter rulings through Firestore `live/audio_cue` with `source in ['companion_ptt', 'gemini_tier2']`. See [ADR-0012](0012-client-side-rules-arbiter-firebase-ai-logic.md).

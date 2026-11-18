@@ -73,7 +73,7 @@ The player-facing interface displaying character identity selection, voice rule 
 _Avoid_: Mobile app, player view, phone mode, mini screen.
 
 **Push-to-Talk Rules Sniffer**:
-The on-demand voice query listener activated from the Player Companion to capture a spoken rules question and match it against the Rules Glossary.
+The on-demand voice query listener activated from the Player Companion or GM Screen to capture a spoken rules question and evaluate it across the Rules Lookup Ladder.
 _Avoid_: Voice assistant, always-on mic, speech bot, rule search bar.
 
 **Rules Glossary**:
@@ -81,7 +81,7 @@ The unified collection of 5e mechanics, spell definitions, condition summaries, 
 _Avoid_: Rulebook, SRD dump, lore dictionary, reference table.
 
 **Rule Card**:
-A dismissible quick-reference card displaying a matched game mechanic, spell, or condition summary with player feedback controls.
+A dismissible quick-reference modal displaying a matched game mechanic or Rules Arbiter ruling with summary, detailed ruling, Rule Citations, Rule Confidence badge, and Rule Feedback controls with a 30-second hover-pausable decay timer.
 _Avoid_: Tooltip, popup, rule modal, glossary toast.
 
 **Speech Chunk**:
@@ -89,7 +89,7 @@ A timestamped, voice-gated audio segment containing active table speech stripped
 _Avoid_: Audio clip, recording slice, voice snippet, raw stream.
 
 **Audio Cue**:
-A structured intent signal derived from a classified Speech Chunk—identifying a musical shift, rules question, or table banter—dispatched to the GM Screen.
+A structured intent signal derived from classified audio or Rules Broadcast—identifying a musical shift (`MUSIC_CUE`), sound effect (`SFX`), or table rules query (`RULE_QUERY`)—dispatched to the shared `live/audio_cue` Firestore document.
 _Avoid_: Webhook payload, intent event, voice command, classifier message.
 
 **Attendance Quorum**:
@@ -99,6 +99,30 @@ _Avoid_: Headcount, invite check, RSVP tally, roster check.
 **Storyline Lock**:
 A designation on a player whose character is central to the upcoming session's narrative arc, requiring their confirmed attendance for Attendance Quorum to hold.
 _Avoid_: Mandatory player, VIP attendee, critical role, quorum blocker.
+
+**Rules Arbiter**:
+The client-side conversational AI adjudication engine (powered by Firebase AI Logic and Gemini 2.5 Flash) that parses complex, natural-language 5e rules questions, cross-references Rules as Written (RAW) and Rules as Intended (RAI), and yields structured rulings with citations and confidence tiers.
+_Avoid_: AI GM, rulebot, oracle, ChatGPT helper, chatbot.
+
+**Rule Confidence**:
+The qualitative certainty rating—`exact` (1.0, codified RAW), `interpretation` (0.75, RAI tactical adjudication), or `unsupported` (0.5, table ruling required)—assigned by the Rules Arbiter and rendered as a visual badge on Rule Cards.
+_Avoid_: Certainty score, probability, accuracy rating, arbiter score.
+
+**Rule Citation**:
+A specific authoritative source reference (e.g. `PHB p. 195`, `DMG p. 248`, `XGE p. 77`) formatted as an interactive pill on Rule Cards grounding a ruling in official 5e texts.
+_Avoid_: Rule reference, book quote, page link, bibliography.
+
+**Rules Broadcast**:
+The real-time publish-subscribe dissemination of a resolved rule query from the inquiring client to the shared `live/audio_cue` document in Firestore, expanding synchronized Rule Cards across all connected GM Screen and Player Companion devices simultaneously.
+_Avoid_: Rule sync, pubsub announcement, tabletop blast, screen broadcast.
+
+**Rule Feedback**:
+The player or GM rating (`+1` helpful, `-1` irrelevant) recorded either in Firestore `rules_feedback` collection (for Rules Arbiter rulings) or Google Sheets via Apps Script (for static glossary lookups) to evaluate adjudication quality.
+_Avoid_: Rule vote, like/dislike, review, rating.
+
+**Rules Lookup Ladder**:
+The 3-tier lookup progression governing table rules inquiries: Tier 1 (local RAM MiniSearch index, <5ms, zero token), Tier 2 (cloud Firebase AI Logic / Gemini 2.5 Flash, ~400–800ms), and Tier 3 (offline keyword fallback and manual search).
+_Avoid_: Rule hierarchy, fallback chain, search ladder.
 
 **Weather Hexflower**:
 The campaign's maritime weather probability table rolled via 2d8 once Attendance Quorum is met to forecast sea conditions for the upcoming Session.

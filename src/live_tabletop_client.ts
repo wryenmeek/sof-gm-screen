@@ -30,7 +30,10 @@ import {
   type Auth,
   type User
 } from "firebase/auth";
-import type { ArbiterConfidence } from "./rules_arbiter_client";
+import {
+  ARBITER_CONFIDENCE_SCORE,
+  type ArbiterConfidence
+} from "./rules_arbiter_client";
 
 export const FIRESTORE_CACHE_SIZE_BYTES = 104857600; // 100 MB dedicated LRU cache
 
@@ -77,6 +80,7 @@ export interface AudioCueDocument {
     | "seafaring";
   rule?: string | null;
   triggeredAt?: any;
+  authorUid?: string;
   source: "pi_vad_tier1" | "gemini_tier2" | "gm_manual_tier3" | "companion_ptt";
   payload?: AudioCuePayload;
 }
@@ -606,19 +610,15 @@ export class LiveTabletopClient {
       mood: "exploration",
       rule: ruling.ruleTitle,
       source: source,
+      authorUid: this.getCurrentUser()?.uid || undefined,
       payload: {
         ruleTitle: ruling.ruleTitle,
-        ruleId: ruling.ruleId,
+        ...(ruling.ruleId ? { ruleId: ruling.ruleId } : {}),
         summary: ruling.summary,
         ruling: ruling.ruling,
         citations: ruling.citations,
         ruleConfidence: ruling.confidence,
-        confidence:
-          ruling.confidence === "exact"
-            ? 1.0
-            : ruling.confidence === "interpretation"
-              ? 0.75
-              : 0.5
+        confidence: ARBITER_CONFIDENCE_SCORE[ruling.confidence] ?? 0.75
       }
     };
     await this.publishAudioCue(sessionDate, cue);

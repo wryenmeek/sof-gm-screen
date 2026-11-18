@@ -6,7 +6,7 @@ How the engineering skills consume this repo's domain documentation and architec
 
 - **[`GLOSSARY.md`](../../GLOSSARY.md)** at the repo root.
 - **[`CODING_STANDARDS.md`](../../CODING_STANDARDS.md)** at the repo root (lists all active ADRs with exact filenames and cross-boundary conventions).
-- **[`docs/adr/`](../adr/)**: read the numbered ADRs (`0001`–`0011`) that touch the area you're working in.
+- **[`docs/adr/`](../adr/)**: read the numbered ADRs (`0001`–`0012`) that touch the area you're working in.
 
 ## Repository layout
 
@@ -19,11 +19,12 @@ How the engineering skills consume this repo's domain documentation and architec
 ├── Code.gs                        # Google Apps Script V8 server entrypoints & triggers
 ├── Index.html                     # GM Screen & Player Companion template, CSS & client JS
 ├── firebase.json                  # Firebase Hosting & Firestore Emulator configuration
-├── firestore.rules                # Cloud Firestore security rules (partitioned combat & reactions)
+├── firestore.rules                # Cloud Firestore security rules (partitioned combat, rules & reactions)
 ├── public/
 │   └── index.html                 # Top-level Firebase Hosting client entrypoint
 ├── src/
-│   └── live_tabletop_client.ts    # Cloud Firestore Modular SDK v11 tabletop sync client
+│   ├── live_tabletop_client.ts    # Cloud Firestore Modular SDK v11 tabletop sync client
+│   └── rules_arbiter_client.ts    # Firebase AI Logic (Gemini 2.5 Flash) 5e Rules Arbiter client
 ├── validate_session_artifacts.py  # Pre-flight validator for HTML, MD, Python & RPC contracts
 ├── .githooks/
 │   ├── pre-commit                 # Runs npm run check before commits
@@ -38,7 +39,7 @@ How the engineering skills consume this repo's domain documentation and architec
 │   ├── act/                       # Local GitHub Actions (act) runner helpers
 │   └── rpi_vad_chunker.py         # Raspberry Pi Silero VAD & 3-tier classifier (direct Firestore + webhook)
 ├── docs/
-│   ├── adr/                       # Architectural Decision Records (0001–0011)
+│   ├── adr/                       # Architectural Decision Records (0001–0012)
 │   ├── agents/                    # Workflow, issue tracker, triage & domain pointers
 │   └── research/                  # Wayfinder exploratory research spikes
 └── test/
@@ -48,6 +49,7 @@ How the engineering skills consume this repo's domain documentation and architec
     ├── mocks/google-apps-script.ts# Shared Apps Script VM mocks (Drive, Calendar, Tasks, Cache)
     ├── client.test.ts             # Tactical search & manifest UI tests
     ├── firestore_rules.test.ts    # Security rules tests for combat partitioning & reactions
+    ├── rules_arbiter.test.ts      # Firebase AI Logic Rules Arbiter tests
     ├── audio_engine.test.ts       # Tabletop Mixer, IndexedDB cache & classifier tier tests
     ├── mobile_ux.test.ts          # Player Companion isolation, reactions & roster claiming tests
     ├── server.test.ts             # Apps Script VM server & governance tests

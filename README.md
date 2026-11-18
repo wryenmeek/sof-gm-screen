@@ -1,6 +1,6 @@
 # Sea of Fortune GM Screen (Dual-Engine Real-Time Tabletop)
 
-A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mixer**, server-isolated **Player Companion**, Google Workspace governance engine, edge Raspberry Pi 3-tier **Speech Chunk** classifier, and Cloud Firestore real-time tabletop engine built across Google Apps Script `HtmlService` and Firebase Hosting (`ADR-0001` through `ADR-0011`).
+A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mixer**, server-isolated **Player Companion**, Google Workspace governance engine, edge Raspberry Pi 3-tier **Speech Chunk** classifier, and Cloud Firestore real-time tabletop engine built across Google Apps Script `HtmlService` and Firebase Hosting (`ADR-0001` through `ADR-0012`).
 
 ---
 
@@ -44,6 +44,12 @@ A tactical Single-Page Application (SPA) **GM Screen**, 3-channel **Tabletop Mix
    - Supports 5-emoji live table reactions with Web Haptics (`navigator.vibrate`) and a 20-item sliding FIFO queue on `live/reactions`.
    - Edge Raspberry Pi classifier routes audio cues through a sub-35ms direct Firestore write with an automatic 800ms fallback ladder to the Apps Script HTTPS `doPost(e)` webhook.
    - Ensures zero-downtime offline play with a 100MB LRU `persistentLocalCache` and multi-tab synchronization.
+7. **Conversational Rules Arbiter & Multi-Device Broadcast ([ADR-0012](docs/adr/0012-client-side-rules-arbiter-firebase-ai-logic.md)):**
+   - Implements the **Rules Lookup Ladder**: Tier 1 (local RAM MiniSearch <5ms, zero token cost) → Tier 2 (cloud Firebase AI Logic / Gemini 2.5 Flash with 5e SRD system prompt and 5000ms timeout budget) → Tier 3 (offline keyword fallback).
+   - Resolves natural-language rules inquiries into structured rulings containing Rule Title, summary, detailed ruling, Rule Citations (e.g. `PHB p. 195`), and a Rule Confidence rating (`exact`, `interpretation`, `unsupported`).
+   - Disseminates resolved rulings across all active devices via real-time **Rules Broadcast** over Firestore `sessions/{sessionDate}/live/audio_cue`.
+   - Displays rulings on `#rule-card` featuring hover/focus-pausable 30-second decay timer, Escape key dismissal, and dual feedback submission (Firestore `rules_feedback` collection and Google Sheets).
+   - Strictly enforces ducking boundaries in `firestore.rules` and `Index.html` to prevent audio muting exploits during rules lookups.
 
 ---
 

@@ -1845,9 +1845,15 @@
         style="display: none; margin: 8px 0; flex-wrap: wrap; gap: 6px"
       ></div>
       <div style="display: flex; gap: 8px; margin-top: 12px">
-        <button id="btn-up" class="primary">👍 Helpful</button>
-        <button id="btn-down">👎 Irrelevant</button>
-        <button id="btn-dismiss">✕ Dismiss</button>
+        <button id="btn-up" class="primary" aria-label="Mark rule as helpful">
+          <span aria-hidden="true">👍</span> Helpful
+        </button>
+        <button id="btn-down" aria-label="Mark rule as irrelevant">
+          <span aria-hidden="true">👎</span> Irrelevant
+        </button>
+        <button id="btn-dismiss" aria-label="Dismiss rule card">
+          <span aria-hidden="true">✕</span> Dismiss
+        </button>
       </div>
       <div
         id="feedback-status"
@@ -4937,19 +4943,40 @@
         return words.length >= 5;
       }
 
+      function resolveSessionDate_() {
+        if (
+          typeof currentSessionDate === "string" &&
+          !currentSessionDate.startsWith("<" + "?") &&
+          /^\d{4}-\d{2}-\d{2}$/.test(currentSessionDate)
+        ) {
+          return currentSessionDate;
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.__sessionDate === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(window.__sessionDate)
+        ) {
+          return window.__sessionDate;
+        }
+        return "";
+      }
+
       function broadcastRuleRuling_(ruling) {
         if (!ruling) return;
+        const date = resolveSessionDate_();
+        if (!date) {
+          console.warn(
+            "[LiveTabletop] Cannot broadcast rule query: missing valid sessionDate"
+          );
+          return;
+        }
         const client = getLiveTabletopClient_();
-        const date =
-          typeof currentSessionDate === "string" && currentSessionDate
-            ? currentSessionDate
-            : "2026-10-31";
         if (client && typeof client.broadcastRuleQuery === "function") {
           client
             .broadcastRuleQuery(
               date,
               ruling,
-              isCompanionMode_() ? "companion_ptt" : "gm_manual_tier3"
+              isCompanionMode_() ? "companion_ptt" : "gemini_tier2"
             )
             .catch(function (err) {
               console.warn("Failed to broadcast ruling to tabletop:", err);
@@ -5197,6 +5224,107 @@
         });
       }
 
+      let ruleCardDecayRemaining_ = 30000;
+      let ruleCardDecayStart_ = 0;
+      let ruleCardIsPaused_ = false;
+      let lastHandledRuleTitle_ = "";
+      let lastHandledRuleTimestamp_ = 0;
+
+      function startRuleCardDecay_(durationMs = 30000) {
+        if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        ruleCardDecayRemaining_ = durationMs;
+        ruleCardDecayStart_ = Date.now();
+        ruleCardIsPaused_ = false;
+        ruleCardTimer = setTimeout(() => {
+          dismissRuleCard();
+        }, ruleCardDecayRemaining_);
+      }
+
+      function pauseRuleCardDecay_() {
+        if (ruleCardTimer && !ruleCardIsPaused_) {
+          clearTimeout(ruleCardTimer);
+          ruleCardTimer = null;
+          ruleCardDecayRemaining_ = Math.max(
+            1000,
+            ruleCardDecayRemaining_ - (Date.now() - ruleCardDecayStart_)
+          );
+          ruleCardIsPaused_ = true;
+        }
+      }
+
+      function resumeRuleCardDecay_() {
+        if (ruleCardIsPaused_) {
+          ruleCardIsPaused_ = false;
+          ruleCardDecayStart_ = Date.now();
+          ruleCardTimer = setTimeout(() => {
+            dismissRuleCard();
+          }, ruleCardDecayRemaining_);
+        }
+      }
+
+      function normalizeRuling_(raw, phrase = "", fallbackSummary = "") {
+        if (!raw || typeof raw !== "object") {
+          const title = String(raw || "Rule");
+          return {
+            ruleTitle: title,
+            ruleId: "",
+            summary: String(fallbackSummary || phrase || ""),
+            ruling: "",
+            citations: [],
+            confidence: "",
+            source: "Mechanic",
+            phrase: phrase || title.toLowerCase()
+          };
+        }
+        const ruleTitle = String(
+          raw.ruleTitle || raw.title || raw.name || raw.rule || "Ruling"
+        ).slice(0, 120);
+        const rawId = raw.ruleId || raw.id || "";
+        const ruleId = rawId
+          ? String(rawId)
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "_")
+              .replace(/^_+|_+$/g, "")
+              .slice(0, 100)
+          : "";
+        const summary = String(
+          raw.summary ||
+            (typeof fallbackSummary === "string" && fallbackSummary
+              ? fallbackSummary
+              : "") ||
+            (typeof phrase === "string" ? phrase : "") ||
+            raw.text ||
+            ""
+        ).slice(0, 500);
+        const ruling = String(raw.ruling || "");
+        const citations = Array.isArray(raw.citations)
+          ? raw.citations.slice(0, 10).map((c) => String(c).slice(0, 200))
+          : [];
+        const rawConf = raw.confidence || raw.ruleConfidence;
+        let confidence = "";
+        if (rawConf) {
+          const validConfidences = ["exact", "interpretation", "unsupported"];
+          const confStr = String(rawConf).toLowerCase();
+          confidence = validConfidences.includes(confStr)
+            ? confStr
+            : "interpretation";
+        }
+        const source = confidence
+          ? `Rules Arbiter (${confidence})`
+          : raw.source || raw.type || "Mechanic";
+
+        return {
+          ruleTitle: ruleTitle,
+          ruleId: ruleId,
+          summary: summary,
+          ruling: ruling,
+          citations: citations,
+          confidence: confidence,
+          source: source,
+          phrase: phrase || String(raw.phrase || ruleTitle.toLowerCase())
+        };
+      }
+
       function showRuleCard_(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
         const card = document.getElementById("rule-card");
         const titleEl = document.getElementById("card-title");
@@ -5208,64 +5336,43 @@
         const citationsEl = document.getElementById("card-citations");
         if (!card || !titleEl) return;
 
-        let ruleTitle = "";
-        let ruleId = "";
-        let ruleSummary = "";
-        let ruleRuling = "";
-        let ruleSource = "Mechanic";
-        let ruleConfidence = "";
-        let ruleCitations = [];
-        let heardPhrase = "";
+        const isObj = typeof ruleOrTitle === "object" && ruleOrTitle !== null;
+        const phraseArg = isObj
+          ? typeof textOrPhrase === "string"
+            ? textOrPhrase
+            : ""
+          : String(
+              maybePhrase ||
+                (typeof textOrPhrase === "string" ? textOrPhrase : "")
+            );
+        const summaryArg = isObj
+          ? ""
+          : String(typeof textOrPhrase === "string" ? textOrPhrase : "");
 
-        if (ruleOrTitle && typeof ruleOrTitle === "object") {
-          ruleTitle =
-            ruleOrTitle.ruleTitle ||
-            ruleOrTitle.title ||
-            ruleOrTitle.name ||
-            "";
-          ruleId = ruleOrTitle.ruleId || ruleOrTitle.id || "";
-          ruleSummary =
-            ruleOrTitle.summary ||
-            (typeof textOrPhrase === "string" ? textOrPhrase : "") ||
-            ruleOrTitle.text ||
-            "";
-          ruleRuling = ruleOrTitle.ruling || "";
-          ruleConfidence = ruleOrTitle.confidence || "";
-          if (Array.isArray(ruleOrTitle.citations)) {
-            ruleCitations = ruleOrTitle.citations;
-          }
-          ruleSource =
-            (ruleConfidence ? `Rules Arbiter (${ruleConfidence})` : "") ||
-            ruleOrTitle.source ||
-            ruleOrTitle.type ||
-            "Mechanic";
-          heardPhrase = String(textOrPhrase || ruleTitle.toLowerCase());
-        } else {
-          ruleTitle = String(ruleOrTitle || "");
-          ruleSummary = String(textOrPhrase || "");
-          ruleSource = "Mechanic";
-          heardPhrase = String(maybePhrase || ruleTitle.toLowerCase());
-        }
+        const normalized = normalizeRuling_(ruleOrTitle, phraseArg, summaryArg);
 
         activeRuleCard = {
-          ruleId: ruleId,
-          cardTitle: ruleTitle,
-          source: ruleSource,
-          summary: ruleSummary,
-          ruling: ruleRuling,
-          confidence: ruleConfidence,
-          citations: ruleCitations,
-          text: ruleRuling || ruleSummary || "",
-          phrase: heardPhrase
+          ruleId: normalized.ruleId,
+          cardTitle: normalized.ruleTitle,
+          source: normalized.source,
+          summary: normalized.summary,
+          ruling: normalized.ruling,
+          confidence: normalized.confidence,
+          citations: normalized.citations,
+          text: normalized.ruling || normalized.summary || "",
+          phrase: normalized.phrase
         };
 
-        titleEl.textContent = ruleTitle;
-        if (typeEl) typeEl.textContent = ruleSource;
+        lastHandledRuleTitle_ = normalized.ruleTitle;
+        lastHandledRuleTimestamp_ = Date.now();
+
+        titleEl.textContent = normalized.ruleTitle;
+        if (typeEl) typeEl.textContent = normalized.source;
 
         if (confidenceEl) {
-          if (ruleConfidence) {
-            confidenceEl.textContent = ruleConfidence;
-            confidenceEl.setAttribute("data-confidence", ruleConfidence);
+          if (normalized.confidence) {
+            confidenceEl.textContent = normalized.confidence;
+            confidenceEl.setAttribute("data-confidence", normalized.confidence);
             confidenceEl.style.display = "inline-block";
           } else {
             confidenceEl.textContent = "";
@@ -5275,24 +5382,24 @@
         }
 
         if (summaryEl) {
-          summaryEl.textContent = ruleSummary;
-          summaryEl.style.display = ruleSummary ? "block" : "none";
+          summaryEl.textContent = normalized.summary;
+          summaryEl.style.display = normalized.summary ? "block" : "none";
         }
 
         if (rulingEl) {
-          rulingEl.textContent = ruleRuling;
-          rulingEl.style.display = ruleRuling ? "block" : "none";
+          rulingEl.textContent = normalized.ruling;
+          rulingEl.style.display = normalized.ruling ? "block" : "none";
         }
 
         if (textEl) {
-          textEl.textContent = ruleRuling || ruleSummary || "";
+          textEl.textContent = normalized.ruling || normalized.summary || "";
         }
 
         if (citationsEl) {
           citationsEl.innerHTML = "";
-          if (ruleCitations && ruleCitations.length > 0) {
+          if (normalized.citations && normalized.citations.length > 0) {
             citationsEl.style.display = "flex";
-            ruleCitations.forEach((cit) => {
+            normalized.citations.forEach((cit) => {
               const pill = document.createElement("span");
               pill.className = "citation-pill";
               pill.textContent = cit;
@@ -5313,14 +5420,13 @@
         card.style.display = "block";
         setRuleFeedbackPending_(false);
 
-        if (ruleCardTimer) clearTimeout(ruleCardTimer);
-        ruleCardTimer = setTimeout(() => {
-          dismissRuleCard();
-        }, 30000);
+        startRuleCardDecay_(30000);
       }
 
       function dismissRuleCard() {
         if (ruleCardTimer) clearTimeout(ruleCardTimer);
+        ruleCardTimer = null;
+        ruleCardIsPaused_ = false;
         const card = document.getElementById("rule-card");
         if (card) {
           card.classList.remove("visible");
@@ -5477,6 +5583,27 @@
         });
       }
 
+      const ruleCardEl = document.getElementById("rule-card");
+      if (ruleCardEl) {
+        ruleCardEl.addEventListener("pointerenter", pauseRuleCardDecay_);
+        ruleCardEl.addEventListener("pointerleave", resumeRuleCardDecay_);
+        ruleCardEl.addEventListener("focusin", pauseRuleCardDecay_);
+        ruleCardEl.addEventListener("focusout", resumeRuleCardDecay_);
+      }
+
+      window.addEventListener("keydown", function (e) {
+        if (e && e.key === "Escape") {
+          const card = document.getElementById("rule-card");
+          if (
+            card &&
+            (card.classList.contains("visible") ||
+              card.style.display !== "none")
+          ) {
+            dismissRuleCard();
+          }
+        }
+      });
+
       let lastHandledCueTimestamp_ = null;
 
       function extractCueTimestamp_(cue) {
@@ -5522,7 +5649,12 @@
         }
         const payload = intentPayload.payload || {};
         const shouldDuck = Boolean(intentPayload.ducking || payload.ducking);
-        if (shouldDuck && !isCompanionMode_()) {
+        if (
+          shouldDuck &&
+          !isCompanionMode_() &&
+          (intentPayload.intent === "MUSIC_CUE" ||
+            intentPayload.intent === "SFX")
+        ) {
           const duckDuration =
             payload.duckingDurationMs ||
             intentPayload.duckingDurationMs ||
@@ -5551,10 +5683,33 @@
             activeMixer.triggerSfx(intentPayload.trackId || payload.trackTitle);
           }
         } else if (intentPayload.intent === "RULE_QUERY") {
+          // Ignore pending local write snapshot with unresolved server timestamp or hasPendingWrites flag
+          if (
+            intentPayload.hasPendingWrites === true ||
+            intentPayload.triggeredAt === null
+          ) {
+            return;
+          }
           const payload = intentPayload.payload || {};
+          const candidateTitle = payload.ruleTitle || intentPayload.rule || "";
+          const client = getLiveTabletopClient_();
+          const currentUid =
+            client && client.getCurrentUser && client.getCurrentUser()?.uid;
+          if (
+            (intentPayload.authorUid &&
+              currentUid &&
+              intentPayload.authorUid === currentUid &&
+              Date.now() - lastHandledRuleTimestamp_ < 5000) ||
+            (candidateTitle &&
+              candidateTitle === lastHandledRuleTitle_ &&
+              Date.now() - lastHandledRuleTimestamp_ < 5000)
+          ) {
+            return;
+          }
+
           let rulingData = null;
           if (payload.ruling || payload.ruleTitle) {
-            rulingData = {
+            rulingData = normalizeRuling_({
               ruleTitle: payload.ruleTitle || intentPayload.rule || "Ruling",
               ruleId: payload.ruleId || intentPayload.rule || "rule_ruling",
               summary: payload.summary || "",
@@ -5562,11 +5717,11 @@
               citations: payload.citations || [],
               confidence:
                 payload.ruleConfidence || payload.confidence || "exact"
-            };
+            });
           } else if (intentPayload.rule) {
             const key = intentPayload.rule.toLowerCase();
             const matchedFromSearch = matchSpokenRuleQuery_(intentPayload.rule);
-            rulingData = (matchedFromSearch && matchedFromSearch.entry) ||
+            const entry = (matchedFromSearch && matchedFromSearch.entry) ||
               DEFAULT_GLOSSARY[key] || {
                 id: "rule_" + key,
                 title: intentPayload.rule,
@@ -5574,6 +5729,7 @@
                 summary: "Matched table query: " + intentPayload.rule,
                 tags: key
               };
+            rulingData = normalizeRuling_(entry, intentPayload.rule);
           }
           if (rulingData) {
             showRuleCard_(
@@ -5637,11 +5793,26 @@
         }
 
         try {
+          let isInitialSnap = true;
           audioCueUnsubscribe_ = client.subscribeToAudioCue(
             sessionDate,
             (cue) => {
               setFirestoreLiveState_(true);
               if (cue) {
+                if (isInitialSnap) {
+                  isInitialSnap = false;
+                  // If late-joining or reconnecting, ignore stale RULE_QUERY older than 60s
+                  if (cue.intent === "RULE_QUERY") {
+                    const ts = extractCueTimestamp_(cue);
+                    if (
+                      typeof ts === "number" &&
+                      ts > 1000000000000 &&
+                      Date.now() - ts > 60000
+                    ) {
+                      return;
+                    }
+                  }
+                }
                 handleAudioIntent_(cue);
               }
             },

@@ -1,7 +1,47 @@
 {
   "rules": [
     {
+      "pattern": "GLOSSARY.md",
+      "required_skills": ["domain-modeling"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "docs/adr/**",
+      "required_skills": ["domain-modeling"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "CODING_STANDARDS.md",
+      "required_skills": ["domain-modeling", "code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "AGENTS.md",
+      "required_skills": ["writing-for-agents"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "CLAUDE.md",
+      "required_skills": ["writing-for-agents"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "docs/agents/**",
+      "required_skills": ["writing-for-agents"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": ".agents/skills/**",
+      "required_skills": ["writing-for-agents"],
+      "enforcement": "gate"
+    },
+    {
       "pattern": "src/**",
+      "required_skills": ["code-review", "tdd"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "firestore.rules",
       "required_skills": ["code-review"],
       "enforcement": "gate"
     },
@@ -11,13 +51,48 @@
       "enforcement": "gate"
     },
     {
-      "pattern": "firestore.rules",
+      "pattern": "Index.html",
       "required_skills": ["code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "public/**",
+      "required_skills": ["code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "test/**",
+      "required_skills": ["tdd"],
       "enforcement": "gate"
     },
     {
       "pattern": "scripts/**",
       "required_skills": ["code-review"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": ".github/workflows/**",
+      "required_skills": ["antigravity-guard"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": ".githooks/**",
+      "required_skills": ["antigravity-guard"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": ".github/required-skills.json",
+      "required_skills": ["antigravity-guard"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "docs/research/**",
+      "required_skills": ["research"],
+      "enforcement": "gate"
+    },
+    {
+      "pattern": "README.md",
+      "required_skills": ["writing-for-agents"],
       "enforcement": "advisory"
     }
   ]

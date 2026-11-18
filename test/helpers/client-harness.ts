@@ -302,8 +302,10 @@ export class MockLiveTabletopClient {
       cb(snap);
     }
   }
-  public async submitRuleFeedback(): Promise<string> {
-    return "mock_fb_id";
+  public feedbackHistory: any[] = [];
+  public async submitRuleFeedback(feedback: any): Promise<string> {
+    this.feedbackHistory.push(feedback);
+    return "mock_fb_" + Date.now();
   }
   public unsubscribeAll(): void {
     this.rosterListeners.clear();

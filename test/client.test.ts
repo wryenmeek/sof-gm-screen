@@ -1005,5 +1005,73 @@ A resonant construct of bronze and coral.
       expect(client.reactionsStore[19].id).toBe("rx_21_overflow");
       expect(client.reactionsStore[19].emoji).toBe("💀");
     });
+
+    it("Ticket 03 / #48: #rule-card renders canonical Arbiter rulings with confidence and formatted citations", () => {
+      const harness = setupClientHarness({
+        viewMode: "companion"
+      });
+
+      harness.showRuleCard({
+        ruleTitle: "Concentration in Water",
+        ruleId: "concentration_water",
+        summary: "Taking damage while swimming requires standard Con save.",
+        ruling:
+          "Environmental pressure or suffocation does not inherently break concentration unless damage is dealt, triggering the DC 10 / half damage save.",
+        citations: ["PHB p. 203", "SRD p. 101"],
+        confidence: "exact"
+      });
+
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Concentration in Water"
+      );
+      expect(document.getElementById("card-summary")!.textContent).toBe(
+        "Taking damage while swimming requires standard Con save."
+      );
+      expect(document.getElementById("card-ruling")!.textContent).toContain(
+        "DC 10 / half damage save"
+      );
+
+      const confidenceEl = document.getElementById("card-confidence")!;
+      expect(confidenceEl.textContent).toBe("exact");
+      expect(confidenceEl.getAttribute("data-confidence")).toBe("exact");
+
+      const citationsEl = document.getElementById("card-citations")!;
+      expect(citationsEl.children.length).toBe(2);
+      expect(citationsEl.children[0].textContent).toBe("PHB p. 203");
+      expect(citationsEl.children[1].textContent).toBe("SRD p. 101");
+    });
+
+    it("Ticket 03 / #48: submits player feedback with rule ID to Firestore rules_feedback collection", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "companion_user_42" }
+      });
+
+      harness.showRuleCard({
+        ruleTitle: "Opportunity Attacks with Reach",
+        ruleId: "reach_opportunity_attack",
+        summary: "Leaving reach triggers reaction attack.",
+        confidence: "exact"
+      });
+
+      const btnUp = document.getElementById("btn-up") as HTMLButtonElement;
+      btnUp.click();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const client = harness.liveTabletopClient as any;
+      expect(client.feedbackHistory.length).toBe(1);
+      expect(client.feedbackHistory[0]).toMatchObject({
+        ruleId: "reach_opportunity_attack",
+        isHelpful: true,
+        authorUid: "companion_user_42",
+        timestamp: expect.any(Number)
+      });
+      expect(
+        document.getElementById("rule-card")!.classList.contains("visible")
+      ).toBe(false);
+    });
   });
 });

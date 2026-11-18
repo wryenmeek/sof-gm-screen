@@ -1271,4 +1271,238 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       );
     });
   });
+
+  describe("Ticket 03 (Issue #48): Structured Rule Card Modal Rendering & Citations UI", () => {
+    it("renders canonical ruleTitle, plain-language summary, tactical ruling, and formatted citations list", () => {
+      const harness = setupClientHarness({ viewMode: "companion" });
+      const card = document.getElementById("rule-card")!;
+
+      harness.showRuleCard({
+        ruleTitle: "Underwater Combat",
+        ruleId: "underwater_combat",
+        summary: "Disadvantage on melee attacks without swim speed.",
+        ruling:
+          "Creatures without swimming speed have disadvantage on melee weapon attack rolls unless weapon is dagger, javelin, shortsword, spear, or trident.",
+        citations: ["PHB p. 198", "DMG p. 248"],
+        confidence: "exact"
+      });
+
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(card.style.display).toBe("block");
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Underwater Combat"
+      );
+      expect(document.getElementById("card-summary")!.textContent).toBe(
+        "Disadvantage on melee attacks without swim speed."
+      );
+      expect(document.getElementById("card-ruling")!.textContent).toBe(
+        "Creatures without swimming speed have disadvantage on melee weapon attack rolls unless weapon is dagger, javelin, shortsword, spear, or trident."
+      );
+
+      const citationsContainer = document.getElementById("card-citations")!;
+      expect(citationsContainer.style.display).toBe("flex");
+      const pills = citationsContainer.querySelectorAll(".citation-pill");
+      expect(pills.length).toBe(2);
+      expect(pills[0].textContent).toBe("PHB p. 198");
+      expect(pills[1].textContent).toBe("DMG p. 248");
+    });
+
+    it("displays visual confidence indicator reflecting exact codified rules versus interpretations", () => {
+      const harness = setupClientHarness({ viewMode: "companion" });
+      const confidenceEl = document.getElementById("card-confidence")!;
+
+      // 1. Exact confidence
+      harness.showRuleCard({
+        ruleTitle: "Grappling",
+        ruleId: "srd_grappling",
+        summary: "Contested Athletics check.",
+        confidence: "exact"
+      });
+      expect(confidenceEl.style.display).toBe("inline-block");
+      expect(confidenceEl.textContent).toBe("exact");
+      expect(confidenceEl.getAttribute("data-confidence")).toBe("exact");
+
+      // 2. Interpretation confidence
+      harness.showRuleCard({
+        ruleTitle: "Sneak Attack in Fog",
+        ruleId: "sneak_attack_fog",
+        summary: "Heavy obscurement blocks sight.",
+        confidence: "interpretation"
+      });
+      expect(confidenceEl.style.display).toBe("inline-block");
+      expect(confidenceEl.textContent).toBe("interpretation");
+      expect(confidenceEl.getAttribute("data-confidence")).toBe(
+        "interpretation"
+      );
+
+      // 3. Unsupported confidence
+      harness.showRuleCard({
+        ruleTitle: "Homebrew Flanking",
+        ruleId: "hb_flanking",
+        summary: "Optional DMG rule.",
+        confidence: "unsupported"
+      });
+      expect(confidenceEl.style.display).toBe("inline-block");
+      expect(confidenceEl.textContent).toBe("unsupported");
+      expect(confidenceEl.getAttribute("data-confidence")).toBe("unsupported");
+
+      // 4. Default / non-arbiter glossary entry hides confidence badge
+      harness.showRuleCard("Opportunity Attack", "Reaction attack.");
+      expect(confidenceEl.style.display).toBe("none");
+      expect(confidenceEl.textContent).toBe("");
+    });
+
+    it("player feedback buttons (thumbs up / thumbs down) record rating with rule ID and timestamp to Firestore rules_feedback", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "test_player_uid" }
+      });
+      const card = document.getElementById("rule-card")!;
+
+      harness.showRuleCard({
+        ruleTitle: "Underwater Combat",
+        ruleId: "underwater_combat",
+        summary: "Swim speed rules.",
+        confidence: "exact"
+      });
+
+      expect(card.classList.contains("visible")).toBe(true);
+
+      // 1. Thumbs Up (+1)
+      const btnUp = document.getElementById("btn-up") as HTMLButtonElement;
+      btnUp.click();
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      const mockClient = harness.liveTabletopClient as any;
+      expect(mockClient.feedbackHistory.length).toBe(1);
+      expect(mockClient.feedbackHistory[0]).toMatchObject({
+        ruleId: "underwater_combat",
+        isHelpful: true,
+        authorUid: "test_player_uid",
+        timestamp: expect.any(Number)
+      });
+      // Verified card dismisses upon feedback submission success
+      expect(card.classList.contains("visible")).toBe(false);
+
+      // 2. Thumbs Down (-1)
+      harness.showRuleCard({
+        ruleTitle: "Levitation Movement",
+        ruleId: "levitation_movement",
+        summary: "Climbing surfaces while floating.",
+        confidence: "interpretation"
+      });
+      expect(card.classList.contains("visible")).toBe(true);
+
+      const btnDown = document.getElementById("btn-down") as HTMLButtonElement;
+      btnDown.click();
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(mockClient.feedbackHistory.length).toBe(2);
+      expect(mockClient.feedbackHistory[1]).toMatchObject({
+        ruleId: "levitation_movement",
+        isHelpful: false,
+        authorUid: "test_player_uid",
+        timestamp: expect.any(Number)
+      });
+      expect(card.classList.contains("visible")).toBe(false);
+    });
+
+    it("auto-dismiss timer (30s) resets cleanly when new rulings arrive, and dismiss button closes the card cleanly", () => {
+      const harness = setupClientHarness({ viewMode: "companion" });
+      const card = document.getElementById("rule-card")!;
+
+      // 1. Initial ruling arrives at T=0
+      harness.showRuleCard({
+        ruleTitle: "First Ruling",
+        ruleId: "first_ruling",
+        summary: "Ruling one.",
+        confidence: "exact"
+      });
+      expect(card.classList.contains("visible")).toBe(true);
+
+      // Advance by 20s (< 30s): card remains visible
+      vi.advanceTimersByTime(20000);
+      expect(card.classList.contains("visible")).toBe(true);
+
+      // 2. New ruling arrives at T=20s (resets timer back to full 30s)
+      harness.showRuleCard({
+        ruleTitle: "Second Ruling",
+        ruleId: "second_ruling",
+        summary: "Ruling two.",
+        confidence: "exact"
+      });
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Second Ruling"
+      );
+
+      // Advance by 20s (total 40s from start, but 20s from second ruling): card still visible!
+      vi.advanceTimersByTime(20000);
+      expect(card.classList.contains("visible")).toBe(true);
+
+      // Advance remaining 10s (30s from second ruling): card dismisses
+      vi.advanceTimersByTime(10000);
+      expect(card.classList.contains("visible")).toBe(false);
+
+      // 3. Dismiss button closes the card cleanly
+      harness.showRuleCard({
+        ruleTitle: "Third Ruling",
+        ruleId: "third_ruling",
+        summary: "Ruling three."
+      });
+      expect(card.classList.contains("visible")).toBe(true);
+
+      const btnDismiss = document.getElementById(
+        "btn-dismiss"
+      ) as HTMLButtonElement;
+      btnDismiss.click();
+
+      expect(card.classList.contains("visible")).toBe(false);
+      expect(card.style.display).toBe("none");
+    });
+
+    it("handles Firestore rule feedback promise rejection gracefully without freezing buttons or card", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "test_player_uid" }
+      });
+      const card = document.getElementById("rule-card")!;
+      const mockClient = harness.liveTabletopClient as any;
+      mockClient.submitRuleFeedback = vi
+        .fn()
+        .mockRejectedValue(new Error("Firestore network disconnect 503"));
+
+      harness.showRuleCard({
+        ruleTitle: "Levitation",
+        ruleId: "levitation",
+        summary: "Target rises vertically up to 20 feet.",
+        confidence: "exact"
+      });
+
+      expect(card.classList.contains("visible")).toBe(true);
+
+      const btnUp = document.getElementById("btn-up") as HTMLButtonElement;
+      const btnDown = document.getElementById("btn-down") as HTMLButtonElement;
+
+      btnUp.click();
+      expect(btnUp.disabled).toBe(true);
+      expect(btnDown.disabled).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Card remains visible
+      expect(card.classList.contains("visible")).toBe(true);
+      // Buttons re-enabled for retry
+      expect(btnUp.disabled).toBe(false);
+      expect(btnDown.disabled).toBe(false);
+
+      // Status shows failure message
+      const feedbackStatus = document.getElementById("feedback-status")!;
+      expect(feedbackStatus.classList.contains("hidden")).toBe(false);
+      expect(feedbackStatus.textContent).toContain(
+        "Feedback could not be saved. Please try again."
+      );
+    });
+  });
 });

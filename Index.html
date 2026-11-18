@@ -552,6 +552,61 @@
         display: block;
       }
 
+      .confidence-badge {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 700;
+        vertical-align: middle;
+      }
+
+      .confidence-badge[data-confidence="exact"] {
+        background: rgba(46, 204, 113, 0.15);
+        color: #2ecc71;
+        border: 1px solid rgba(46, 204, 113, 0.6);
+      }
+
+      .confidence-badge[data-confidence="interpretation"] {
+        background: rgba(241, 196, 15, 0.15);
+        color: #f1c40f;
+        border: 1px solid rgba(241, 196, 15, 0.6);
+      }
+
+      .confidence-badge[data-confidence="unsupported"] {
+        background: rgba(231, 76, 60, 0.15);
+        color: #e74c3c;
+        border: 1px solid rgba(231, 76, 60, 0.6);
+      }
+
+      .citation-pill {
+        display: inline-block;
+        background: rgba(88, 166, 255, 0.12);
+        color: var(--cyan);
+        border: 1px solid rgba(88, 166, 255, 0.35);
+        border-radius: 12px;
+        padding: 2px 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .rule-summary {
+        margin: 8px 0 6px;
+        font-size: 0.95rem;
+        line-height: 1.45;
+        color: #e6edf3;
+      }
+
+      .rule-ruling {
+        margin: 6px 0 8px;
+        font-size: 0.88rem;
+        line-height: 1.4;
+        color: #8b949e;
+        border-left: 2px solid var(--gold);
+        padding-left: 8px;
+      }
+
       .hidden {
         display: none !important;
       }
@@ -1755,17 +1810,44 @@
       aria-live="polite"
       aria-labelledby="card-title"
     >
-      <h2 id="card-title">Rule Title</h2>
-      <div id="card-type">Mechanic</div>
-      <p id="card-text">Rule description...</p>
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 8px;
+        "
+      >
+        <h2
+          id="card-title"
+          style="margin: 0; font-size: 1.15rem; color: var(--gold-light)"
+        >
+          Rule Title
+        </h2>
+        <span
+          id="card-confidence"
+          class="confidence-badge"
+          style="display: none"
+        ></span>
+      </div>
+      <div
+        id="card-type"
+        style="color: var(--cyan); font-size: 0.85rem; margin-top: 4px"
+      >
+        Mechanic
+      </div>
+      <p id="card-summary" class="rule-summary" style="display: none"></p>
+      <div id="card-ruling" class="rule-ruling" style="display: none"></div>
+      <p id="card-text" style="display: none"></p>
+      <div
+        id="card-citations"
+        class="rule-citations"
+        style="display: none; margin: 8px 0; flex-wrap: wrap; gap: 6px"
+      ></div>
       <div style="display: flex; gap: 8px; margin-top: 12px">
-        <button id="btn-up" class="primary" onclick="submitRuleFeedback('+1')">
-          👍 Helpful
-        </button>
-        <button id="btn-down" onclick="submitRuleFeedback('-1')">
-          👎 Irrelevant
-        </button>
-        <button id="btn-dismiss" onclick="dismissRuleCard()">✕ Dismiss</button>
+        <button id="btn-up" class="primary">👍 Helpful</button>
+        <button id="btn-down">👎 Irrelevant</button>
+        <button id="btn-dismiss">✕ Dismiss</button>
       </div>
       <div
         id="feedback-status"
@@ -5002,13 +5084,21 @@
       function showRuleCard_(ruleOrTitle, textOrPhrase = "", maybePhrase = "") {
         const card = document.getElementById("rule-card");
         const titleEl = document.getElementById("card-title");
+        const confidenceEl = document.getElementById("card-confidence");
         const typeEl = document.getElementById("card-type");
+        const summaryEl = document.getElementById("card-summary");
+        const rulingEl = document.getElementById("card-ruling");
         const textEl = document.getElementById("card-text");
+        const citationsEl = document.getElementById("card-citations");
         if (!card || !titleEl) return;
 
         let ruleTitle = "";
-        let ruleText = "";
+        let ruleId = "";
+        let ruleSummary = "";
+        let ruleRuling = "";
         let ruleSource = "Mechanic";
+        let ruleConfidence = "";
+        let ruleCitations = [];
         let heardPhrase = "";
 
         if (ruleOrTitle && typeof ruleOrTitle === "object") {
@@ -5017,39 +5107,96 @@
             ruleOrTitle.title ||
             ruleOrTitle.name ||
             "";
-          ruleText =
-            ruleOrTitle.ruling || ruleOrTitle.summary || ruleOrTitle.text || "";
+          ruleId = ruleOrTitle.ruleId || ruleOrTitle.id || "";
+          ruleSummary =
+            ruleOrTitle.summary ||
+            (typeof textOrPhrase === "string" ? textOrPhrase : "") ||
+            ruleOrTitle.text ||
+            "";
+          ruleRuling = ruleOrTitle.ruling || "";
+          ruleConfidence = ruleOrTitle.confidence || "";
+          if (Array.isArray(ruleOrTitle.citations)) {
+            ruleCitations = ruleOrTitle.citations;
+          }
           ruleSource =
-            (ruleOrTitle.confidence
-              ? `Rules Arbiter (${ruleOrTitle.confidence})`
-              : "") ||
+            (ruleConfidence ? `Rules Arbiter (${ruleConfidence})` : "") ||
             ruleOrTitle.source ||
             ruleOrTitle.type ||
             "Mechanic";
           heardPhrase = String(textOrPhrase || ruleTitle.toLowerCase());
         } else {
           ruleTitle = String(ruleOrTitle || "");
-          ruleText = String(textOrPhrase || "");
+          ruleSummary = String(textOrPhrase || "");
+          ruleSource = "Mechanic";
           heardPhrase = String(maybePhrase || ruleTitle.toLowerCase());
         }
 
         activeRuleCard = {
+          ruleId: ruleId,
           cardTitle: ruleTitle,
           source: ruleSource,
-          text: ruleText,
+          summary: ruleSummary,
+          ruling: ruleRuling,
+          confidence: ruleConfidence,
+          citations: ruleCitations,
+          text: ruleRuling || ruleSummary || "",
           phrase: heardPhrase
         };
+
         titleEl.textContent = ruleTitle;
         if (typeEl) typeEl.textContent = ruleSource;
-        if (textEl) textEl.textContent = ruleText;
+
+        if (confidenceEl) {
+          if (ruleConfidence) {
+            confidenceEl.textContent = ruleConfidence;
+            confidenceEl.setAttribute("data-confidence", ruleConfidence);
+            confidenceEl.style.display = "inline-block";
+          } else {
+            confidenceEl.textContent = "";
+            confidenceEl.removeAttribute("data-confidence");
+            confidenceEl.style.display = "none";
+          }
+        }
+
+        if (summaryEl) {
+          summaryEl.textContent = ruleSummary;
+          summaryEl.style.display = ruleSummary ? "block" : "none";
+        }
+
+        if (rulingEl) {
+          rulingEl.textContent = ruleRuling;
+          rulingEl.style.display = ruleRuling ? "block" : "none";
+        }
+
+        if (textEl) {
+          textEl.textContent = ruleRuling || ruleSummary || "";
+        }
+
+        if (citationsEl) {
+          citationsEl.innerHTML = "";
+          if (ruleCitations && ruleCitations.length > 0) {
+            citationsEl.style.display = "flex";
+            ruleCitations.forEach((cit) => {
+              const pill = document.createElement("span");
+              pill.className = "citation-pill";
+              pill.textContent = cit;
+              citationsEl.appendChild(pill);
+            });
+          } else {
+            citationsEl.style.display = "none";
+          }
+        }
+
         const feedbackStatus = document.getElementById("feedback-status");
         if (feedbackStatus) {
           feedbackStatus.textContent = "";
           feedbackStatus.classList.add("hidden");
         }
+
         card.classList.add("visible");
         card.style.display = "block";
-        setRuleFeedbackPending_(ruleFeedbackPending);
+        setRuleFeedbackPending_(false);
+
         if (ruleCardTimer) clearTimeout(ruleCardTimer);
         ruleCardTimer = setTimeout(() => {
           dismissRuleCard();
@@ -5077,12 +5224,80 @@
         const submittedCard = activeRuleCard;
         setRuleFeedbackPending_(true);
 
+        const isHelpful = vote === "+1" || vote === true || vote === 1;
+        const rawRuleId =
+          submittedCard.ruleId ||
+          submittedCard.id ||
+          (submittedCard.cardTitle || "rule")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "") ||
+          "rule_generic";
+        const ruleId = rawRuleId.slice(0, 100);
+
         let player = currentPlayerIdentity || "Guest";
         try {
           if (typeof localStorage !== "undefined" && localStorage) {
             player = localStorage.getItem("sof_player_identity") || player;
           }
         } catch (_e) {}
+
+        const handleSuccess = () => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          dismissRuleCard();
+        };
+
+        const handleFailure = (msg) => {
+          setRuleFeedbackPending_(false);
+          if (activeRuleCard !== submittedCard) return;
+          setRuleFeedbackStatus_(
+            msg || "Feedback could not be saved. Please try again."
+          );
+        };
+
+        // If card originates from Rules Arbiter (or preferFirestoreFeedback set), write to Firestore rules_feedback
+        const client = getOrCreateLiveTabletopClient_();
+        const prefersFirestore =
+          client &&
+          typeof client.submitRuleFeedback === "function" &&
+          (Boolean(submittedCard.confidence || submittedCard.ruleId) ||
+            typeof google === "undefined" ||
+            !google.script ||
+            !google.script.run ||
+            (typeof window !== "undefined" &&
+              window.__preferFirestoreFeedback));
+
+        if (prefersFirestore) {
+          const authorUid =
+            currentAnonymousUid ||
+            (client.getCurrentUser &&
+              client.getCurrentUser() &&
+              client.getCurrentUser().uid) ||
+            "anon_player";
+          const firestorePayload = {
+            ruleId: ruleId,
+            isHelpful: isHelpful,
+            authorUid: authorUid,
+            timestamp: Date.now(),
+            ...(typeof currentSessionDate === "string" &&
+            currentSessionDate.length === 10
+              ? { sessionDate: currentSessionDate }
+              : {})
+          };
+          client
+            .submitRuleFeedback(firestorePayload)
+            .then(function () {
+              handleSuccess();
+            })
+            .catch(function (err) {
+              console.warn("Firestore rule feedback error:", err);
+              handleFailure();
+            });
+          return;
+        }
+
+        // Fallback to Apps Script logRuleFeedback
         const payload = {
           sessionDate: currentSessionDate,
           player: player,
@@ -5091,33 +5306,6 @@
           source: submittedCard.source || "D&D 5e Glossary",
           vote: vote
         };
-        const handleFailure = () => {
-          setRuleFeedbackPending_(false);
-          if (activeRuleCard !== submittedCard) return;
-          setRuleFeedbackStatus_(
-            "Feedback could not be saved. Please try again."
-          );
-        };
-        const handleResult = (result) => {
-          setRuleFeedbackPending_(false);
-          if (activeRuleCard !== submittedCard) return;
-          if (result && result.status === "logged") {
-            dismissRuleCard();
-            return;
-          }
-          if (result && result.status === "rate_limited") {
-            setRuleFeedbackStatus_(
-              "Feedback limit reached. Please try again later."
-            );
-          } else if (result && result.status === "unavailable") {
-            setRuleFeedbackStatus_(
-              "Feedback logging is unavailable. Please try again later."
-            );
-          } else {
-            handleFailure();
-          }
-        };
-
         if (
           typeof google !== "undefined" &&
           google.script &&
@@ -5125,8 +5313,26 @@
         ) {
           try {
             const runner = google.script.run
-              .withSuccessHandler(handleResult)
-              .withFailureHandler(handleFailure);
+              .withSuccessHandler(function (result) {
+                setRuleFeedbackPending_(false);
+                if (activeRuleCard !== submittedCard) return;
+                if (result && result.status === "logged") {
+                  dismissRuleCard();
+                } else if (result && result.status === "rate_limited") {
+                  setRuleFeedbackStatus_(
+                    "Feedback limit reached. Please try again later."
+                  );
+                } else if (result && result.status === "unavailable") {
+                  setRuleFeedbackStatus_(
+                    "Feedback logging is unavailable. Please try again later."
+                  );
+                } else {
+                  handleFailure();
+                }
+              })
+              .withFailureHandler(function () {
+                handleFailure();
+              });
             if (runner && typeof runner.logRuleFeedback === "function") {
               runner.logRuleFeedback(payload);
               return;
@@ -5134,6 +5340,25 @@
           } catch (_e) {}
         }
         handleFailure();
+      }
+
+      const btnUpEl = document.getElementById("btn-up");
+      if (btnUpEl) {
+        btnUpEl.addEventListener("click", function () {
+          submitRuleFeedback("+1");
+        });
+      }
+      const btnDownEl = document.getElementById("btn-down");
+      if (btnDownEl) {
+        btnDownEl.addEventListener("click", function () {
+          submitRuleFeedback("-1");
+        });
+      }
+      const btnDismissEl = document.getElementById("btn-dismiss");
+      if (btnDismissEl) {
+        btnDismissEl.addEventListener("click", function () {
+          dismissRuleCard();
+        });
       }
 
       let lastHandledCueTimestamp_ = null;

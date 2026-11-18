@@ -7,6 +7,11 @@ import {
   type CharacterRosterDoc,
   type ClaimResult
 } from "../../src/live_tabletop_client";
+import {
+  RulesArbiterClient,
+  type ArbiterRuleResponse,
+  type RulesArbiterResult
+} from "../../src/rules_arbiter_client";
 
 const cachedHtml = fs.readFileSync("Index.html", "utf8");
 const bodyMatch = cachedHtml.match(
@@ -311,6 +316,45 @@ export class MockLiveTabletopClient {
   }
 }
 
+export class MockRulesArbiterClient {
+  public queryHistory: string[] = [];
+  public mockResponse?: ArbiterRuleResponse;
+  public mockResult?: RulesArbiterResult;
+  public delayMs: number = 0;
+
+  constructor(options?: {
+    mockResponse?: ArbiterRuleResponse;
+    mockResult?: RulesArbiterResult;
+    delayMs?: number;
+  }) {
+    if (options?.mockResponse) this.mockResponse = options.mockResponse;
+    if (options?.mockResult) this.mockResult = options.mockResult;
+    this.delayMs = options?.delayMs || 0;
+  }
+
+  public async queryRulesArbiter(query: string): Promise<RulesArbiterResult> {
+    this.queryHistory.push(query);
+    if (this.delayMs > 0) {
+      await new Promise((r) => setTimeout(r, this.delayMs));
+    }
+    if (this.mockResult) return this.mockResult;
+    if (this.mockResponse) {
+      return { success: true, data: this.mockResponse };
+    }
+    return {
+      success: true,
+      data: {
+        ruleTitle: query,
+        ruleId: query.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+        summary: `Ruling summary for ${query}`,
+        ruling: `Tactical mechanics ruling for ${query}`,
+        citations: ["PHB p. 195"],
+        confidence: "exact"
+      }
+    };
+  }
+}
+
 export interface ClientHarnessOptions {
   sessionDate?: string;
   viewMode?: "gm" | "companion";
@@ -335,6 +379,8 @@ export interface ClientHarnessOptions {
   verifyGmKeyError?: string;
   initLiveTabletopClient?: boolean;
   liveTabletopClient?: LiveTabletopClient | MockLiveTabletopClient;
+  initRulesArbiterClient?: boolean;
+  rulesArbiterClient?: RulesArbiterClient | MockRulesArbiterClient;
   mockRoster?: CharacterRosterDoc[];
   mockUser?: { uid: string; isAnonymous?: boolean } | null;
   forceContentionForCharacterId?: string | null;
@@ -762,6 +808,19 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
     ? LiveTabletopClient
     : MockLiveTabletopClient;
 
+  const rulesArbiterClient =
+    options.rulesArbiterClient ??
+    (options.initRulesArbiterClient
+      ? new RulesArbiterClient({ timeoutMs: 2000 })
+      : new MockRulesArbiterClient());
+
+  if (rulesArbiterClient) {
+    (window as any).rulesArbiterClient = rulesArbiterClient;
+  }
+  (window as any).RulesArbiterClient = options.initRulesArbiterClient
+    ? RulesArbiterClient
+    : MockRulesArbiterClient;
+
   const exported = fn(
     window,
     document,
@@ -775,6 +834,7 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
   return {
     ...exported,
     liveTabletopClient,
+    rulesArbiterClient,
     mockLocalStorage,
     fetchSpy,
     idbStore,

@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { setupClientHarness } from "./helpers/client-harness";
+import {
+  setupClientHarness,
+  MockRulesArbiterClient
+} from "./helpers/client-harness";
 
 describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
   let selectPlayerIdentity: (name: string) => void;
@@ -983,6 +986,289 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(reactions[0].uid).toBe("anon_reactor");
       expect(typeof reactions[0].timestamp).toBe("number");
       expect(reactions[0].id).toMatch(/^rx_/);
+    });
+  });
+
+  describe("Ticket 02 (Issue #47): Push-to-Talk 3-Tier Arbiter Query Pipeline & Status Feedback", () => {
+    it("resolves exact and fuzzy keywords in <5ms via rulesMiniSearch without triggering RulesArbiterClient", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter,
+        rulesGlossary: [
+          {
+            id: "opportunity_attack",
+            title: "Opportunity Attack",
+            summary:
+              "Melee attack triggered when hostile creature leaves reach.",
+            tags: "combat reaction reach"
+          }
+        ]
+      });
+
+      harness.loadDriveRulesGlossary("2026-10-31");
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      dictationInput.value = "opportunity attack";
+      harness.handleDictationInput("opportunity attack");
+
+      // Verify immediate debounce status update
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      expect(statusMsg.textContent).toContain("Searching for");
+
+      // Advance debounce timer (900ms)
+      vi.advanceTimersByTime(900);
+
+      // Fast-path Tier 1 match
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Opportunity Attack"
+      );
+      expect(document.getElementById("ptt-status-msg")!.textContent).toContain(
+        "✓ Rule found"
+      );
+
+      // Verify RulesArbiterClient was NOT queried
+      expect(mockArbiter.queryHistory).toHaveLength(0);
+
+      // Fuzzy keyword resolution test ('opportunty attck' -> Opportunity Attack)
+      harness.dismissRuleCard();
+      dictationInput.value = "opportunty attck";
+      harness.handleDictationInput("opportunty attck");
+      vi.advanceTimersByTime(900);
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Opportunity Attack"
+      );
+      expect(mockArbiter.queryHistory).toHaveLength(0);
+    });
+
+    it("routes conversational queries that miss Tier 1 to RulesArbiterClient, transitions status, and expands Rule Card", async () => {
+      const mockArbiter = new MockRulesArbiterClient({
+        mockResponse: {
+          ruleTitle: "Sneak Attack In Water",
+          ruleId: "sneak_attack_water",
+          summary:
+            "Sneak attack works in water if you have advantage or adjacent ally.",
+          ruling:
+            "Submerged combat does not disable sneak attack unless disadvantage is imposed by weapon choice.",
+          citations: ["PHB p. 96", "PHB p. 198"],
+          confidence: "interpretation"
+        }
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+
+      dictationInput.value = "Can I sneak attack an enemy while swimming?";
+      harness.handleDictationInput(
+        "Can I sneak attack an enemy while swimming?"
+      );
+
+      // Advance debounce timer
+      vi.advanceTimersByTime(900);
+
+      expect(statusMsg.textContent).toContain("Consulting 5e Rules Arbiter");
+
+      // Allow microtask resolution
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(mockArbiter.queryHistory).toContain(
+        "Can I sneak attack an enemy while swimming?"
+      );
+
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Sneak Attack In Water"
+      );
+      expect(statusMsg.textContent).toContain(
+        "✓ Rule resolved: Sneak Attack In Water"
+      );
+    });
+
+    it("displays offline status guidance when RulesArbiterClient indicates offline condition", async () => {
+      const mockArbiter = new MockRulesArbiterClient({
+        mockResult: {
+          success: false,
+          isOffline: true,
+          error: "Device is currently offline. Consulting local rules glossary."
+        }
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+
+      dictationInput.value = "How does falling damage work in high gravity?";
+      harness.handleDictationInput(
+        "How does falling damage work in high gravity?"
+      );
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(statusMsg.textContent).toContain("offline");
+    });
+
+    it("speech recognition onresult delegates unmatched conversational transcript to RulesArbiterClient", async () => {
+      const mockArbiter = new MockRulesArbiterClient({
+        mockResponse: {
+          ruleTitle: "Silence On Restrained Target",
+          ruleId: "silence_restrained",
+          summary: "Casting silence prevents verbal components.",
+          ruling:
+            "A restrained creature inside silence cannot cast spells with verbal components.",
+          citations: ["PHB p. 275"],
+          confidence: "exact"
+        }
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      harness.triggerPtt();
+      const rec = harness.getLastSpeechRecognitionInstance();
+      expect(rec).not.toBeNull();
+
+      // Trigger spoken transcript that misses Tier 1
+      rec.onresult({
+        results: [
+          [
+            {
+              transcript:
+                "What happens if I cast silence while restraining an enemy caster?"
+            }
+          ]
+        ]
+      });
+
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(mockArbiter.queryHistory).toContain(
+        "What happens if I cast silence while restraining an enemy caster?"
+      );
+      const card = document.getElementById("rule-card")!;
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Silence On Restrained Target"
+      );
+    });
+
+    it("handles arbiter API failure or rejected promise gracefully without unhandled rejection", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi
+        .fn()
+        .mockRejectedValue(new Error("API Gateway 502 Bad Gateway"));
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+
+      dictationInput.value = "How does antimagic field affect wildshape?";
+      harness.handleDictationInput(
+        "How does antimagic field affect wildshape?"
+      );
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(statusMsg.textContent).toContain("No rule found");
+    });
+
+    it("sequence guard prevents out-of-order async arbiter responses from clobbering newer queries", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      let resolveFirstQuery: ((res: any) => void) | null = null;
+
+      mockArbiter.queryRulesArbiter = vi
+        .fn()
+        .mockImplementation((query: string) => {
+          if (query.includes("slow")) {
+            return new Promise((resolve) => {
+              resolveFirstQuery = resolve;
+            });
+          }
+          return Promise.resolve({
+            success: true,
+            data: {
+              ruleTitle: "Fast Query Rule",
+              ruleId: "fast_rule",
+              summary: "Fast summary",
+              ruling: "Fast ruling",
+              citations: ["PHB p. 100"],
+              confidence: "exact"
+            }
+          });
+        });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+
+      // 1. Send slow query
+      dictationInput.value = "Why is this query slow?";
+      harness.handleDictationInput("Why is this query slow?");
+      vi.advanceTimersByTime(900);
+
+      // 2. Send fast query before slow finishes
+      dictationInput.value = "Fast query now";
+      harness.handleDictationInput("Fast query now");
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Fast Query Rule"
+      );
+
+      // 3. Late resolution of slow query should be ignored
+      if (resolveFirstQuery) {
+        (resolveFirstQuery as any)({
+          success: true,
+          data: {
+            ruleTitle: "Late Stale Rule",
+            ruleId: "late_stale",
+            summary: "Should not show",
+            ruling: "Should not show",
+            citations: [],
+            confidence: "unsupported"
+          }
+        });
+      }
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Title remains Fast Query Rule
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Fast Query Rule"
+      );
     });
   });
 });

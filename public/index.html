@@ -4752,30 +4752,43 @@
             });
             if (hits && hits.length > 0) {
               const top = hits[0];
-              return {
-                key: top.id || top.title.toLowerCase(),
-                id: top.id,
-                title: top.title,
-                source: top.source || "Core Mechanic",
-                summary: top.summary,
-                text: top.summary,
-                entry: {
+              const cleanTitle = (top.title || "").toLowerCase();
+              const cleanQuery = query.toLowerCase();
+              const isDirectTitleMatch =
+                cleanQuery === cleanTitle ||
+                cleanTitle.includes(cleanQuery) ||
+                cleanQuery.includes(cleanTitle);
+              const isConversational = isConversationalQuery_(query);
+              if (
+                isDirectTitleMatch ||
+                (!isConversational && top.score >= 3.0)
+              ) {
+                return {
+                  key: top.id || top.title.toLowerCase(),
                   id: top.id,
                   title: top.title,
-                  type: top.source || "Core Mechanic",
                   source: top.source || "Core Mechanic",
                   summary: top.summary,
-                  text: top.summary
-                }
-              };
+                  text: top.summary,
+                  entry: {
+                    id: top.id,
+                    title: top.title,
+                    type: top.source || "Core Mechanic",
+                    source: top.source || "Core Mechanic",
+                    summary: top.summary,
+                    text: top.summary
+                  }
+                };
+              }
             }
           } catch (_e) {}
         }
-        const lower = query.toLowerCase();
+        const lower = query.toLowerCase().trim();
         const keys = Object.keys(DEFAULT_GLOSSARY);
         for (let i = 0; i < keys.length; i++) {
           const key = keys[i];
-          if (lower.includes(key.replace(/_/g, " ")) || lower.includes(key)) {
+          const readableKey = key.replace(/_/g, " ");
+          if (lower === readableKey || lower === key) {
             return {
               key: key,
               entry: DEFAULT_GLOSSARY[key]
@@ -4807,17 +4820,107 @@
         }
       }
 
+      let activeRulesArbiterClient_ = null;
+
+      function getOrCreateRulesArbiterClient_() {
+        if (typeof window !== "undefined" && window.rulesArbiterClient) {
+          activeRulesArbiterClient_ = window.rulesArbiterClient;
+          return activeRulesArbiterClient_;
+        }
+        if (activeRulesArbiterClient_) return activeRulesArbiterClient_;
+        if (typeof window !== "undefined" && window.RulesArbiterClient) {
+          try {
+            activeRulesArbiterClient_ = new window.RulesArbiterClient();
+            return activeRulesArbiterClient_;
+          } catch (_e) {
+            console.warn("Could not instantiate RulesArbiterClient:", _e);
+          }
+        }
+        return null;
+      }
+
+      function isConversationalQuery_(query) {
+        const q = String(query || "")
+          .trim()
+          .toLowerCase();
+        if (q.includes("?")) return true;
+        if (
+          /^(can|could|how|what|when|where|why|does|do|is|are|if)\b/i.test(q)
+        ) {
+          return true;
+        }
+        const words = q.split(/\s+/).filter(Boolean);
+        return words.length >= 5;
+      }
+
+      let activeDictationSeq_ = 0;
+
       function executeDictationQuery_(rawQuery) {
         const cleaned = String(rawQuery || "").trim();
         if (!cleaned) return;
-        const matched = matchSpokenRuleQuery_(cleaned);
-        if (matched && matched.entry) {
-          showRuleCard_(matched.entry, cleaned);
-          showPttStatus_(`✓ Rule found: ${matched.entry.title || cleaned}`);
+        const seq = ++activeDictationSeq_;
+
+        const isConversational = isConversationalQuery_(cleaned);
+
+        // Tier 1: Local RAM rulesMiniSearch fast-path (<5ms, zero token) for direct keyword searches
+        if (!isConversational) {
+          const matched = matchSpokenRuleQuery_(cleaned);
+          if (matched && matched.entry) {
+            showRuleCard_(matched.entry, cleaned);
+            showPttStatus_(`✓ Rule found: ${matched.entry.title || cleaned}`);
+            return;
+          }
+        }
+
+        // Tier 2: Cloud 5e Rules Arbiter (Firebase AI Logic / Gemini 2.5 Flash)
+        const arbiter = getOrCreateRulesArbiterClient_();
+        if (arbiter && typeof arbiter.queryRulesArbiter === "function") {
+          showPttStatus_("Consulting 5e Rules Arbiter (Gemini 2.5 Flash)...");
+          arbiter
+            .queryRulesArbiter(cleaned)
+            .then(function (result) {
+              if (seq !== activeDictationSeq_) return;
+              if (result && result.success && result.data) {
+                showRuleCard_(result.data, cleaned);
+                showPttStatus_(`✓ Rule resolved: ${result.data.ruleTitle}`);
+              } else if (result && result.isOffline) {
+                // Tier 3: Offline fallback to keyword search if available
+                const fallbackMatch = matchSpokenRuleQuery_(cleaned);
+                if (fallbackMatch && fallbackMatch.entry) {
+                  showRuleCard_(fallbackMatch.entry, cleaned);
+                }
+                showPttStatus_(
+                  `⚠️ Device is offline. Showing local glossary keywords for "${cleaned}".`,
+                  true
+                );
+              } else {
+                const errMsg =
+                  (result && result.error) ||
+                  `No rule found for "${cleaned}". Try searching keywords above.`;
+                showPttStatus_(errMsg, true);
+              }
+            })
+            .catch(function (err) {
+              if (seq !== activeDictationSeq_) return;
+              console.warn("Rules Arbiter query error:", err);
+              showPttStatus_(
+                `No rule found for "${cleaned}". Try searching keywords above.`,
+                true
+              );
+            });
         } else {
-          showPttStatus_(
-            `No exact rule found for "${cleaned}". Try searching keywords above.`
-          );
+          // Tier 3: Local glossary fallback if arbiter unavailable
+          const fallbackMatch = matchSpokenRuleQuery_(cleaned);
+          if (fallbackMatch && fallbackMatch.entry) {
+            showRuleCard_(fallbackMatch.entry, cleaned);
+            showPttStatus_(
+              `✓ Rule found: ${fallbackMatch.entry.title || cleaned}`
+            );
+          } else {
+            showPttStatus_(
+              `No exact rule found for "${cleaned}". Try searching keywords above.`
+            );
+          }
         }
       }
 
@@ -4912,6 +5015,8 @@
             if (matched) {
               showRuleCard_(matched.entry, transcript.toLowerCase());
               showPttStatus_(`🎙️ Heard: "${transcript}"`);
+            } else if (isConversationalQuery_(transcript)) {
+              executeDictationQuery_(transcript);
             } else if (transcript) {
               showPttStatus_(
                 `🎙️ Heard: "${transcript}" (no exact rule match found in glossary)`
@@ -4997,9 +5102,20 @@
         let heardPhrase = "";
 
         if (ruleOrTitle && typeof ruleOrTitle === "object") {
-          ruleTitle = ruleOrTitle.title || ruleOrTitle.name || "";
-          ruleText = ruleOrTitle.summary || ruleOrTitle.text || "";
-          ruleSource = ruleOrTitle.source || ruleOrTitle.type || "Mechanic";
+          ruleTitle =
+            ruleOrTitle.ruleTitle ||
+            ruleOrTitle.title ||
+            ruleOrTitle.name ||
+            "";
+          ruleText =
+            ruleOrTitle.ruling || ruleOrTitle.summary || ruleOrTitle.text || "";
+          ruleSource =
+            (ruleOrTitle.confidence
+              ? `Rules Arbiter (${ruleOrTitle.confidence})`
+              : "") ||
+            ruleOrTitle.source ||
+            ruleOrTitle.type ||
+            "Mechanic";
           heardPhrase = String(textOrPhrase || ruleTitle.toLowerCase());
         } else {
           ruleTitle = String(ruleOrTitle || "");

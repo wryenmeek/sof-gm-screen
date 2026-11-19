@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import fs from "fs";
+import path from "path";
 
 function renderTemplateHtml(mode: "gm" | "companion"): string {
   const rawHtml = fs.readFileSync("Index.html", "utf8");
@@ -18,6 +19,18 @@ function renderTemplateHtml(mode: "gm" | "companion"): string {
         /<\?=\s*viewMode\s*===\s*['"]companion['"]\s*\?\s*['"]companion-only-mode['"]\s*:\s*['"]['"]\s*\?>/g,
         "companion-only-mode"
       )
+      .replace(
+        /<\?=\s*typeof viewMode !== ['"]undefined['"] \? viewMode : ['"]gm['"]\s*\?>/g,
+        "companion"
+      )
+      .replace(
+        /<\?=\s*typeof gmKey !== ['"]undefined['"] \? gmKey : ['"]['"]\s*\?>/g,
+        ""
+      )
+      .replace(
+        /<\?=\s*typeof webAppUrl !== ['"]undefined['"] \? webAppUrl : ['"]['"]\s*\?>/g,
+        ""
+      )
       .replace(/<\?=\s*sessionDate\s*\?>/g, sessionDate)
       .replace(/<\?=\s*gmKey\s*\?>/g, "");
   }
@@ -32,6 +45,18 @@ function renderTemplateHtml(mode: "gm" | "companion"): string {
     .replace(/<\?\s*\}\s*\?>/gi, "")
     .replace(
       /<\?=\s*viewMode\s*===\s*['"]companion['"]\s*\?\s*['"]companion-only-mode['"]\s*:\s*['"]['"]\s*\?>/g,
+      ""
+    )
+    .replace(
+      /<\?=\s*typeof viewMode !== ['"]undefined['"] \? viewMode : ['"]gm['"]\s*\?>/g,
+      "gm"
+    )
+    .replace(
+      /<\?=\s*typeof gmKey !== ['"]undefined['"] \? gmKey : ['"]['"]\s*\?>/g,
+      "test-gm-key"
+    )
+    .replace(
+      /<\?=\s*typeof webAppUrl !== ['"]undefined['"] \? webAppUrl : ['"]['"]\s*\?>/g,
       ""
     )
     .replace(/<\?=\s*sessionDate\s*\?>/g, sessionDate)
@@ -137,6 +162,8 @@ test.describe("Index.html Component Visual Snapshot Regression", () => {
 
     await page.waitForSelector("#sidebar");
     await page.waitForSelector("#workspace");
+    await page.waitForSelector("#file-list .file-item");
+    await page.waitForSelector("#gm-roster-list .gm-roster-item");
     await page.evaluate(() => document.fonts.ready);
 
     await expect(page).toHaveScreenshot("desktop-gm-viewport-1440x900.png");
@@ -152,6 +179,7 @@ test.describe("Index.html Component Visual Snapshot Regression", () => {
     await page.setContent(html, { waitUntil: "domcontentloaded" });
 
     await page.waitForSelector("#player-hud");
+    await expect(page.locator("#player-hud")).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
 
     await expect(page).toHaveScreenshot(
@@ -392,5 +420,310 @@ test.describe("Index.html Component Visual Snapshot Regression", () => {
     await expect(page).toHaveScreenshot(
       "desktop-gm-audio-mixer-active-status.png"
     );
+  });
+
+  test("7. Desktop GM: Combat Tracker, Ambush Badges, Party Roster & Floating Reactions (1440x900)", async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(mockInitScript);
+
+    const html = renderTemplateHtml("gm");
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
+    await page.waitForSelector("#sidebar");
+    await page.waitForSelector("#file-list .file-item");
+    await page.waitForSelector("#gm-combat-tracker");
+
+    await page.evaluate(() => {
+      (window as any).renderGmCombat_({
+        round: 2,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          {
+            id: "pog",
+            name: "Pog",
+            initiative: 19,
+            hp: 34,
+            maxHp: 42,
+            ac: 16,
+            isPlayerVisible: true
+          },
+          {
+            id: "mon1",
+            name: "Muttering Serpent",
+            initiative: 14,
+            hp: 142,
+            maxHp: 142,
+            ac: 17,
+            isPlayerVisible: true
+          },
+          {
+            id: "ambush1",
+            name: "Sahuagin Ambushers",
+            initiative: 11,
+            hp: 66,
+            maxHp: 66,
+            ac: 14,
+            isPlayerVisible: false
+          }
+        ]
+      });
+
+      (window as any).updateGmRosterDom_([
+        { characterId: "pog", name: "Pog", claimedBy: "uid_player_1" },
+        { characterId: "vaelor", name: "Vaelor", claimedBy: "uid_player_2" },
+        { characterId: "orca", name: "Orca", claimedBy: null },
+        { characterId: "fade", name: "Fade", claimedBy: null },
+        { characterId: "guest", name: "Guest", claimedBy: null }
+      ]);
+    });
+
+    await page.click("#combat-next-btn");
+    await expect(page.locator("#gm-combat-list tr.active-row")).toHaveAttribute(
+      "data-combatant-id",
+      "mon1"
+    );
+    await expect(page.locator("#gm-combat-list .ambush-badge")).toContainText(
+      "Hidden"
+    );
+    await expect(
+      page.locator("#gm-roster-list .force-release-btn")
+    ).toHaveCount(2);
+
+    await page.evaluate(() => {
+      const bubble = (window as any).renderFloatingReactionBubble({
+        id: "rx_visual_1",
+        characterName: "Pog",
+        emoji: "⚔️"
+      });
+      if (bubble) {
+        bubble.style.animation = "none";
+        bubble.style.opacity = "1";
+        bubble.style.left = "50%";
+        bubble.style.bottom = "12px";
+        bubble.style.transform = "translateX(-50%)";
+      }
+    });
+
+    await page.waitForSelector(".floating-reaction-bubble");
+    await page.evaluate(() => document.fonts.ready);
+
+    await expect(page).toHaveScreenshot(
+      "desktop-gm-combat-roster-reactions.png"
+    );
+  });
+
+  test("8. Mobile Companion: Sanitized Initiative Projection, Status Bands & Turn Alert Banner (390x844)", async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(mockInitScript);
+
+    const html = renderTemplateHtml("companion");
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
+    await page.waitForSelector("#player-hud");
+    await expect(page.locator("#player-hud")).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as any).selectPlayerIdentity("Pog", "pog");
+      (window as any).renderPlayerCombat_({
+        round: 3,
+        activeIndex: 0,
+        isRunning: true,
+        combatants: [
+          { id: "pog", name: "Pog", initiative: 19, statusBand: "INJURED" },
+          {
+            id: "vaelor",
+            name: "Vaelor",
+            initiative: 17,
+            statusBand: "UNINJURED"
+          },
+          { id: "orca", name: "Orca", initiative: 15, statusBand: "BLOODIED" },
+          {
+            id: "mon1",
+            name: "Muttering Serpent",
+            initiative: 12,
+            statusBand: "CRITICAL"
+          },
+          {
+            id: "deckhand",
+            name: "Pirate Deckhand",
+            initiative: 6,
+            statusBand: "DOWN"
+          }
+        ]
+      });
+    });
+
+    await page.waitForSelector("#player-turn-banner");
+    await expect(page.locator("#player-turn-banner")).toBeVisible();
+    await expect(page.locator("#player-combat-tracker")).toBeVisible();
+    await expect(page.locator("#player-combat-list")).toContainText("INJURED");
+    await expect(page.locator("#player-combat-list")).toContainText("BLOODIED");
+    await expect(page.locator("#player-combat-list")).toContainText("CRITICAL");
+    await expect(page.locator("#player-combat-list")).toContainText("DOWN");
+    await expect(page.locator("#player-combat-list")).not.toContainText("142");
+
+    await page.evaluate(() => document.fonts.ready);
+
+    await expect(page).toHaveScreenshot(
+      "mobile-companion-combat-turn-alert.png"
+    );
+  });
+
+  test("9. Mobile Companion: Character Roster Claiming, Contested Claim & Switch Confirmation Modal (390x844)", async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(mockInitScript);
+
+    const html = renderTemplateHtml("companion");
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
+    await page.waitForSelector("#player-hud");
+    await expect(page.locator("#player-hud")).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as any).liveTabletopClient = {
+        getCurrentUser: () => ({ uid: "uid_self" })
+      };
+      (window as any).selectPlayerIdentity("Pog", "pog");
+      (window as any).togglePlayerIdentityModal();
+      (window as any).updateRosterDom_([
+        { characterId: "pog", name: "Pog", claimedBy: "uid_self" },
+        { characterId: "vaelor", name: "Vaelor", claimedBy: "uid_other" },
+        { characterId: "orca", name: "Orca", claimedBy: null },
+        { characterId: "fade", name: "Fade", claimedBy: null },
+        { characterId: "guest", name: "Guest", claimedBy: null }
+      ]);
+    });
+
+    await expect(
+      page.locator('.character-card[data-character-id="pog"] .claimed-badge')
+    ).toContainText("You");
+    await expect(
+      page.locator('.character-card[data-character-id="vaelor"] .claimed-badge')
+    ).toContainText("Claimed");
+    await page.click('.character-card[data-character-id="orca"]');
+    await page.waitForSelector("#switch-character-modal:not(.hidden)");
+    await expect(page.locator("#switch-modal-msg")).toContainText(
+      "Switch to Orca? Pog will be released back to the party roster."
+    );
+    await expect(
+      page.locator('.character-card[data-character-id="vaelor"]')
+    ).toBeDisabled();
+
+    await page.evaluate(() => document.fonts.ready);
+
+    await expect(page).toHaveScreenshot(
+      "mobile-companion-switch-character-modal.png"
+    );
+  });
+
+  test("10. Mobile Companion: Structured Rules Arbiter Card with Confidence Badges & Citations (390x844)", async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(mockInitScript);
+
+    const html = renderTemplateHtml("companion");
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
+    await page.waitForSelector("#player-hud");
+    await expect(page.locator("#player-hud")).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as any).selectPlayerIdentity("Pog", "pog");
+      (window as any).showRuleCard_({
+        ruleTitle: "Grappling a Huge Creature",
+        ruleId: "grapple_huge",
+        confidence: "exact",
+        summary:
+          "You cannot grapple a creature more than one size larger than you.",
+        ruling:
+          "A Medium creature (Pog) can grapple at most a Large creature. Huge creatures cannot be grappled unless an effect increases your size.",
+        citations: ["PHB p. 195", "SRD 5.1 Combat"]
+      });
+    });
+
+    await page.waitForSelector("#rule-card.visible");
+    await expect(
+      page.locator('#card-confidence[data-confidence="exact"]')
+    ).toBeVisible();
+    await expect(page.locator("#card-summary")).toBeVisible();
+    await expect(page.locator("#card-ruling")).toBeVisible();
+    await expect(page.locator("#card-citations .citation-pill")).toHaveCount(2);
+
+    await page.evaluate(() => document.fonts.ready);
+
+    await expect(page).toHaveScreenshot(
+      "mobile-companion-structured-arbiter-card.png"
+    );
+  });
+
+  test("11. Mobile Companion: In-App GM Login Modal & Validation Error State (390x844)", async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(mockInitScript);
+
+    const html = renderTemplateHtml("companion");
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
+    await page.waitForSelector("#player-hud");
+    await expect(page.locator("#player-hud")).toBeVisible();
+
+    await page.click("#gm-login-trigger-btn");
+    await page.waitForSelector("#gm-key-modal:not(.hidden)");
+    await page.click("#gm-key-submit-btn");
+    await expect(page.locator("#gm-key-error")).toBeVisible();
+    await expect(page.locator("#gm-key-error")).toContainText(
+      "Please enter your GM secret key."
+    );
+
+    await page.evaluate(() => document.fonts.ready);
+
+    await expect(page).toHaveScreenshot("mobile-companion-gm-login-modal.png");
+  });
+
+  test("12. Static Export Distribution: Browser Bundle Exports LiveTabletopClient & RulesArbiterClient (Ticket #54)", async ({
+    page
+  }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        consoleErrors.push(msg.text());
+      }
+    });
+    page.on("pageerror", (err) => {
+      consoleErrors.push(err.message);
+    });
+
+    const publicIndexPath = path.resolve("public", "index.html");
+    const publicBundlePath = path.resolve("public", "tabletop-bundle.js");
+    expect(fs.existsSync(publicIndexPath)).toBe(true);
+    expect(fs.existsSync(publicBundlePath)).toBe(true);
+
+    await page.goto("file://" + publicIndexPath, {
+      waitUntil: "domcontentloaded"
+    });
+
+    await page.waitForFunction(
+      () =>
+        typeof (window as any).LiveTabletopClient === "function" &&
+        typeof (window as any).RulesArbiterClient === "function"
+    );
+
+    const clientTypes = await page.evaluate(() => ({
+      liveTabletopType: typeof (window as any).LiveTabletopClient,
+      rulesArbiterType: typeof (window as any).RulesArbiterClient
+    }));
+
+    expect(clientTypes.liveTabletopType).toBe("function");
+    expect(clientTypes.rulesArbiterType).toBe("function");
+    expect(consoleErrors).toEqual([]);
   });
 });

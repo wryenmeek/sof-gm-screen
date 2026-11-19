@@ -515,11 +515,11 @@ A resonant construct of bronze and coral.
       harness.initLiveAudioCueSubscription("2026-10-31");
       expect(mockClient.sessionDates).toContain("2026-10-31");
       expect(mockClient.cueListeners).toHaveLength(1);
-      expect(harness.isFirestoreLive()).toBe(true);
-
-      // Verify HTTP polling is suppressed
+      // Polling remains active until the first valid snapshot arrives
+      expect(harness.isFirestoreLive()).toBe(false);
       harness.pollLatestAudioCue();
-      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      harness.getLatestAudioCueSpy.mockClear();
 
       // Simulate incoming live audio cue snapshot
       const start = performance.now();
@@ -533,6 +533,8 @@ A resonant construct of bronze and coral.
 
       // Acceptance criterion: instant crossfade executed in <50ms without polling
       expect(elapsedMs).toBeLessThan(50);
+      expect(harness.isFirestoreLive()).toBe(true);
+      harness.pollLatestAudioCue();
       expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
       expect(
         harness.TabletopMixer.activeScorePlayback.source.start
@@ -632,9 +634,15 @@ A resonant construct of bronze and coral.
       });
 
       harness.initLiveAudioCueSubscription("2026-10-31");
-      expect(harness.isFirestoreLive()).toBe(true);
+      // Initially false before first snapshot
+      expect(harness.isFirestoreLive()).toBe(false);
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      harness.getLatestAudioCueSpy.mockClear();
 
-      // Suppressed while live
+      // First snapshot arrives: live state is established and polling is suppressed
+      mockClient.emitCue(null);
+      expect(harness.isFirestoreLive()).toBe(true);
       harness.pollLatestAudioCue();
       expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
 
@@ -696,11 +704,11 @@ A resonant construct of bronze and coral.
 
       const unsub = harness.initLiveAudioCueSubscription("2026-10-31");
       expect(unsub).toBeDefined();
-      expect(harness.isFirestoreLive()).toBe(true);
+      expect(harness.isFirestoreLive()).toBe(false);
 
-      // Polling is suppressed
+      // Polling is active while waiting for live snapshot
       harness.pollLatestAudioCue();
-      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
 
       // Clean unmount
       harness.teardownLiveAudioCueSubscription();
@@ -1207,6 +1215,406 @@ A resonant construct of bronze and coral.
       });
 
       client.destroy();
+    });
+
+    it("hydrates #gm-roster-list with default party characters when LiveTabletopClient is unavailable", () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm",
+        disableLiveTabletopClient: true
+      });
+
+      gmHarness.initGmRoster();
+
+      const rosterList = document.getElementById("gm-roster-list")!;
+      expect(rosterList.textContent).not.toContain("Loading roster...");
+      ["Pog", "Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+        expect(rosterList.textContent).toContain(name);
+      });
+      expect(rosterList.textContent).toContain("Unclaimed");
+    });
+  });
+
+  describe("Capability-Gated Browser Bundle & Runtime Firebase Config Guard (Ticket #54)", () => {
+    it("isFirebaseConfigured returns false when SOF_FIREBASE_CONFIG is absent, empty, or placeholder", () => {
+      const harness = setupClientHarness();
+      const isFirebaseConfigured = harness.isFirebaseConfigured;
+      expect(isFirebaseConfigured).toBeDefined();
+
+      delete (window as any).SOF_FIREBASE_CONFIG;
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = null;
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {};
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "",
+        projectId: "sof-test"
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "   ",
+        projectId: "sof-test"
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "demo-api-key",
+        projectId: "sof-test"
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyValidKey123",
+        projectId: ""
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyValidKey123",
+        projectId: "   "
+      };
+      expect(isFirebaseConfigured()).toBe(false);
+    });
+
+    it("isFirebaseConfigured returns true when SOF_FIREBASE_CONFIG has valid apiKey and projectId", () => {
+      const harness = setupClientHarness();
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyValidKey123",
+        projectId: "sof-gm-screen",
+        authDomain: "sof-gm-screen.firebaseapp.com",
+        appId: "1:1234567890:web:abcdef"
+      };
+
+      expect(harness.isFirebaseConfigured()).toBe(true);
+    });
+
+    it("returns injected test doubles directly when available on window", () => {
+      const mockLive = { testLiveDouble: true };
+      const mockArbiter = { testArbiterDouble: true };
+
+      const harness = setupClientHarness();
+      (window as any).liveTabletopClient = mockLive;
+      (window as any).rulesArbiterClient = mockArbiter;
+
+      expect(harness.getOrCreateLiveTabletopClient()).toBe(mockLive);
+      expect(harness.getLiveTabletopClient()).toBe(mockLive);
+      expect(harness.getOrCreateRulesArbiterClient()).toBe(mockArbiter);
+    });
+
+    it("does not instantiate live clients and returns null when unconfigured without test doubles", () => {
+      const harness = setupClientHarness();
+      delete (window as any).liveTabletopClient;
+      delete (window as any).rulesArbiterClient;
+      delete (window as any).SOF_FIREBASE_CONFIG;
+
+      const liveConstructorSpy = vi.fn();
+      const arbiterConstructorSpy = vi.fn();
+      (window as any).LiveTabletopClient = liveConstructorSpy;
+      (window as any).RulesArbiterClient = arbiterConstructorSpy;
+
+      expect(harness.getOrCreateLiveTabletopClient()).toBeNull();
+      expect(harness.getLiveTabletopClient()).toBeNull();
+      expect(harness.getOrCreateRulesArbiterClient()).toBeNull();
+
+      expect(liveConstructorSpy).not.toHaveBeenCalled();
+      expect(arbiterConstructorSpy).not.toHaveBeenCalled();
+
+      // Placeholder apiKey explicitly rejected
+      (window as any).SOF_FIREBASE_CONFIG = {
+        apiKey: "demo-api-key",
+        projectId: "sof-gm-screen"
+      };
+
+      expect(harness.getOrCreateLiveTabletopClient()).toBeNull();
+      expect(harness.getLiveTabletopClient()).toBeNull();
+      expect(harness.getOrCreateRulesArbiterClient()).toBeNull();
+
+      expect(liveConstructorSpy).not.toHaveBeenCalled();
+      expect(arbiterConstructorSpy).not.toHaveBeenCalled();
+    });
+
+    it("instantiates live clients with SOF_FIREBASE_CONFIG and consolidates singletons when configured", () => {
+      const harness = setupClientHarness();
+      delete (window as any).liveTabletopClient;
+      delete (window as any).rulesArbiterClient;
+
+      const validConfig = {
+        apiKey: "AIzaSyLiveSecret999",
+        projectId: "sof-production-live",
+        authDomain: "sof-production-live.firebaseapp.com"
+      };
+      (window as any).SOF_FIREBASE_CONFIG = validConfig;
+
+      const mockLiveInstance = { id: "live-inst-1" };
+      const liveConstructorSpy = vi.fn().mockImplementation(function () {
+        return mockLiveInstance;
+      });
+      const mockArbiterInstance = { id: "arbiter-inst-1" };
+      const arbiterConstructorSpy = vi.fn().mockImplementation(function () {
+        return mockArbiterInstance;
+      });
+
+      (window as any).LiveTabletopClient = liveConstructorSpy;
+      (window as any).RulesArbiterClient = arbiterConstructorSpy;
+
+      const client1 = harness.getOrCreateLiveTabletopClient();
+      expect(client1).toBe(mockLiveInstance);
+      expect(liveConstructorSpy).toHaveBeenCalledTimes(1);
+      expect(liveConstructorSpy).toHaveBeenCalledWith({
+        firebaseConfig: validConfig
+      });
+
+      // Consolidated getter shares singleton and does not re-instantiate
+      const client2 = harness.getLiveTabletopClient();
+      expect(client2).toBe(mockLiveInstance);
+      expect(liveConstructorSpy).toHaveBeenCalledTimes(1);
+
+      const arbiterClient = harness.getOrCreateRulesArbiterClient();
+      expect(arbiterClient).toBe(mockArbiterInstance);
+      expect(arbiterConstructorSpy).toHaveBeenCalledTimes(1);
+      expect(arbiterConstructorSpy).toHaveBeenCalledWith({
+        firebaseConfig: validConfig
+      });
+    });
+  });
+
+  describe("Progressive Fallback Hardening for Character Roster Claiming & GM Party Roster Seeding (Ticket #55)", () => {
+    describe("Character Claiming & Switching Fallbacks", () => {
+      it("falls back to selectPlayerIdentity without race-loss shake when claimCharacter returns code: ERROR", async () => {
+        const harness = setupClientHarness({ viewMode: "companion" });
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.claimCharacter = vi.fn().mockResolvedValue({
+          success: false,
+          code: "ERROR",
+          error: "Permission denied or network offline"
+        });
+
+        harness.executeCharacterClaim("pog", "Pog");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="pog"]');
+        expect(card?.classList.contains("contested")).toBe(false);
+
+        expect(localStorage.getItem("sof_player_identity")).toBe("Pog");
+        const playerTag = document.getElementById("player-tag");
+        expect(playerTag?.textContent).toContain("Pog");
+      });
+
+      it("falls back to selectPlayerIdentity without race-loss shake when claimCharacter rejects", async () => {
+        const harness = setupClientHarness({ viewMode: "companion" });
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.claimCharacter = vi
+          .fn()
+          .mockRejectedValue(new Error("Firestore unavailable"));
+
+        harness.executeCharacterClaim("vaelor", "Vaelor");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="vaelor"]');
+        expect(card?.classList.contains("contested")).toBe(false);
+
+        expect(localStorage.getItem("sof_player_identity")).toBe("Vaelor");
+        const playerTag = document.getElementById("player-tag");
+        expect(playerTag?.textContent).toContain("Vaelor");
+      });
+
+      it("triggers race-loss shake and rejection message when claimCharacter returns code: ALREADY_CLAIMED", async () => {
+        const harness = setupClientHarness({ viewMode: "companion" });
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.claimCharacter = vi.fn().mockResolvedValue({
+          success: false,
+          code: "ALREADY_CLAIMED"
+        });
+
+        harness.executeCharacterClaim("orca", "Orca");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="orca"]');
+        expect(card?.classList.contains("contested")).toBe(true);
+
+        const toast = document.querySelector(".toast-msg");
+        expect(toast?.textContent).toContain(
+          "Orca has just been claimed by another player."
+        );
+      });
+
+      it("falls back to selectPlayerIdentity when switchCharacter returns code: ERROR or rejects", async () => {
+        const harness = setupClientHarness({
+          viewMode: "companion",
+          initialLocalStorage: {
+            sof_claimed_character_2026_10_31: "pog",
+            sof_player_identity: "Pog"
+          }
+        });
+
+        (window as any).currentClaimedCharacterId = "pog";
+        (window as any).currentPlayerIdentity = "Pog";
+
+        const liveClient = harness.liveTabletopClient as any;
+        liveClient.switchCharacter = vi.fn().mockResolvedValue({
+          success: false,
+          code: "ERROR",
+          error: "Simulated switch error"
+        });
+
+        harness.handleCharacterCardClick("Fade", "fade");
+        harness.confirmSwitchCharacter();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const card = document.querySelector('[data-character-id="fade"]');
+        expect(card?.classList.contains("contested")).toBe(false);
+
+        expect(localStorage.getItem("sof_player_identity")).toBe("Fade");
+      });
+    });
+
+    describe("GM Party Roster Baseline Preservation & Listener Lifecycle", () => {
+      it("renders the 5 canonical party members as Unclaimed on init before snapshot arrival", () => {
+        const harness = setupClientHarness({ viewMode: "gm" });
+        harness.initGmRoster();
+
+        const rosterList = document.getElementById("gm-roster-list")!;
+        ["Pog", "Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+          expect(rosterList.textContent).toContain(name);
+        });
+        expect(rosterList.textContent).not.toContain(
+          "No characters in roster."
+        );
+      });
+
+      it("retains the 5 canonical party members as Unclaimed when subscribeRoster emits empty array []", () => {
+        let snapshotCallback: ((roster: any[]) => void) | null = null;
+        const mockUnsubscribe = vi.fn();
+        const mockLiveClient = {
+          subscribeToRoster: vi
+            .fn()
+            .mockImplementation((_date: string, cb: any) => {
+              snapshotCallback = cb;
+              return mockUnsubscribe;
+            })
+        };
+
+        const harness = setupClientHarness({
+          viewMode: "gm",
+          liveTabletopClient: mockLiveClient as any
+        });
+
+        harness.initGmRoster();
+
+        expect(snapshotCallback).not.toBeNull();
+        snapshotCallback!([]);
+
+        const rosterList = document.getElementById("gm-roster-list")!;
+        expect(rosterList.textContent).not.toContain(
+          "No characters in roster."
+        );
+        ["Pog", "Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+          expect(rosterList.textContent).toContain(name);
+        });
+      });
+
+      it("merges partial snapshots preserving remaining canonical party members as Unclaimed", () => {
+        let snapshotCallback: ((roster: any[]) => void) | null = null;
+        const mockLiveClient = {
+          subscribeToRoster: vi
+            .fn()
+            .mockImplementation((_date: string, cb: any) => {
+              snapshotCallback = cb;
+              return vi.fn();
+            })
+        };
+
+        const harness = setupClientHarness({
+          viewMode: "gm",
+          liveTabletopClient: mockLiveClient as any
+        });
+
+        harness.initGmRoster();
+
+        snapshotCallback!([
+          { characterId: "pog", name: "Pog", claimedBy: "player_pog_uid" }
+        ]);
+
+        const rosterList = document.getElementById("gm-roster-list")!;
+        expect(rosterList.textContent).toContain("Pog");
+        expect(rosterList.textContent).toContain("Claimed (player_p...");
+
+        ["Vaelor", "Orca", "Fade", "Guest"].forEach((name) => {
+          expect(rosterList.textContent).toContain(name);
+        });
+      });
+
+      it("unsubscribes prior gmRoster listener on re-invocation", () => {
+        const mockUnsubscribe = vi.fn();
+        const mockLiveClient = {
+          subscribeToRoster: vi.fn().mockReturnValue(mockUnsubscribe)
+        };
+
+        const harness = setupClientHarness({
+          viewMode: "gm",
+          liveTabletopClient: mockLiveClient as any
+        });
+
+        harness.initGmRoster();
+        expect(mockLiveClient.subscribeToRoster).toHaveBeenCalledTimes(1);
+        expect(mockUnsubscribe).not.toHaveBeenCalled();
+
+        harness.initGmRoster();
+        expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+        expect(mockLiveClient.subscribeToRoster).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  describe("Deferred Audio Cue Polling Suppression & Snapshot Confirmation (Ticket #56)", () => {
+    it("defers setting isFirestoreLive to true until the first snapshot arrives from Firestore", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      // Pre-condition: listener attached but no snapshot delivered yet
+      expect(mockClient.cueListeners).toHaveLength(1);
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      // 4-second HTTP polling continues
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
+      harness.getLatestAudioCueSpy.mockClear();
+
+      // First snapshot arrives (even if null / empty doc)
+      mockClient.emitCue(null);
+      expect(harness.isFirestoreLive()).toBe(true);
+
+      // Polling is now suppressed
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps polling active if subscription immediately reports an error or disconnects", () => {
+      const mockClient = new MockLiveTabletopClient();
+      const harness = setupClientHarness({
+        liveTabletopClient: mockClient as any
+      });
+
+      harness.initLiveAudioCueSubscription("2026-10-31");
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      // Error occurs before any snapshot
+      mockClient.emitError(new Error("Permission denied or offline"));
+      expect(harness.isFirestoreLive()).toBe(false);
+
+      harness.pollLatestAudioCue();
+      expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1,6 +1,7 @@
 <!doctype html>
 <html>
   <head>
+    <meta charset="utf-8" />
     <base target="_top" />
     <meta
       name="viewport"
@@ -8,6 +9,7 @@
     />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.min.js"></script>
+    <script src="tabletop-bundle.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -114,6 +116,7 @@
       /* File List */
       #file-list {
         flex: 1;
+        min-height: 90px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
@@ -156,7 +159,7 @@
         padding: 10px 12px;
         display: flex;
         flex-direction: column;
-        height: 40%;
+        height: 25%;
         background: #0d131f;
       }
 
@@ -699,6 +702,13 @@
         background: #b91c1c;
       }
 
+      #gm-combat-tracker {
+        flex: 0 0 auto;
+        max-height: 210px;
+        overflow: visible;
+        border-top: 1px solid var(--border);
+      }
+
       .combat-tracker-header {
         display: flex;
         justify-content: space-between;
@@ -789,6 +799,7 @@
         border-radius: 3px;
         padding: 1px 4px;
         display: inline-block;
+        white-space: nowrap;
       }
 
       .visible-badge {
@@ -799,6 +810,7 @@
         border-radius: 3px;
         padding: 1px 4px;
         display: inline-block;
+        white-space: nowrap;
       }
 
       .player-combat-section {
@@ -1319,7 +1331,7 @@
                 <th>Combatant</th>
                 <th style="width: 52px">HP</th>
                 <th style="width: 32px">AC</th>
-                <th style="width: 44px">Vis</th>
+                <th style="width: 58px">Vis</th>
               </tr>
             </thead>
             <tbody id="gm-combat-list">
@@ -1964,7 +1976,7 @@
 
       let currentSessionDate = new URLSearchParams(window.location.search).get("session") || "2026-10-31";
       const rawViewModeTemplate =
-        new URLSearchParams(window.location.search).get("view") || "companion";
+        new URLSearchParams(window.location.search).get("view") || (new URLSearchParams(window.location.search).get("gmKey") || sessionStorage.getItem("sof_gm_key") ? "gm" : "companion");
       if (typeof window !== "undefined" && !window.INITIAL_VIEW_MODE) {
         window.INITIAL_VIEW_MODE = rawViewModeTemplate.startsWith("<" + "?")
           ? "gm"
@@ -2428,6 +2440,9 @@
             window.location &&
             window.location.search) ||
           "";
+        if (search.includes("view=gm")) {
+          return false;
+        }
         return (
           (typeof window !== "undefined" &&
             window.INITIAL_VIEW_MODE === "companion") ||
@@ -4194,7 +4209,7 @@
           if (typeof window !== "undefined" && window.location) {
             const currentUrl = new URL(window.location.href);
             currentUrl.searchParams.set("gmKey", key);
-            currentUrl.searchParams.delete("view");
+            currentUrl.searchParams.set("view", "gm");
             destUrl = currentUrl.toString();
           }
         } catch (_e) {}
@@ -4205,6 +4220,7 @@
           try {
             const u = new URL(webAppBase);
             u.searchParams.set("gmKey", key);
+            u.searchParams.set("view", "gm");
             if (currentSessionDate) {
               u.searchParams.set("session", currentSessionDate);
             }
@@ -4228,6 +4244,11 @@
           inputKey.name = "gmKey";
           inputKey.value = key;
           form.appendChild(inputKey);
+          const inputView = document.createElement("input");
+          inputView.type = "hidden";
+          inputView.name = "view";
+          inputView.value = "gm";
+          form.appendChild(inputView);
           if (currentSessionDate) {
             const inputSession = document.createElement("input");
             inputSession.type = "hidden";
@@ -4328,15 +4349,45 @@
         highlightActivePlayerIdentity_();
       }
 
+      function isFirebaseConfigured_() {
+        if (typeof window === "undefined" || !window.SOF_FIREBASE_CONFIG) {
+          return false;
+        }
+        const config = window.SOF_FIREBASE_CONFIG;
+        if (!config.apiKey || typeof config.apiKey !== "string") {
+          return false;
+        }
+        const apiKey = config.apiKey.trim();
+        if (apiKey === "" || apiKey === "demo-api-key") {
+          return false;
+        }
+        if (
+          !config.projectId ||
+          typeof config.projectId !== "string" ||
+          config.projectId.trim() === ""
+        ) {
+          return false;
+        }
+        return true;
+      }
+
       function getOrCreateLiveTabletopClient_() {
         if (liveTabletopClient) return liveTabletopClient;
         if (typeof window !== "undefined" && window.liveTabletopClient) {
           liveTabletopClient = window.liveTabletopClient;
           return liveTabletopClient;
         }
-        if (typeof window !== "undefined" && window.LiveTabletopClient) {
+        if (!isFirebaseConfigured_()) {
+          return null;
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.LiveTabletopClient === "function"
+        ) {
           try {
-            liveTabletopClient = new window.LiveTabletopClient();
+            liveTabletopClient = new window.LiveTabletopClient({
+              firebaseConfig: window.SOF_FIREBASE_CONFIG
+            });
             return liveTabletopClient;
           } catch (_e) {
             console.warn("Could not instantiate LiveTabletopClient:", _e);
@@ -4345,13 +4396,70 @@
         return null;
       }
 
+      const CANONICAL_PARTY_ROSTER = [
+        { characterId: "pog", name: "Pog", claimedBy: null },
+        { characterId: "vaelor", name: "Vaelor", claimedBy: null },
+        { characterId: "orca", name: "Orca", claimedBy: null },
+        { characterId: "fade", name: "Fade", claimedBy: null },
+        { characterId: "guest", name: "Guest", claimedBy: null }
+      ];
+      let gmRosterUnsubscribe_ = null;
+
+      function mergeRosterWithCanonicalBaseline_(liveRoster) {
+        const canonical = CANONICAL_PARTY_ROSTER.map(function (c) {
+          return Object.assign({}, c);
+        });
+        if (
+          !liveRoster ||
+          !Array.isArray(liveRoster) ||
+          liveRoster.length === 0
+        ) {
+          return canonical;
+        }
+        const liveMap = new Map();
+        liveRoster.forEach(function (item) {
+          const id = (item.characterId || item.name || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          if (id) {
+            liveMap.set(id, item);
+          }
+        });
+
+        const merged = canonical.map(function (c) {
+          const live = liveMap.get(c.characterId);
+          if (live) {
+            liveMap.delete(c.characterId);
+            return Object.assign({}, c, live);
+          }
+          return c;
+        });
+
+        liveMap.forEach(function (extra) {
+          merged.push(extra);
+        });
+
+        return merged;
+      }
+
       function initGmRoster_() {
+        if (typeof gmRosterUnsubscribe_ === "function") {
+          gmRosterUnsubscribe_();
+          gmRosterUnsubscribe_ = null;
+        }
+        // Initial render: Always baseline five canonical party members as Unclaimed
+        currentRosterList = mergeRosterWithCanonicalBaseline_([]);
+        updateGmRosterDom_(currentRosterList);
+
         const client = getOrCreateLiveTabletopClient_();
         if (client && typeof client.subscribeToRoster === "function") {
-          client.subscribeToRoster(currentSessionDate, function (roster) {
-            currentRosterList = roster || [];
-            updateGmRosterDom_(currentRosterList);
-          });
+          gmRosterUnsubscribe_ = client.subscribeToRoster(
+            currentSessionDate,
+            function (roster) {
+              currentRosterList = mergeRosterWithCanonicalBaseline_(roster);
+              updateGmRosterDom_(currentRosterList);
+            }
+          );
         }
       }
 
@@ -4526,13 +4634,9 @@
             }
           });
         }
-        if (!roster || roster.length === 0) {
-          container.innerHTML =
-            '<div class="roster-empty-hint" style="color: #64748b; font-size: 11px;">No characters in roster.</div>';
-          return;
-        }
+        const resolvedRoster = mergeRosterWithCanonicalBaseline_(roster);
         let html = "";
-        roster.forEach(function (char) {
+        resolvedRoster.forEach(function (char) {
           const isClaimed = !!char.claimedBy;
           const statusText = isClaimed
             ? "Claimed (" +
@@ -4659,10 +4763,20 @@
                 selectPlayerIdentity(target.name, target.id);
               } else if (result && result.code === "ALREADY_CLAIMED") {
                 handleClaimRaceLoss_(target.name, target.id);
+              } else {
+                console.warn(
+                  "[LiveTabletop] Switch failed with non-fatal code, falling back to local selection:",
+                  result && result.code
+                );
+                selectPlayerIdentity(target.name, target.id);
               }
             })
-            .catch(function (_err) {
-              handleClaimRaceLoss_(target.name, target.id);
+            .catch(function (err) {
+              console.warn(
+                "[LiveTabletop] Switch rejected, degrading to local identity selection:",
+                err
+              );
+              selectPlayerIdentity(target.name, target.id);
             });
         } else {
           executeCharacterClaim_(target.id, target.name);
@@ -4687,10 +4801,20 @@
               selectPlayerIdentity(charName, charId);
             } else if (result && result.code === "ALREADY_CLAIMED") {
               handleClaimRaceLoss_(charName, charId);
+            } else {
+              console.warn(
+                "[LiveTabletop] Claim failed with non-fatal code, falling back to local selection:",
+                result && result.code
+              );
+              selectPlayerIdentity(charName, charId);
             }
           })
-          .catch(function (_err) {
-            handleClaimRaceLoss_(charName, charId);
+          .catch(function (err) {
+            console.warn(
+              "[LiveTabletop] Claim rejected, degrading to local identity selection:",
+              err
+            );
+            selectPlayerIdentity(charName, charId);
           });
       }
 
@@ -4739,6 +4863,8 @@
           if (gmTrackerEl && typeof gmTrackerEl.remove === "function") {
             gmTrackerEl.remove();
           }
+        } else {
+          document.body.classList.remove("companion-only-mode");
         }
         let savedIdentity = null;
         try {
@@ -4918,9 +5044,17 @@
           return activeRulesArbiterClient_;
         }
         if (activeRulesArbiterClient_) return activeRulesArbiterClient_;
-        if (typeof window !== "undefined" && window.RulesArbiterClient) {
+        if (!isFirebaseConfigured_()) {
+          return null;
+        }
+        if (
+          typeof window !== "undefined" &&
+          typeof window.RulesArbiterClient === "function"
+        ) {
           try {
-            activeRulesArbiterClient_ = new window.RulesArbiterClient();
+            activeRulesArbiterClient_ = new window.RulesArbiterClient({
+              firebaseConfig: window.SOF_FIREBASE_CONFIG
+            });
             return activeRulesArbiterClient_;
           } catch (_e) {
             console.warn("Could not instantiate RulesArbiterClient:", _e);
@@ -5017,31 +5151,46 @@
                 if (broadcast) {
                   broadcastRuleRuling_(result.data);
                 }
-              } else if (result && result.isOffline) {
-                // Tier 3: Offline fallback to keyword search if available
+              } else {
+                // Tier 3: Universal local glossary fallback on any Tier 2 failure (offline, quota, timeout, network error)
                 const fallbackMatch = matchSpokenRuleQuery_(cleaned);
                 if (fallbackMatch && fallbackMatch.entry) {
                   showRuleCard_(fallbackMatch.entry, cleaned);
+                  if (result && result.isOffline) {
+                    showPttStatus_(
+                      `⚠️ Device is offline. Showing local glossary keywords for "${cleaned}".`,
+                      true
+                    );
+                  } else {
+                    showPttStatus_(
+                      `✓ Rule found: ${fallbackMatch.entry.title || cleaned}`
+                    );
+                  }
+                } else {
+                  const errMsg =
+                    (result && result.error) ||
+                    `No rule found for "${cleaned}". Try searching keywords above.`;
+                  showPttStatus_(errMsg, true);
                 }
-                showPttStatus_(
-                  `⚠️ Device is offline. Showing local glossary keywords for "${cleaned}".`,
-                  true
-                );
-              } else {
-                const errMsg =
-                  (result && result.error) ||
-                  `No rule found for "${cleaned}". Try searching keywords above.`;
-                showPttStatus_(errMsg, true);
               }
               return result;
             })
             .catch(function (err) {
               if (seq !== activeDictationSeq_) return;
               console.warn("Rules Arbiter query error:", err);
-              showPttStatus_(
-                `No rule found for "${cleaned}". Try searching keywords above.`,
-                true
-              );
+              // Tier 3: Universal local glossary fallback on promise rejection
+              const fallbackMatch = matchSpokenRuleQuery_(cleaned);
+              if (fallbackMatch && fallbackMatch.entry) {
+                showRuleCard_(fallbackMatch.entry, cleaned);
+                showPttStatus_(
+                  `✓ Rule found: ${fallbackMatch.entry.title || cleaned}`
+                );
+              } else {
+                showPttStatus_(
+                  `No rule found for "${cleaned}". Try searching keywords above.`,
+                  true
+                );
+              }
             });
         } else {
           // Tier 3: Local glossary fallback if arbiter unavailable
@@ -5741,29 +5890,10 @@
       }
 
       let isFirestoreLive_ = false;
-      let liveTabletopClient_ = null;
       let audioCueUnsubscribe_ = null;
 
       function getLiveTabletopClient_() {
-        if (liveTabletopClient_) return liveTabletopClient_;
-        if (typeof window !== "undefined") {
-          if (window.liveTabletopClient) {
-            liveTabletopClient_ = window.liveTabletopClient;
-            return liveTabletopClient_;
-          }
-          if (typeof window.LiveTabletopClient === "function") {
-            try {
-              liveTabletopClient_ = new window.LiveTabletopClient();
-              return liveTabletopClient_;
-            } catch (err) {
-              console.warn(
-                "[LiveTabletop] Failed to instantiate LiveTabletopClient:",
-                err
-              );
-            }
-          }
-        }
-        return null;
+        return getOrCreateLiveTabletopClient_();
       }
 
       function setFirestoreLiveState_(isLive) {
@@ -5824,7 +5954,6 @@
               setFirestoreLiveState_(false);
             }
           );
-          setFirestoreLiveState_(true);
         } catch (err) {
           console.warn(
             "[LiveTabletop] Failed to subscribe to real-time audio cue:",

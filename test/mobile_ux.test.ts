@@ -192,6 +192,35 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(gmError.style.display).toBe("block");
       expect(gmError.textContent).toContain("Invalid GM key");
     });
+
+    it("clears preset companion-only-mode when booting in GM mode and propagates view=gm on GM login redirect", () => {
+      const gmHarness = setupClientHarness({
+        viewMode: "gm",
+        gmKey: "test-gm-key"
+      });
+
+      // Simulate static host markup presetting companion-only-mode on <body>
+      document.body.classList.add("companion-only-mode");
+      gmHarness.initCompanionState();
+
+      expect(document.body.classList.contains("companion-only-mode")).toBe(
+        false
+      );
+      expect(document.getElementById("sidebar")).not.toBeNull();
+      expect(document.getElementById("workspace")).not.toBeNull();
+
+      // Simulate unlocking GM screen from Companion via navigateWithGmKey
+      gmHarness.navigateWithGmKey("secret-gm-key");
+      const form = document.getElementById(
+        "gm-navigation-form"
+      ) as HTMLFormElement | null;
+      expect(form).not.toBeNull();
+      const viewInput = form!.querySelector(
+        'input[name="view"]'
+      ) as HTMLInputElement | null;
+      expect(viewInput).not.toBeNull();
+      expect(viewInput!.value).toBe("gm");
+    });
   });
 
   describe("Ticket 08: Mobile Push-to-Talk (PTT) Rules Sniffer & Feedback Logger", () => {
@@ -660,6 +689,75 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(
         harness.mockLocalStorage.getItem("sof_claimed_character_2026-10-31")
       ).toBe("donald");
+      expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
+        "Donald"
+      );
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Donald"
+      );
+    });
+
+    it("falls back to local identity selection without race-loss shake when claimCharacter encounters ERROR or rejects (Ticket #55)", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_test_user", isAnonymous: true }
+      });
+
+      harness.liveTabletopClient.claimCharacter = vi.fn().mockResolvedValue({
+        success: false,
+        code: "ERROR",
+        error: "Network unavailable"
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      const donaldCard = document.querySelector(
+        '[data-character-id="donald"]'
+      ) as HTMLButtonElement;
+
+      harness.handleCharacterCardClick("Donald", "donald");
+      await vi.runAllTimersAsync();
+
+      if (donaldCard) {
+        expect(donaldCard.classList.contains("contested")).toBe(false);
+      }
+      expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
+        "Donald"
+      );
+      expect(document.getElementById("player-tag")!.textContent).toBe(
+        "Player: Donald"
+      );
+    });
+
+    it("falls back to local identity selection without race-loss shake when switchCharacter encounters ERROR or rejects (Ticket #55)", async () => {
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        mockUser: { uid: "anon_switcher", isAnonymous: true }
+      });
+
+      (window as any).onload();
+      await vi.runAllTimersAsync();
+
+      harness.handleCharacterCardClick("Pog", "pog");
+      await vi.runAllTimersAsync();
+
+      harness.liveTabletopClient.switchCharacter = vi.fn().mockResolvedValue({
+        success: false,
+        code: "ERROR",
+        error: "Simulated switch error"
+      });
+
+      harness.handleCharacterCardClick("Donald", "donald");
+      harness.confirmSwitchCharacter();
+      await vi.runAllTimersAsync();
+
+      const donaldCard = document.querySelector(
+        '[data-character-id="donald"]'
+      ) as HTMLButtonElement;
+      if (donaldCard) {
+        expect(donaldCard.classList.contains("contested")).toBe(false);
+      }
       expect(harness.mockLocalStorage.getItem("sof_player_identity")).toBe(
         "Donald"
       );
@@ -1503,6 +1601,101 @@ describe("Mobile Player Companion UX (Tickets 07 & 08)", () => {
       expect(feedbackStatus.textContent).toContain(
         "Feedback could not be saved. Please try again."
       );
+    });
+  });
+
+  describe("Universal Tier 2-to-3 Rules Lookup Ladder Fallback (Ticket #56)", () => {
+    it("falls back to Tier 3 local glossary and renders rule card when Tier 2 arbiter returns quota/API error", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi.fn().mockResolvedValue({
+        success: false,
+        isOffline: false,
+        error: "Resource exhausted (quota limit exceeded)"
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      const card = document.getElementById("rule-card")!;
+
+      dictationInput.value = "How does grappling work?";
+      harness.handleDictationInput("How does grappling work?");
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Grappling"
+      );
+      expect(statusMsg.textContent).toContain("Rule found: Grappling");
+    });
+
+    it("falls back to Tier 3 local glossary and renders rule card when Tier 2 arbiter promise rejects", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi
+        .fn()
+        .mockRejectedValue(new Error("Gateway Timeout 504"));
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      const card = document.getElementById("rule-card")!;
+
+      dictationInput.value = "How does grappling work?";
+      harness.handleDictationInput("How does grappling work?");
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(card.classList.contains("visible")).toBe(true);
+      expect(document.getElementById("card-title")!.textContent).toBe(
+        "Grappling"
+      );
+      expect(statusMsg.textContent).toContain("Rule found: Grappling");
+    });
+
+    it("surfaces error toast when Tier 2 arbiter fails and query has no Tier 3 local match", async () => {
+      const mockArbiter = new MockRulesArbiterClient();
+      mockArbiter.queryRulesArbiter = vi.fn().mockResolvedValue({
+        success: false,
+        isOffline: false,
+        error: "Custom ruleset model error"
+      });
+
+      const harness = setupClientHarness({
+        viewMode: "companion",
+        rulesArbiterClient: mockArbiter
+      });
+
+      const dictationInput = document.getElementById(
+        "ptt-dictation-input"
+      ) as HTMLInputElement;
+      const statusMsg = document.getElementById("ptt-status-msg")!;
+      const card = document.getElementById("rule-card")!;
+
+      dictationInput.value = "What is the secret homebrew spell Xyloblaster?";
+      harness.handleDictationInput(
+        "What is the secret homebrew spell Xyloblaster?"
+      );
+
+      vi.advanceTimersByTime(900);
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(card.classList.contains("visible")).toBe(false);
+      expect(statusMsg.textContent).toContain("Custom ruleset model error");
     });
   });
 });

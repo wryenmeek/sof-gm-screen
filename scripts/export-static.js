@@ -2,6 +2,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import esbuild from "esbuild";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,10 +11,31 @@ const rootDir = path.resolve(__dirname, "..");
 const indexPath = path.join(rootDir, "Index.html");
 const publicDir = path.join(rootDir, "public");
 const outPath = path.join(publicDir, "index.html");
+const bundleEntry = path.join(rootDir, "src", "tabletop_bundle.ts");
+const bundleOut = path.join(publicDir, "tabletop-bundle.js");
 
 if (!fs.existsSync(publicDir)) {
   fs.mkdirSync(publicDir, { recursive: true });
 }
+
+// Compile tabletop bundle for browser runtime
+await esbuild.build({
+  entryPoints: [bundleEntry],
+  bundle: true,
+  outfile: bundleOut,
+  format: "iife",
+  platform: "browser",
+  target: ["es2022"],
+  minify: true,
+  sourcemap: true
+});
+
+// Strip trailing whitespace for strict git diff --check compliance
+let bundleCode = fs.readFileSync(bundleOut, "utf8");
+bundleCode = bundleCode.replace(/[ \t]+$/gm, "");
+fs.writeFileSync(bundleOut, bundleCode, "utf8");
+
+console.log("Compiled browser tabletop bundle to " + bundleOut);
 
 let content = fs.readFileSync(indexPath, "utf8");
 
@@ -142,7 +164,7 @@ content = content.replace(
 
 content = content.replace(
   /"<\?= typeof viewMode !== 'undefined' \? viewMode : 'gm' \?>";/,
-  'new URLSearchParams(window.location.search).get("view") || "companion";'
+  'new URLSearchParams(window.location.search).get("view") || (new URLSearchParams(window.location.search).get("gmKey") || sessionStorage.getItem("sof_gm_key") ? "gm" : "companion");'
 );
 
 content = content.replace(
@@ -157,6 +179,12 @@ content = content.replace(
 
 // Inject the RPC bridge right inside <script>
 content = content.replace(/<script>/, "<script>" + rpcBridge);
+
+// Inject tabletop bundle into <head>
+content = content.replace(
+  /(<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/minisearch[^"]*"><\/script>)/,
+  '$1\n    <script src="tabletop-bundle.js"></script>'
+);
 
 fs.writeFileSync(outPath, content, "utf8");
 console.log(

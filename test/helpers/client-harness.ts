@@ -40,6 +40,7 @@ export class MockLiveTabletopClient {
   public rosterListeners: Set<(roster: CharacterRosterDoc[]) => void> =
     new Set();
   public audioCueListeners: Set<(cue: any) => void> = new Set();
+  public audioCueErrorListeners: Set<(err: any) => void> = new Set();
   public combatListeners: Set<(combat: any) => void> = new Set();
   public reactionsListeners: Set<(reactions: any) => void> = new Set();
   public sessionDate: string = "2026-10-31";
@@ -254,15 +255,37 @@ export class MockLiveTabletopClient {
     return { success: true, code: "CLAIMED", claimedByUid: uid };
   }
 
-  public subscribeToAudioCue(_sessionDate: string, cb: any): () => void {
+  public get cueListeners(): Array<(cue: any) => void> {
+    return Array.from(this.audioCueListeners);
+  }
+
+  public subscribeToAudioCue(
+    _sessionDate: string,
+    cb: any,
+    onError?: (err: Error) => void
+  ): () => void {
     this.audioCueListeners.add(cb);
-    return () => this.audioCueListeners.delete(cb);
+    if (onError) this.audioCueErrorListeners.add(onError);
+    return () => {
+      this.audioCueListeners.delete(cb);
+      if (onError) this.audioCueErrorListeners.delete(onError);
+    };
   }
 
   public emitCue(cue: any): void {
     for (const listener of this.audioCueListeners) {
       listener(cue);
     }
+  }
+
+  public emitError(err: any): void {
+    for (const listener of this.audioCueErrorListeners) {
+      listener(err);
+    }
+  }
+
+  public emitAudioCueError(err: any): void {
+    this.emitError(err);
   }
 
   public subscribeToCombat(_sessionDate: string, cb: any): () => void {
@@ -403,6 +426,7 @@ export interface ClientHarnessOptions {
   liveTabletopClient?: LiveTabletopClient | MockLiveTabletopClient;
   initRulesArbiterClient?: boolean;
   rulesArbiterClient?: RulesArbiterClient | MockRulesArbiterClient;
+  disableLiveTabletopClient?: boolean;
   mockRoster?: CharacterRosterDoc[];
   mockUser?: { uid: string; isAnonymous?: boolean } | null;
   forceContentionForCharacterId?: string | null;
@@ -695,14 +719,22 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
               getLatestAudioCueSpy(...args);
               if (cb && options.deferLatestAudioCue) {
                 latestAudioCueResponses.push(cb);
-              } else if (cb && options.latestAudioCue !== undefined) {
-                cb(options.latestAudioCue);
+              } else if (cb) {
+                cb(
+                  options.latestAudioCue !== undefined
+                    ? options.latestAudioCue
+                    : null
+                );
               }
             },
             getLatestRuleQueryCueForCompanion: (...args: any[]) => {
               getLatestCompanionRuleQueryCueSpy(...args);
-              if (cb && options.companionRuleQueryCue !== undefined) {
-                cb(options.companionRuleQueryCue);
+              if (cb) {
+                cb(
+                  options.companionRuleQueryCue !== undefined
+                    ? options.companionRuleQueryCue
+                    : null
+                );
               }
             },
             verifyGmKey: (candidateKey: string) => {
@@ -766,6 +798,9 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         handleManualSave_: typeof handleManualSave_ !== "undefined" ? handleManualSave_ : undefined,
         triggerPromiseExtraction: typeof triggerPromiseExtraction !== "undefined" ? triggerPromiseExtraction : undefined,
         initCompanionState: typeof initCompanionState_ !== "undefined" ? initCompanionState_ : undefined,
+        isCompanionMode: typeof isCompanionMode_ !== "undefined" ? isCompanionMode_ : undefined,
+        initGmRoster: typeof initGmRoster_ !== "undefined" ? initGmRoster_ : undefined,
+        navigateWithGmKey: typeof navigateWithGmKey_ !== "undefined" ? navigateWithGmKey_ : undefined,
         selectPlayerIdentity: typeof selectPlayerIdentity !== "undefined" ? selectPlayerIdentity : undefined,
         togglePlayerIdentityModal: typeof togglePlayerIdentityModal !== "undefined" ? togglePlayerIdentityModal : undefined,
         closePlayerIdentityModal: typeof closePlayerIdentityModal !== "undefined" ? closePlayerIdentityModal : undefined,
@@ -810,28 +845,42 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
         triggerTurnHaptics: typeof triggerTurnHaptics_ !== "undefined" ? triggerTurnHaptics_ : undefined,
         executeDictationQuery: typeof executeDictationQuery_ !== "undefined" ? executeDictationQuery_ : undefined,
         broadcastRuleRuling: typeof broadcastRuleRuling_ !== "undefined" ? broadcastRuleRuling_ : undefined,
-        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined
+        handleAudioIntent: typeof handleAudioIntent_ !== "undefined" ? handleAudioIntent_ : undefined,
+        isFirebaseConfigured: typeof isFirebaseConfigured_ !== "undefined" ? isFirebaseConfigured_ : undefined,
+        getOrCreateLiveTabletopClient: typeof getOrCreateLiveTabletopClient_ !== "undefined" ? getOrCreateLiveTabletopClient_ : undefined,
+        getLiveTabletopClient: typeof getLiveTabletopClient_ !== "undefined" ? getLiveTabletopClient_ : undefined,
+        getOrCreateRulesArbiterClient: typeof getOrCreateRulesArbiterClient_ !== "undefined" ? getOrCreateRulesArbiterClient_ : undefined,
+        executeCharacterClaim: typeof executeCharacterClaim_ !== "undefined" ? executeCharacterClaim_ : undefined,
+        getGmRosterUnsubscribe: () => typeof gmRosterUnsubscribe_ !== "undefined" ? gmRosterUnsubscribe_ : null,
+        mergeRosterWithCanonicalBaseline: typeof mergeRosterWithCanonicalBaseline_ !== "undefined" ? mergeRosterWithCanonicalBaseline_ : undefined
       };
     `
   );
 
-  const liveTabletopClient =
-    options.liveTabletopClient ??
-    (options.initLiveTabletopClient
-      ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
-      : new MockLiveTabletopClient({
-          sessionDate: options.sessionDate || "2026-10-31",
-          initialRoster: options.mockRoster,
-          currentUser: options.mockUser,
-          forceContentionForCharacterId: options.forceContentionForCharacterId
-        }));
+  const liveTabletopClient = options.disableLiveTabletopClient
+    ? null
+    : (options.liveTabletopClient ??
+      (options.initLiveTabletopClient
+        ? new LiveTabletopClient({ appName: `harness-${Date.now()}` })
+        : new MockLiveTabletopClient({
+            sessionDate: options.sessionDate || "2026-10-31",
+            initialRoster: options.mockRoster,
+            currentUser: options.mockUser,
+            forceContentionForCharacterId: options.forceContentionForCharacterId
+          })));
 
   if (liveTabletopClient) {
     (window as any).liveTabletopClient = liveTabletopClient;
+  } else {
+    delete (window as any).liveTabletopClient;
   }
-  (window as any).LiveTabletopClient = options.initLiveTabletopClient
-    ? LiveTabletopClient
-    : MockLiveTabletopClient;
+  if (options.disableLiveTabletopClient) {
+    delete (window as any).LiveTabletopClient;
+  } else {
+    (window as any).LiveTabletopClient = options.initLiveTabletopClient
+      ? LiveTabletopClient
+      : MockLiveTabletopClient;
+  }
 
   const rulesArbiterClient =
     options.rulesArbiterClient ??

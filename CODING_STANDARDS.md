@@ -62,3 +62,9 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 12. **Rules Arbiter Client Boundary & Normalization (`src/rules_arbiter_client.ts`, `Index.html`):**
     Direct calls to Gemini 2.5 Flash via Firebase AI Logic must sanitize input queries ($\le 500$ chars, strip control characters) and frame them within delimiters to prevent prompt injection. All responses must be validated against `ARBITER_RULE_RESPONSE_SCHEMA` and normalized via `normalizeRuling_` with safe confidence clamping (`exact`, `interpretation`, `unsupported`) and bounded lengths before rendering or broadcasting to `live/audio_cue`.
+
+13. **Progressive Capability Gating for Client-Side Cloud SDKs (`Index.html`, `public/index.html`):**
+    Client code must gate cloud SDK instantiations (`LiveTabletopClient`, `RulesArbiterClient`) behind runtime configuration checks (`isFirebaseConfigured_()`). Unconfigured environments (missing `window.SOF_FIREBASE_CONFIG`, empty `projectId`, or placeholder `apiKey: "demo-api-key"`) must skip instantiation and return `null`, allowing graceful fallback to Cold Prep Archive mode without firing failed requests to placeholder cloud endpoints.
+
+14. **Frozen Lockfile & Package Hygiene (`bun.lock`, `package-lock.json`, `knip.json`):**
+    Continuous Integration enforces `bun install --frozen-lockfile` and strict Knip dependency validation. Whenever adding or updating build dependencies or scripts, keep `bun.lock` and `package-lock.json` synchronized. Any CLI binaries executed by package scripts or developer tooling must be audited and registered in `knip.json` `ignoreBinaries` or `ignoreDependencies` to maintain zero-tolerance Knip clean passes.

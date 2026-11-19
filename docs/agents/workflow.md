@@ -23,6 +23,14 @@ All maps, specs, and implementation tickets live as **GitHub issues** operated v
 
 Keep steps 1–3 in **one unbroken context window** so domain terms, spec, and tickets share the same primary source. Start a fresh context window (or isolated subagent worktree) for step 4.
 
+### Pre-`ready-for-agent` Gate (applies to `triage`, `to-spec`, and `to-tickets`)
+
+Before labeling any spec, ticket, or triaged issue `ready-for-agent`:
+
+1. **Code-graph blast-radius check (`infigraph`):** Run `infigraph index` and inspect implicated files/symbols (`file-deps`, `search-code`, `impact`) to validate assumptions, detect already-landed fixes, and capture downstream callers, bundlers, configs, and test seams.
+2. **Skill best-practice review:** Map impacted paths against [`.github/required-skills.json`](../../.github/required-skills.json), read each matching `SKILL.md`, and remediate any alignment gaps in the issue/spec.
+3. **Explicit Skill & Documentation Acceptance Criteria:** Include checkboxes in `## Acceptance criteria` for every required skill review from `.github/required-skills.json` and every impacted documentation surface ([`CODING_STANDARDS.md`](../../CODING_STANDARDS.md), [`GLOSSARY.md`](../../GLOSSARY.md), `docs/adr/`, `README.md`, or explicit `N/A — no doc changes`).
+
 ### 1. Sharpen the domain and design (`grill-with-docs`)
 
 Read [`.agents/skills/grill-with-docs/SKILL.md`](../../.agents/skills/grill-with-docs/SKILL.md), [`.agents/skills/grilling/SKILL.md`](../../.agents/skills/grilling/SKILL.md), and [`.agents/skills/domain-modeling/SKILL.md`](../../.agents/skills/domain-modeling/SKILL.md).

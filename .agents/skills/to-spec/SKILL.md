@@ -10,7 +10,7 @@ The issue tracker and triage label vocabulary should have been provided to you. 
 
 ## Process
 
-1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.
+1. Explore the repo to understand the current state of the codebase, if you haven't already. Run `infigraph index` and `file-deps` / `search-code` / `impact` on implicated areas to verify assumptions and blast radius, and complete the Pre-`ready-for-agent` Gate in [`docs/agents/workflow.md`](../../../docs/agents/workflow.md). Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.
 
 2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
 
@@ -67,6 +67,11 @@ A list of testing decisions that were made. Include:
 ## Out of Scope
 
 A description of the things that are out of scope for this spec.
+
+## Skill & Documentation Governance
+
+- Applicable skills from `.github/required-skills.json` and any skill-specific best-practice constraints
+- Documentation surfaces impacted (`CODING_STANDARDS.md`, `GLOSSARY.md`, `docs/adr/`, `README.md`, or `N/A`)
 
 ## Further Notes
 

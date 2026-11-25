@@ -1,0 +1,15 @@
+# Lockfiles and logs
+bun.lock
+package-lock.json
+act_output.log
+
+# Generated bundles and source maps
+public/tabletop-bundle.js
+public/tabletop-bundle.js.map
+
+# Tooling caches and test artifacts
+node_modules/
+.infigraph/
+.vitest/
+test-results/
+playwright-report/

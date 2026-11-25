@@ -2,24 +2,5 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": ["Code.gs", "src/**/*.ts", "test/**/*.ts"],
   "project": ["Code.gs", "src/**/*.ts", "test/**/*.ts"],
-  "ignoreDependencies": [
-    "@google/clasp",
-    "eslint",
-    "markdownlint-cli2",
-    "prettier",
-    "stylelint"
-  ],
-  "ignoreBinaries": [
-    "git",
-    "python3",
-    "tsc",
-    "eslint",
-    "stylelint",
-    "markdownlint-cli2",
-    "prettier",
-    "vitest",
-    "playwright",
-    "knip",
-    "clasp"
-  ]
+  "ignoreBinaries": ["python3"]
 }

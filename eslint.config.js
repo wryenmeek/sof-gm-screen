@@ -107,6 +107,12 @@ export default [
     }
   },
   {
+    files: ["src/utils/sanitization.ts"],
+    rules: {
+      "no-control-regex": "off"
+    }
+  },
+  {
     ignores: [
       "node_modules/**",
       ".agents/**",

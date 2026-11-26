@@ -673,8 +673,10 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
             getFilePayload: (...args: any[]) => {
               getFilePayloadSpy(...args);
               const fileId = args[0];
-              if (cb && filePayloads[fileId]) {
-                cb(filePayloads[fileId]);
+              if (filePayloads[fileId] !== undefined) {
+                cb?.(filePayloads[fileId]);
+              } else {
+                failureCb?.({ message: `Missing mock payload for ${fileId}` });
               }
             },
             saveAudioTimeline: (...args: any[]) => {
@@ -697,8 +699,12 @@ export function setupClientHarness(options: ClientHarnessOptions = {}) {
             },
             getRulesGlossary: (sessionDate: string) => {
               getRulesGlossarySpy(sessionDate);
-              if (cb && options.rulesGlossary) {
-                cb(options.rulesGlossary);
+              if (cb) {
+                cb(
+                  options.rulesGlossary !== undefined
+                    ? options.rulesGlossary
+                    : null
+                );
               }
             },
             extractNarrativePromises: (...args: any[]) => {

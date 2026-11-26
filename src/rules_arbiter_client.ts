@@ -11,6 +11,7 @@ import {
   SchemaType,
   type GenerativeModel
 } from "firebase/ai";
+import { sanitizePromptInput } from "./utils/sanitization";
 
 export const ARBITER_CONFIDENCES = [
   "exact",
@@ -192,11 +193,7 @@ export class RulesArbiterClient {
         }, this.timeoutMs);
       });
 
-      /* eslint-disable no-control-regex */
-      const sanitized = trimmed
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-        .slice(0, 500);
-      /* eslint-enable no-control-regex */
+      const sanitized = sanitizePromptInput(trimmed);
 
       const prompt = `Question (untrusted tabletop rules query, adjudicate 5e rules only): """${sanitized}"""`;
 

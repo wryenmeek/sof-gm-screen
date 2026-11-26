@@ -60,7 +60,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 11. **Audio Cue Write Boundary & Ducking Guard (`firestore.rules`, `Index.html`):**
     Writes to `live/audio_cue` must enforce `source in ['companion_ptt', 'gemini_tier2']` and require `request.auth.uid == authorUid`. `RULE_QUERY` intents must reject ducking injection, payload keys outside the allowlist (`ruleTitle`, `ruleId`, `summary`, `ruling`, `citations`, `ruleConfidence`, `confidence`), and bounded string lengths. Client audio mixer must duck tracks exclusively on `MUSIC_CUE` and `SFX` intents, never on `RULE_QUERY`.
 
-12. **Rules Arbiter Client Boundary & Normalization (`src/rules_arbiter_client.ts`, `Index.html`):**
+12. **Rules Arbiter Client Boundary & Normalization (`src/rules_arbiter_client.ts`, `src/utils/sanitization.ts`, `Index.html`):**
     Direct calls to Gemini 2.5 Flash via Firebase AI Logic must sanitize input queries ($\le 500$ chars, strip control characters) and frame them within delimiters to prevent prompt injection. All responses must be validated against `ARBITER_RULE_RESPONSE_SCHEMA` and normalized via `normalizeRuling_` with safe confidence clamping (`exact`, `interpretation`, `unsupported`) and bounded lengths before rendering or broadcasting to `live/audio_cue`.
 
 13. **Progressive Capability Gating for Client-Side Cloud SDKs (`Index.html`, `public/index.html`):**
@@ -68,3 +68,6 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 14. **Frozen Lockfile & Package Hygiene (`bun.lock`, `package-lock.json`, `knip.json`):**
     Continuous Integration enforces `bun install --frozen-lockfile` and strict Knip dependency validation. Whenever adding or updating build dependencies or scripts, keep `bun.lock` and `package-lock.json` synchronized. Any CLI binaries executed by package scripts or developer tooling must be audited and registered in `knip.json` `ignoreBinaries` or `ignoreDependencies` to maintain zero-tolerance Knip clean passes.
+
+15. **Bundler Whitespace Sanitization & Mock RPC Completion Defaults (`scripts/export-static.js`, `test/helpers/client-harness.ts`):**
+    All scripts generating tracked assets in `public/` (such as `scripts/export-static.js`) must strip trailing whitespace (`/[ \t]+$/gm`) before writing to disk to maintain strict `git diff --check` compliance. In `test/helpers/client-harness.ts`, `google.script.run` test mocks (such as `getRulesGlossary` for the Rules Glossary and `getFilePayload` for Session Assets) must resolve completion callbacks (success or failure handlers) by default unless explicitly deferred via an opt-in harness flag, preventing silent test hangs.

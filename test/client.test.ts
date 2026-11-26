@@ -1617,4 +1617,35 @@ A resonant construct of bronze and coral.
       expect(harness.getLatestAudioCueSpy).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("Test Harness Mock RPC Completion Defaults (Ticket #57)", () => {
+    it("getRulesGlossary invokes success handler with null when options.rulesGlossary is omitted", () => {
+      setupClientHarness();
+      const onSuccess = vi.fn();
+
+      (window as any).google.script.run
+        .withSuccessHandler(onSuccess)
+        .getRulesGlossary("2026-10-31");
+
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+      expect(onSuccess).toHaveBeenCalledWith(null);
+    });
+
+    it("getFilePayload invokes failure handler when fileId is absent from filePayloads", () => {
+      setupClientHarness({ filePayloads: {} });
+      const onSuccess = vi.fn();
+      const onFailure = vi.fn();
+
+      (window as any).google.script.run
+        .withSuccessHandler(onSuccess)
+        .withFailureHandler(onFailure)
+        .getFilePayload("missing_asset_id", "2026-10-31");
+
+      expect(onSuccess).not.toHaveBeenCalled();
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(onFailure).toHaveBeenCalledWith({
+        message: "Missing mock payload for missing_asset_id"
+      });
+    });
+  });
 });

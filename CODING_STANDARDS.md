@@ -68,3 +68,6 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 
 14. **Frozen Lockfile & Package Hygiene (`bun.lock`, `package-lock.json`, `knip.json`):**
     Continuous Integration enforces `bun install --frozen-lockfile` and strict Knip dependency validation. Whenever adding or updating build dependencies or scripts, keep `bun.lock` and `package-lock.json` synchronized. Any CLI binaries executed by package scripts or developer tooling must be audited and registered in `knip.json` `ignoreBinaries` or `ignoreDependencies` to maintain zero-tolerance Knip clean passes.
+
+15. **Bundler Whitespace Sanitization & Mock RPC Completion Defaults (`scripts/export-static.js`, `test/helpers/client-harness.ts`):**
+    All scripts generating tracked assets in `public/` (such as `scripts/export-static.js`) must strip trailing whitespace (`/[ \t]+$/gm`) before writing to disk to maintain strict `git diff --check` compliance. In `test/helpers/client-harness.ts`, `google.script.run` test mocks (such as `getRulesGlossary` for the Rules Glossary and `getFilePayload` for Session Assets) must resolve completion callbacks (success or failure handlers) by default unless explicitly deferred via an opt-in harness flag, preventing silent test hangs.

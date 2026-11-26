@@ -11,7 +11,7 @@ if [ -n "$staged_files" ]; then
     [ -z "$file" ] && continue
     has_staged=1
     case "$file" in
-      *.md|docs/*)
+      *.md)
         ;;
       *)
         docs_only=0

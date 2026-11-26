@@ -30,10 +30,17 @@ await esbuild.build({
   sourcemap: true
 });
 
-// Strip trailing whitespace for strict git diff --check compliance
-let bundleCode = fs.readFileSync(bundleOut, "utf8");
-bundleCode = bundleCode.replace(/[ \t]+$/gm, "");
-fs.writeFileSync(bundleOut, bundleCode, "utf8");
+// Strip trailing whitespace for strict git diff --check compliance across generated public/ assets
+function stripTrailingWhitespace(text) {
+  return text.replace(/[ \t]+$/gm, "");
+}
+
+for (const generatedFile of [bundleOut, bundleOut + ".map"]) {
+  if (fs.existsSync(generatedFile)) {
+    const raw = fs.readFileSync(generatedFile, "utf8");
+    fs.writeFileSync(generatedFile, stripTrailingWhitespace(raw), "utf8");
+  }
+}
 
 console.log("Compiled browser tabletop bundle to " + bundleOut);
 
@@ -186,6 +193,7 @@ content = content.replace(
   '$1\n    <script src="tabletop-bundle.js"></script>'
 );
 
+content = stripTrailingWhitespace(content);
 fs.writeFileSync(outPath, content, "utf8");
 console.log(
   "Exported static distribution to " +

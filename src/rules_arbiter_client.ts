@@ -193,7 +193,7 @@ export class RulesArbiterClient {
         }, this.timeoutMs);
       });
 
-      const sanitized = sanitizePromptInput(trimmed, 500);
+      const sanitized = sanitizePromptInput(trimmed);
 
       const prompt = `Question (untrusted tabletop rules query, adjudicate 5e rules only): """${sanitized}"""`;
 

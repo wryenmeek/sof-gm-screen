@@ -1,3 +1,31 @@
 #!/usr/bin/env sh
 set -e
-npm run check
+
+staged_files="$(git diff --cached --name-only --no-renames)"
+
+has_staged=0
+docs_only=1
+
+if [ -n "$staged_files" ]; then
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    has_staged=1
+    case "$file" in
+      *.md|docs/*)
+        ;;
+      *)
+        docs_only=0
+        break
+        ;;
+    esac
+  done <<EOF
+$staged_files
+EOF
+fi
+
+if [ "$has_staged" -eq 1 ] && [ "$docs_only" -eq 1 ]; then
+  echo "Documentation-only changes detected; running fast pre-commit check..."
+  npm run lint:md && npm run format:check && npm run audit:artifacts
+else
+  npm run check
+fi

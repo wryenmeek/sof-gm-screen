@@ -24,10 +24,12 @@ How the engineering skills consume this repo's domain documentation and architec
 │   └── index.html                 # Top-level Firebase Hosting client entrypoint
 ├── src/
 │   ├── live_tabletop_client.ts    # Cloud Firestore Modular SDK v11 tabletop sync client
-│   └── rules_arbiter_client.ts    # Firebase AI Logic (Gemini 2.5 Flash) 5e Rules Arbiter client
+│   ├── rules_arbiter_client.ts    # Firebase AI Logic (Gemini 2.5 Flash) 5e Rules Arbiter client
+│   └── utils/
+│       └── sanitization.ts        # Prompt input control-character sanitization & length clamping
 ├── validate_session_artifacts.py  # Pre-flight validator for HTML, MD, Python & RPC contracts
 ├── .githooks/
-│   ├── pre-commit                 # Runs npm run check before commits
+│   ├── pre-commit                 # Runs fast doc checks for *.md-only commits, full npm run check otherwise
 │   └── commit-msg                 # Enforces Conventional Commits and Antigravity-Session-ID
 ├── .github/
 │   ├── copilot-instructions.md    # GitHub Copilot context pointer
@@ -50,6 +52,7 @@ How the engineering skills consume this repo's domain documentation and architec
     ├── client.test.ts             # Tactical search & manifest UI tests
     ├── firestore_rules.test.ts    # Security rules tests for combat partitioning & reactions
     ├── rules_arbiter.test.ts      # Firebase AI Logic Rules Arbiter tests
+    ├── sanitization.test.ts       # Prompt input sanitization unit tests
     ├── audio_engine.test.ts       # Tabletop Mixer, IndexedDB cache & classifier tier tests
     ├── mobile_ux.test.ts          # Player Companion isolation, reactions & roster claiming tests
     ├── server.test.ts             # Apps Script VM server & governance tests

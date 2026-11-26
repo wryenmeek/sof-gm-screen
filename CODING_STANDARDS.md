@@ -60,7 +60,7 @@ Read during `/code-review` (Standards axis) and when extending cross-boundary se
 11. **Audio Cue Write Boundary & Ducking Guard (`firestore.rules`, `Index.html`):**
     Writes to `live/audio_cue` must enforce `source in ['companion_ptt', 'gemini_tier2']` and require `request.auth.uid == authorUid`. `RULE_QUERY` intents must reject ducking injection, payload keys outside the allowlist (`ruleTitle`, `ruleId`, `summary`, `ruling`, `citations`, `ruleConfidence`, `confidence`), and bounded string lengths. Client audio mixer must duck tracks exclusively on `MUSIC_CUE` and `SFX` intents, never on `RULE_QUERY`.
 
-12. **Rules Arbiter Client Boundary & Normalization (`src/rules_arbiter_client.ts`, `Index.html`):**
+12. **Rules Arbiter Client Boundary & Normalization (`src/rules_arbiter_client.ts`, `src/utils/sanitization.ts`, `Index.html`):**
     Direct calls to Gemini 2.5 Flash via Firebase AI Logic must sanitize input queries ($\le 500$ chars, strip control characters) and frame them within delimiters to prevent prompt injection. All responses must be validated against `ARBITER_RULE_RESPONSE_SCHEMA` and normalized via `normalizeRuling_` with safe confidence clamping (`exact`, `interpretation`, `unsupported`) and bounded lengths before rendering or broadcasting to `live/audio_cue`.
 
 13. **Progressive Capability Gating for Client-Side Cloud SDKs (`Index.html`, `public/index.html`):**
